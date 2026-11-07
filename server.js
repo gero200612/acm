@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readPadron } from './padron.js';
+import { publish } from './publisher.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -14,6 +15,10 @@ const UPLOADS = path.join(DATA, 'uploads');
 const PROD = process.env.NODE_ENV === 'production';
 const PASSWORD = process.env.ACM_PASSWORD || (PROD ? '' : 'admin');
 if (!PASSWORD) { console.error('Falta ACM_PASSWORD'); process.exit(1); }
+// Las fechas se guardan en hora de la campaña (Argentina), no en la del servidor.
+const TZ = process.env.ACM_TZ || 'America/Argentina/Buenos_Aires';
+const tzFmt = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+const localNow = (offsetMin = 0) => tzFmt.format(new Date(Date.now() + offsetMin * 6e4)).replace(',', '');
 const SECRET = process.env.ACM_SECRET || crypto.createHash('sha256').update('acm:' + PASSWORD).digest('hex');
 const vault = makeVault(SECRET);
 
@@ -54,6 +59,10 @@ if (!cols('pauta').includes('budget')) db.exec('ALTER TABLE pauta ADD COLUMN bud
 if (!cols('pauta').includes('end_date')) db.exec("ALTER TABLE pauta ADD COLUMN end_date TEXT DEFAULT ''");
 for (const [c, def] of [['propaganda_until', "TEXT DEFAULT ''"], ['padron_contacts', 'INTEGER DEFAULT 0'], ['padron_phones', 'INTEGER DEFAULT 0'], ['padron_emails', 'INTEGER DEFAULT 0'], ['padron_file', "TEXT DEFAULT ''"], ['padron_at', "TEXT DEFAULT ''"]])
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
+for (const [c, def] of [['external_id', "TEXT DEFAULT ''"], ['external_url', "TEXT DEFAULT ''"], ['error', "TEXT DEFAULT ''"], ['note', "TEXT DEFAULT ''"], ['published_at', "TEXT DEFAULT ''"], ['attempts', 'INTEGER DEFAULT 0']])
+  if (!cols('posts').includes(c)) db.exec(`ALTER TABLE posts ADD COLUMN ${c} ${def}`);
+// si el servidor se reinició a mitad de una subida, esas vuelven a la fila
+db.exec("UPDATE posts SET status = 'programado' WHERE status = 'publicando'");
 db.exec('CREATE TABLE IF NOT EXISTS padron (project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, em TEXT, ph TEXT)');
 db.exec('CREATE INDEX IF NOT EXISTS padron_project ON padron(project_id)');
 for (const [c, def] of [['creds', "TEXT DEFAULT ''"], ['connected_as', "TEXT DEFAULT ''"], ['last_error', "TEXT DEFAULT ''"], ['last_checked_at', "TEXT DEFAULT ''"]])
@@ -160,11 +169,11 @@ app.get('/api/overview', (req, res) => {
   res.json({
     upcoming: all(`SELECT p.id, p.scheduled_at, p.status, p.project_id, pr.name AS project, pr.color, r.title AS reel_title, a.network, a.handle
       FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id JOIN projects pr ON pr.id = p.project_id
-      WHERE p.status = 'programado' AND p.scheduled_at >= strftime('%Y-%m-%d %H:%M', 'now', 'localtime', '-1 hour') ORDER BY p.scheduled_at LIMIT 14`),
-    upcoming14: all(`SELECT project_id, scheduled_at FROM posts WHERE scheduled_at >= date('now', 'localtime') AND scheduled_at < date('now', 'localtime', '+14 days')`),
+      WHERE p.status IN ('programado', 'publicando') AND p.scheduled_at >= ? ORDER BY p.scheduled_at LIMIT 14`, localNow(-60)),
+    upcoming14: all(`SELECT project_id, scheduled_at FROM posts WHERE scheduled_at >= ? AND scheduled_at < ?`, localNow().slice(0, 10), localNow(14 * 1440).slice(0, 10)),
     networks: all(`SELECT network, count(*) AS total, sum(status = 'conectada') AS live, sum(CASE WHEN status = 'conectada' THEN followers ELSE 0 END) AS followers FROM accounts GROUP BY network`),
     byProject: all(`SELECT project_id, network, count(*) AS n FROM accounts GROUP BY project_id, network`),
-    next: all(`SELECT project_id, min(scheduled_at) AS at FROM posts WHERE status = 'programado' AND scheduled_at >= strftime('%Y-%m-%d %H:%M', 'now', 'localtime') GROUP BY project_id`),
+    next: all(`SELECT project_id, min(scheduled_at) AS at FROM posts WHERE status = 'programado' AND scheduled_at >= ? GROUP BY project_id`, localNow()),
   });
 });
 
@@ -319,8 +328,28 @@ app.post('/api/projects/:id/posts', (req, res) => {
   } catch (e) { db.exec('ROLLBACK'); return res.status(400).json({ error: e.message }); }
   res.json({ ok: true, created: items.length });
 });
-app.put('/api/posts/:id', (req, res) => { update('posts', req.params.id, pick(req.body || {}, ['scheduled_at', 'status'])); res.json({ ok: true }); });
+app.put('/api/posts/:id', (req, res) => {
+  const p = get('SELECT * FROM posts WHERE id = ?', req.params.id);
+  if (!p) return res.status(404).json({ error: 'No existe' });
+  if (p.status === 'publicando') return res.status(409).json({ error: 'Se está publicando en este momento' });
+  const d = pick(req.body || {}, ['scheduled_at', 'status']);
+  if (d.status && !['programado', 'publicado', 'fallido'].includes(d.status)) return res.status(400).json({ error: 'Estado inválido' });
+  if (d.status === 'programado') d.error = '';
+  update('posts', p.id, d);
+  res.json({ ok: true });
+});
 app.delete('/api/posts/:id', (req, res) => { run('DELETE FROM posts WHERE id = ?', req.params.id); res.json({ ok: true }); });
+
+app.post('/api/posts/:id/now', (req, res) => {
+  const p = get('SELECT * FROM posts WHERE id = ?', req.params.id);
+  if (!p) return res.status(404).json({ error: 'No existe' });
+  if (p.status === 'publicando') return res.status(409).json({ error: 'Ya se está publicando' });
+  if (p.status === 'publicado') return res.status(409).json({ error: 'Ya está publicada' });
+  run("UPDATE posts SET status = 'programado', scheduled_at = ?, error = '' WHERE id = ?", localNow(), p.id);
+  setImmediate(tick);
+  res.json({ ok: true });
+});
+app.get('/api/clock', (req, res) => res.json({ now: localNow(), tz: TZ }));
 
 // pauta
 app.put('/api/projects/:id/pauta', (req, res) => {
@@ -337,5 +366,40 @@ app.use((err, req, res, next) => { console.error(err); res.status(err.status || 
 
 app.use(express.static(path.resolve('public'), { index: 'index.html', setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
 app.get('/{*splat}', (req, res) => res.sendFile(path.resolve('public/index.html')));
+
+// ---------- programador: publica lo que ya llegó a su hora, de a una ----------
+let busy = false;
+async function tick() {
+  if (busy) return;
+  busy = true;
+  try {
+    for (;;) {
+      const now = localNow();
+      const p = get(`SELECT p.*, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.title, r.caption, pr.propaganda_until
+        FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id JOIN projects pr ON pr.id = p.project_id
+        WHERE p.status = 'programado' AND p.scheduled_at <= ? ORDER BY p.scheduled_at LIMIT 1`, now);
+      if (!p) break;
+      // se marca antes de subir: si dos vueltas se cruzan, solo una la toma
+      if (!run("UPDATE posts SET status = 'publicando', attempts = attempts + 1 WHERE id = ? AND status = 'programado'", p.id).changes) continue;
+      const fail = (msg) => run("UPDATE posts SET status = 'fallido', error = ? WHERE id = ?", msg, p.id);
+      if (p.propaganda_until && p.scheduled_at.slice(0, 10) > p.propaganda_until) { fail(`Cae después del ${p.propaganda_until}, la fecha máxima de propaganda.`); continue; }
+      if (p.acc_status === 'pausada') { fail('La cuenta está pausada.'); continue; }
+      if (p.acc_status !== 'conectada') { fail('La cuenta no está conectada: conectala y tocá Reintentar.'); continue; }
+      const creds = vault.open(p.creds);
+      const save = (fresh) => run('UPDATE accounts SET creds = ? WHERE id = ?', vault.seal({ ...vault.open(get('SELECT creds FROM accounts WHERE id = ?', p.acc_id).creds), ...fresh }), p.acc_id);
+      try {
+        const r = await publish(p.network, creds, path.join(UPLOADS, path.basename(p.file)), (p.caption || p.title || '').trim(), p.title, save,
+          (m) => console.log(`[publicar ${p.id}] ${m}`));
+        run("UPDATE posts SET status = 'publicado', external_id = ?, external_url = ?, note = ?, error = '', published_at = ? WHERE id = ?", String(r.id || ''), r.url || '', r.note || '', localNow(), p.id);
+        console.log(`[publicar ${p.id}] publicado en ${p.network}`);
+      } catch (e) {
+        fail(e.message);
+        console.log(`[publicar ${p.id}] falló: ${e.message}`);
+      }
+    }
+  } catch (e) { console.error('programador:', e); }
+  finally { busy = false; }
+}
+if (process.env.ACM_SCHEDULER !== 'off') { setInterval(tick, 30000); setTimeout(tick, 3000); }
 
 app.listen(PORT, () => console.log(`ACM en http://localhost:${PORT} (datos en ${DATA})`));

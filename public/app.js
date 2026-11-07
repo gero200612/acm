@@ -358,9 +358,10 @@ function calendarioView() {
           ${L.length > 3 ? `<button class="cal-more" data-act="open-day" data-day="${ymd(d)}">+${L.length - 3} más</button>` : ''}
         </div>`; }).join('')}
     </div>
-    <div class="cal-legend small muted"><span><i class="lgd prog"></i>Programado</span><span><i class="lgd pub"></i>Publicado</span><span><i class="lgd fail"></i>Falló</span>${lim ? '<span><i class="lgd veda"></i>Sin propaganda</span>' : ''}</div>
+    <div class="cal-legend small muted"><span><i class="lgd prog"></i>Programado</span><span><i class="lgd pub"></i>Publicado</span><span><i class="lgd fail"></i>Falló</span><span><i class="lgd publ"></i>Publicándose</span>${lim ? '<span><i class="lgd veda"></i>Sin propaganda</span>' : ''}</div>
   </section>`;
 }
+const POST_ST = { programado: 'Programado', publicando: 'Publicando…', publicado: 'Publicado', fallido: 'Falló' };
 function postDialog(ids) {
   const L = ids.map((id) => state.posts.find((x) => x.id === id)).filter(Boolean);
   if (!L.length) return;
@@ -370,8 +371,15 @@ function postDialog(ids) {
       <div class="pd-info"><b>${esc(x.reel_title)}</b>
         <span class="row small">${netBadge(x.network)}${esc(x.handle ? '@' + x.handle : NETS[x.network].name + ' sin conectar')}</span>
         <span class="small muted">${fmtDate(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}</span>
-        <div class="row"><select class="select sm" data-act="post-status">${[['programado', 'Programado'], ['publicado', 'Publicado'], ['fallido', 'Falló']].map(([k, l]) => `<option value="${k}" ${x.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <button class="btn sm danger" data-act="del-post">Quitar</button></div>
+        <span><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span>${x.published_at ? ` <span class="small muted">el ${fmtDay(x.published_at)} a las ${fmtTime(x.published_at)}</span>` : ''}</span>
+        ${x.error ? `<p class="banner err" style="margin:0">${esc(x.error)}</p>` : ''}
+        ${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}
+        ${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">Ver en ${NETS[x.network].name} ↗</a>` : ''}
+        <div class="row">
+          ${x.status === 'programado' ? `<button class="btn sm accent" data-act="post-now">Publicar ahora</button>` : ''}
+          ${x.status === 'fallido' ? `<button class="btn sm accent" data-act="post-now">Reintentar</button>` : ''}
+          ${x.status !== 'publicando' && x.status !== 'publicado' ? `<button class="btn sm danger" data-act="del-post">Quitar</button>` : ''}
+        </div>
       </div>
     </div>`).join(''));
   d.classList.add('wide');
@@ -642,6 +650,7 @@ function distributeDialog(reel) {
     <p class="muted small">«${esc(reel.title)}» sale en cada cuenta elegida, con horarios separados para que no publiquen lo mismo a la vez.</p>
     <div class="row"><b class="small">Cuentas</b><span class="spacer"></span><button type="button" class="btn sm ghost" data-all>Todas</button><button type="button" class="btn sm ghost" data-none>Ninguna</button></div>
     <div class="acc-pick">${A.map((a) => `<label><input type="checkbox" name="acc" value="${a.id}" checked>${netBadge(a.network)}${esc(accName(a))}<span class="spacer"></span><span class="small muted">${ACC_STATUS[a.status]}</span></label>`).join('') || '<p class="small muted">No hay cuentas activas.</p>'}</div>
+    <label class="field">Texto de la publicación<textarea class="textarea" name="caption" rows="3" placeholder="El texto que acompaña al reel, con sus #hashtags">${esc(reel.caption || '')}</textarea><span class="hint">Se guarda en el reel y sale igual en todas las cuentas</span></label>
     <div class="two"><label class="field">Primera publicación<input class="input" type="datetime-local" name="start" value="${localInput(start)}" ${state.project.propaganda_until ? `max="${state.project.propaganda_until}T23:59"` : ''} required></label>
     <label class="field">Separación entre cuentas<select class="select" name="gap"><option value="20">20 minutos</option><option value="45" selected>45 minutos</option><option value="90">1 h 30</option><option value="180">3 horas</option><option value="1440">1 día</option></select></label></div>
     <div class="row"><span class="spacer"></span><button class="btn" type="button" data-close>Cancelar</button><button class="btn accent" type="submit">Programar</button></div>
@@ -659,7 +668,8 @@ function distributeDialog(reel) {
     const lim = state.project.propaganda_until;
     const items = ids.map((id, i) => { const t = new Date(t0.getTime() + i * gap * 6e4); return { reel_id: reel.id, account_id: id, scheduled_at: localInput(t).replace('T', ' ') }; });
     if (lim && items.some((x) => x.scheduled_at.slice(0, 10) > lim)) return toast(`Algunas publicaciones caen después del ${fmtShort(lim)}, la fecha máxima de propaganda. Empezá antes o separalas menos.`, true);
-    try { await api(`/api/projects/${state.project.id}/posts`, { method: 'POST', body: items }); d.close(); toast(`Programado en ${items.length} ${items.length === 1 ? 'cuenta' : 'cuentas'}`); render(); } catch (err) { fail(err); }
+    try { if (f.caption.value !== (reel.caption || '')) await api(`/api/reels/${reel.id}`, { method: 'PUT', body: { caption: f.caption.value } });
+      await api(`/api/projects/${state.project.id}/posts`, { method: 'POST', body: items }); d.close(); toast(`Programado en ${items.length} ${items.length === 1 ? 'cuenta' : 'cuentas'}`); render(); } catch (err) { fail(err); }
   });
 }
 
@@ -744,6 +754,7 @@ document.addEventListener('click', async (e) => {
         state.calMonth = act === 'cal-today' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : new Date(m.getFullYear(), m.getMonth() + (act === 'cal-next' ? 1 : -1), 1);
         render(); break; }
       case 'open-post': postDialog([Number(el.dataset.pid)]); break;
+      case 'post-now': { el.disabled = true; el.textContent = 'Publicando…'; await api(`/api/posts/${id}/now`, { method: 'POST' }); toast('Se está publicando: en un rato cambia el estado'); el.closest('dialog')?.close(); break; }
       case 'open-day': postDialog(state.posts.filter((x) => ymd(pdate(x.scheduled_at)) === el.dataset.day).map((x) => x.id)); break;
       case 'del-padron': if (await confirmBox('Quitar padrón', 'Se borran las huellas de teléfonos y mails. El número de socios queda.', 'Quitar')) { await api(`/api/projects/${state.project.id}/padron`, { method: 'DELETE' }); toast('Padrón quitado'); render(); } break;
       case 'connect-account': connectPanel(state.accounts.find((a) => a.id === id)); break;
@@ -768,5 +779,6 @@ document.addEventListener('change', async (e) => {
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('[data-act=reel-title]')) e.target.blur(); });
 
+setInterval(() => { if (state.authed && !document.querySelector('dialog, .cp-host') && state.posts.some((x) => x.status === 'publicando' || (x.status === 'programado' && pdate(x.scheduled_at) <= new Date()))) render(); }, 15000);
 window.addEventListener('hashchange', () => { $('.side')?.classList.remove('open'); render(); window.scrollTo(0, 0); });
 api('/api/session').then((s) => { state.authed = s.ok; render(); }).catch(() => render());

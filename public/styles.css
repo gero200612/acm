@@ -565,3 +565,8 @@ dialog.wide { width: min(640px, calc(100vw - 32px)); }
 .reels { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
 .rl-empty { min-height: 420px; display: flex; flex-direction: column; justify-content: center; }
 @media (max-width: 900px) { .rl { grid-template-columns: minmax(0, 1fr); } .rl-side { position: static; } }
+
+.cal-ev.s-publicando { background: #e3e6ff; color: #2a35c9; }
+.lgd.publ { background: #e3e6ff; box-shadow: inset 0 0 0 1px #b8bff5; }
+.chip.s-publicando { background: #e3e6ff; color: #2a35c9; }
+.pd-info a.btn { align-self: flex-start; }
