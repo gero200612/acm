@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { readPadron } from './padron.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -51,6 +52,10 @@ CREATE TABLE IF NOT EXISTS pauta (
 const cols = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
 if (!cols('pauta').includes('budget')) db.exec('ALTER TABLE pauta ADD COLUMN budget REAL DEFAULT 0');
 if (!cols('pauta').includes('end_date')) db.exec("ALTER TABLE pauta ADD COLUMN end_date TEXT DEFAULT ''");
+for (const [c, def] of [['propaganda_until', "TEXT DEFAULT ''"], ['padron_contacts', 'INTEGER DEFAULT 0'], ['padron_phones', 'INTEGER DEFAULT 0'], ['padron_emails', 'INTEGER DEFAULT 0'], ['padron_file', "TEXT DEFAULT ''"], ['padron_at', "TEXT DEFAULT ''"]])
+  if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
+db.exec('CREATE TABLE IF NOT EXISTS padron (project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, em TEXT, ph TEXT)');
+db.exec('CREATE INDEX IF NOT EXISTS padron_project ON padron(project_id)');
 for (const [c, def] of [['creds', "TEXT DEFAULT ''"], ['connected_as', "TEXT DEFAULT ''"], ['last_error', "TEXT DEFAULT ''"], ['last_checked_at', "TEXT DEFAULT ''"]])
   if (!cols('accounts').includes(c)) db.exec(`ALTER TABLE accounts ADD COLUMN ${c} ${def}`);
 
@@ -127,8 +132,8 @@ function update(table, id, data) {
   if (!keys.length) return;
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
-const P_FIELDS = ['name', 'role', 'org', 'election_date', 'padron', 'color', 'notes'];
-const A_FIELDS = ['network', 'handle', 'kind', 'followers', 'posts_per_day', 'notes'];
+const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes'];
+const A_FIELDS = ['network', 'posts_per_day'];
 // la cuenta que ve la pantalla: sin los datos cifrados, con qué campos de conexión hay cargados
 function accountOut(a) {
   if (!a) return a;
@@ -183,19 +188,44 @@ app.delete('/api/projects/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// padrón
+const padronUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024 } });
+app.post('/api/projects/:id/padron', padronUpload.single('file'), async (req, res) => {
+  const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
+  if (!p) return res.status(404).json({ error: 'No existe' });
+  if (!req.file) return res.status(400).json({ error: 'No llegó el archivo' });
+  let r;
+  try { r = await readPadron(req.file.buffer, req.file.originalname); } catch (e) { return res.status(400).json({ error: e.message }); }
+  db.exec('BEGIN');
+  try {
+    run('DELETE FROM padron WHERE project_id = ?', p.id);
+    const ins = db.prepare('INSERT INTO padron (project_id, em, ph) VALUES (?, ?, ?)');
+    for (const [em, ph] of r.hashes) ins.run(p.id, em, ph);
+    run("UPDATE projects SET padron = ?, padron_contacts = ?, padron_phones = ?, padron_emails = ?, padron_file = ?, padron_at = datetime('now') WHERE id = ?",
+      r.total, r.contacts, r.phones, r.emails, path.basename(req.file.originalname).slice(0, 120), p.id);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  res.json({ ...projectSummary(get('SELECT * FROM projects WHERE id = ?', p.id)), columns: r.columns });
+});
+app.delete('/api/projects/:id/padron', (req, res) => {
+  run('DELETE FROM padron WHERE project_id = ?', req.params.id);
+  run("UPDATE projects SET padron_contacts = 0, padron_phones = 0, padron_emails = 0, padron_file = '', padron_at = '' WHERE id = ?", req.params.id);
+  res.json(projectSummary(get('SELECT * FROM projects WHERE id = ?', req.params.id)));
+});
+
 // cuentas
 app.get('/api/projects/:id/accounts', (req, res) => res.json(all('SELECT * FROM accounts WHERE project_id = ? ORDER BY network, created_at', req.params.id).map(accountOut)));
 app.post('/api/projects/:id/accounts', (req, res) => {
   const b = pick(req.body || {}, A_FIELDS);
-  if (!NETWORKS.includes(b.network) || !String(b.handle || '').trim()) return res.status(400).json({ error: 'Falta la red o el usuario' });
-  const r = run('INSERT INTO accounts (project_id, network, handle, kind, status, followers, posts_per_day, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    req.params.id, b.network, b.handle.trim().replace(/^@/, ''), b.kind || 'apoyo', 'pendiente', Number(b.followers) || 0, Number(b.posts_per_day) || 3, b.notes || '');
+  if (!NETWORKS.includes(b.network)) return res.status(400).json({ error: 'Falta la red' });
+  // el nombre de la cuenta lo trae la conexión
+  const r = run("INSERT INTO accounts (project_id, network, handle, kind, status, posts_per_day) VALUES (?, ?, '', 'secundaria', 'pendiente', ?)",
+    req.params.id, b.network, Number(b.posts_per_day) || 3);
   res.json(accountOut(get('SELECT * FROM accounts WHERE id = ?', r.lastInsertRowid)));
 });
 app.put('/api/accounts/:id', (req, res) => {
   const data = pick(req.body || {}, A_FIELDS);
   delete data.network; // la red no cambia: sus datos de conexión son de esa red
-  if (data.handle) data.handle = String(data.handle).trim().replace(/^@/, '');
   // pausar y reanudar es lo único del estado que se toca a mano; "conectada" sale de probar la conexión
   const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
   if (!a) return res.status(404).json({ error: 'No existe' });
@@ -219,9 +249,9 @@ app.post('/api/accounts/:id/test', async (req, res) => {
   try {
     const r = await testConnection(a.network, creds);
     if (r.extra) creds = { ...creds, ...r.extra };
-    run(`UPDATE accounts SET creds = ?, connected_as = ?, followers = ?, last_error = '', last_checked_at = ?,
+    run(`UPDATE accounts SET creds = ?, connected_as = ?, handle = ?, followers = ?, last_error = '', last_checked_at = ?,
          status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'conectada' END WHERE id = ?`,
-      vault.seal(creds), r.connectedAs || '', r.followers || a.followers, now, a.id);
+      vault.seal(creds), r.connectedAs || '', String(r.connectedAs || '').replace(/^@/, ''), r.followers || a.followers, now, a.id);
   } catch (e) {
     run(`UPDATE accounts SET creds = ?, last_error = ?, last_checked_at = ?, status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'error' END WHERE id = ?`,
       vault.seal(creds), e.message, now, a.id);
