@@ -33,7 +33,7 @@ export function mask(text, secrets = []) {
     .replace(/Bearer\s+[A-Za-z0-9_.-]+/g, 'Bearer ••••')
     // datos personales: las listas del padrón y cualquier huella SHA-256 nunca quedan en la traza
     .replace(/"data"\s*:\s*\[[\s\S]*?\]\s*\]/g, '"data":"[filas del padrón: no se guardan]"')
-    .replace(/\b[a-f0-9]{64}\b/gi, '••••');
+    .replace(/\b(?=[0-9a-f]*[a-f])[0-9a-f]{16,}\b/gi, '••••');
 }
 
 export function step(kind, label, status = '', ms = null, detail = '') {
@@ -66,14 +66,18 @@ globalThis.fetch = async (url, opt = {}) => {
   if (!s?.runId) return realFetch(url, opt);
   const u = new URL(String(url));
   const label = `${opt.method || 'GET'} ${u.host}${u.pathname}`;
-  const sent = typeof opt.body === 'string' ? opt.body : opt.body instanceof URLSearchParams ? opt.body.toString() : opt.body ? `[${opt.body.length ?? '?'} bytes]` : '';
+  const raw = typeof opt.body === 'string' ? opt.body : opt.body instanceof URLSearchParams ? opt.body.toString() : opt.body ? `[${opt.body.length ?? '?'} bytes]` : '';
+  // lo que se manda al público de Meta son datos del padrón: solo queda cuánto pesaba
+  const sent = /\/users(replace)?$/.test(u.pathname) ? `[${raw.length} bytes con filas del padrón: no se guardan]` : raw;
   const t0 = Date.now();
   try {
     const res = await realFetch(url, opt);
     const copy = res.clone();
     let text = '';
     try { text = await copy.text(); } catch {}
-    step('http', label, res.status, Date.now() - t0, (sent ? `→ ${sent.slice(0, 500)}\n` : '') + `← ${text.slice(0, 800)}`);
+    // se tapa todo el texto completo y recién después se corta, así un corte no deja a la vista medio secreto
+    const s2 = als.getStore();
+    step('http', label, res.status, Date.now() - t0, (sent ? `→ ${mask(sent, s2.secrets).slice(0, 500)}\n` : '') + `← ${mask(text, s2.secrets).slice(0, 800)}`);
     return res;
   } catch (e) {
     step('http', label, 'sin respuesta', Date.now() - t0, e.message);
