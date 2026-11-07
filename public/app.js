@@ -195,7 +195,6 @@ function resumenView() {
   const live = A.filter((a) => a.status === 'conectada');
   const now = new Date();
   const upcoming = S.filter((x) => x.status === 'programado' && pdate(x.scheduled_at) >= now);
-  const next = upcoming[0];
   // franja de los próximos 7 días
   const week = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + i); return d; });
   const dayPosts = (d) => S.filter((x) => sameDay(pdate(x.scheduled_at), d));
@@ -205,9 +204,9 @@ function resumenView() {
   <section class="rs-hero">
     <div class="rs-count"><span class="small">Elección</span><b>${dE === null ? '—' : dE > 0 ? dE : dE === 0 ? 'Hoy' : '✓'}</b><span>${dE === null ? 'cargá la fecha en Ajustes' : dE > 1 ? 'días' : dE === 1 ? 'día' : ''}${p.election_date ? ' · ' + fmtShort(p.election_date) : ''}</span></div>
     <div class="rs-count"><span class="small">Propaganda</span><b>${dP === null ? '—' : dP >= 0 ? dP + 1 : 0}</b><span>${dP !== null && dP >= 0 ? 'días para publicar y pautar' : 'terminó'}${p.propaganda_until ? ' · hasta ' + fmtShort(p.propaganda_until) : ''}</span></div>
-    <div class="rs-next">${next ? `<span class="small">Próxima publicación</span>
-      <div class="rs-next-row">${netBadge(next.network)}<div><b>${esc(next.reel_title)}</b><span>${esc(next.handle ? '@' + next.handle : NETS[next.network].name)} · ${fmtDay(next.scheduled_at)} ${fmtTime(next.scheduled_at)}</span></div></div>`
-      : `<span class="small">Próxima publicación</span><p>Nada programado. Subí reels y repartilos.</p><a class="btn sm accent" href="#/p/${p.id}/reels">Ir a Reels</a>`}</div>
+    <div class="rs-next"><span class="small">Próximas publicaciones</span>
+      ${upcoming.length ? upcoming.slice(0, 3).map((x) => `<div class="rs-next-row">${netBadge(x.network)}<div><b>${esc(x.reel_title)}</b><span>${esc(x.handle ? '@' + x.handle : NETS[x.network].name)} · ${fmtDay(x.scheduled_at)} ${fmtTime(x.scheduled_at)}</span></div></div>`).join('')
+        : `<p>Nada programado. Subí reels y repartilos.</p><a class="btn sm accent" href="#/p/${p.id}/reels">Ir a Reels</a>`}</div>
   </section>
 
   <div class="rs-stats">
@@ -227,6 +226,17 @@ function resumenView() {
         <span class="dots">${[...new Set(L.map((x) => x.network))].map((n) => `<i class="nd ${n}"></i>`).join('')}</span>
       </a>`; }).join('')}</div>
   </section>
+
+  <div class="rs-row">
+    <section class="card"><div class="card-head"><h2 class="h2">Cuentas</h2><a class="btn sm" href="#/p/${p.id}/cuentas">Ver todas</a></div>
+      ${A.length ? `<ul class="rs-acc">${A.slice(0, 6).map((a) => `<li>${netBadge(a.network)}<span class="nm ${a.connected_as ? '' : 'muted'}">${esc(accName(a))}</span><span class="fl">${a.connected_as ? fmt(a.followers) + ' seg.' : ''}</span><span class="chip s-${a.status}">${ACC_STATUS[a.status]}</span></li>`).join('')}</ul>${A.length > 6 ? `<p class="small muted" style="margin-top:8px">y ${A.length - 6} más</p>` : ''}`
+        : `<p class="muted small">Todavía no hay cuentas.</p><button class="btn sm primary" style="margin-top:10px" data-act="new-account">Agregar cuenta</button>`}
+    </section>
+    <section class="card"><div class="card-head"><h2 class="h2">Reels</h2><a class="btn sm" href="#/p/${p.id}/reels">Ver todos</a></div>
+      ${state.reels.length ? `<div class="rs-reels">${state.reels.slice(0, 6).map((r) => `<a href="#/p/${p.id}/reels" title="${esc(r.title)}"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted></video><span>${esc(r.title)}</span><em>${r.posts} publ.</em></a>`).join('')}</div>`
+        : `<p class="muted small">Todavía no hay reels.</p><a class="btn sm primary" style="margin-top:10px" href="#/p/${p.id}/reels">Subir reels</a>`}
+    </section>
+  </div>
   </div>`;
 }
 
@@ -326,46 +336,75 @@ function pautaView() {
   const p = state.project, pa = p.pauta || {};
   if (!p.padron) return `<div class="card empty"><h2 class="h2">Falta el padrón</h2><p>Subí el padrón en Ajustes para calcular a cuántos socios llega la pauta.</p><a class="btn primary" href="#/p/${p.id}/ajustes">Ir a Ajustes</a></div>`;
   const c = pautaCalc(p, pa);
-  return `<div class="pz">
-  <section class="pz-in" id="pauta-form">
-    <p class="pz-sentence">Invierto
-      <span class="pz-money">USD <input type="number" min="0" step="50" name="budget" value="${pa.budget || ''}" placeholder="3000" aria-label="Inversión en dólares"></span>
-      desde <input class="pz-date" type="date" name="start_date" value="${esc(c.from)}" aria-label="Desde">
-      hasta <input class="pz-date" type="date" name="end_date" value="${esc(c.to)}" ${c.limit ? `max="${esc(c.limit)}"` : ''} aria-label="Hasta">
-    </p>
-    <p class="pz-datos">CPM de Meta USD ${fmt(PAUTA_DATOS.cpm)} · Meta reconoce el ${PAUTA_DATOS.match_pct} % de los contactos · IVA ${PAUTA_DATOS.iva * 100} % incluido${c.limit ? ` · propaganda hasta el ${fmtShort(c.limit)}` : ''}</p>
-  </section>
-  <div id="pauta-out">${pautaOut(p, c)}</div>
-  </div>`;
+  return `<div class="pz2">
+    <aside class="card pz-ctl" id="pauta-form">
+      <h2 class="h2">Inversión</h2>
+      <label class="field">Cuánto invertir (USD, con IVA)<span class="pz-money2"><span>USD</span><input type="number" min="0" step="50" name="budget" value="${pa.budget || ''}" placeholder="3000"></span></label>
+      <div class="two"><label class="field">Desde<input class="input" type="date" name="start_date" value="${esc(c.from)}"></label>
+      <label class="field">Hasta<input class="input" type="date" name="end_date" value="${esc(c.to)}" ${c.limit ? `max="${esc(c.limit)}"` : ''}></label></div>
+      <div id="pauta-datos">${pautaDatos(p, c)}</div>
+    </aside>
+    <div class="pz-main" id="pauta-out">${pautaOut(p, c)}</div>
+  </div>
+  <section class="card" id="pauta-tabla">${pautaTabla(p, c)}</section>`;
+}
+function pautaDatos(p, c) {
+  return `<dl class="pz-dl">
+    <div><dt>CPM de Meta</dt><dd>USD ${fmt(PAUTA_DATOS.cpm)}</dd></div>
+    <div><dt>Padrón</dt><dd>${fmt(p.padron)}</dd></div>
+    <div><dt>Con teléfono o mail</dt><dd>${p.padron_contacts ? fmt(p.padron_contacts) : 'sin archivo'}</dd></div>
+    <div><dt>Meta reconoce</dt><dd>${PAUTA_DATOS.match_pct} %</dd></div>
+    <div><dt>IVA incluido</dt><dd>${PAUTA_DATOS.iva * 100} %</dd></div>
+    <div><dt>Período</dt><dd>${fmt(c.days)} días</dd></div>
+    <div><dt>Propaganda hasta</dt><dd>${c.limit ? fmtShort(c.limit) : '—'}</dd></div>
+  </dl>`;
+}
+function pautaWeeks(c) {
+  const wk = Math.max(1, Math.ceil(c.days / 7));
+  let cum = 0;
+  return Array.from({ length: wk }, (_, i) => {
+    const d0 = new Date(c.from + 'T00:00'); d0.setDate(d0.getDate() + i * 7);
+    const dd = Math.min(7, c.days - i * 7);
+    const d1 = new Date(d0); d1.setDate(d0.getDate() + dd - 1);
+    const budget = c.budget * dd / c.days, net = budget / (1 + PAUTA_DATOS.iva), imps = net / PAUTA_DATOS.cpm * 1000;
+    const per = c.people ? imps / c.people : 0; cum += per;
+    return { i, d0, d1, dd, budget, net, iva: budget - net, imps, per, cum };
+  });
 }
 function pautaOut(p, c) {
-  if (!c.budget) return `<section class="card empty"><h2 class="h2">¿Cuánto querés invertir?</h2><p>Poné el monto y las fechas arriba: ACM calcula a cuántos socios del padrón les llega y cuántas veces la ven.</p></section>`;
-  const v = pautaVerdict(c.freq);
-  // vistas acumuladas por persona, semana a semana (la inversión se reparte pareja en los días)
-  const wk = Math.max(1, Math.ceil(c.days / 7));
-  const weeks = Array.from({ length: wk }, (_, i) => { const d0 = new Date(c.from + 'T00:00'); d0.setDate(d0.getDate() + i * 7); const dd = Math.min(7, c.days - i * 7); return { d0, cum: c.freq * Math.min(c.days, (i * 7) + dd) / c.days }; });
-  const max = Math.max(c.freq, 8) * 1.08;
-  const W = 1100, H = 240, padL = 8, padB = 28, bw = (W - padL) / wk;
-  const y = (val) => H - padB - (val / max) * (H - padB - 10);
-  const bars = weeks.map((w, i) => `<g class="pz-bar"><rect x="${padL + i * bw + bw * 0.18}" y="${y(w.cum)}" width="${bw * 0.64}" height="${Math.max(2, H - padB - y(w.cum))}" rx="4"/><rect class="hit" x="${padL + i * bw}" y="0" width="${bw}" height="${H - padB}"><title>Semana del ${fmtShort(ymd(w.d0))}: ${fmt(w.cum, 1)} vistas por persona acumuladas</title></rect><text x="${padL + i * bw + bw / 2}" y="${H - 8}" text-anchor="middle">${w.d0.getDate()}/${w.d0.getMonth() + 1}</text></g>`).join('');
+  const v = pautaVerdict(c.freq), has = c.budget > 0;
+  const W = pautaWeeks(c);
+  const max = Math.max(c.freq, 8) * 1.1;
+  const VW = 760, H = 220, padB = 2, bw = VW / W.length;
+  const y = (val) => H - padB - (val / max) * (H - padB - 14);
   const refY = y(8);
-  return `<div class="pz-out">
-    <section class="pz-big">
-      <div><span class="lbl">Socios alcanzados</span><b>${fmt(c.people)}</b><span class="sub">de ${fmt(p.padron)} en el padrón${c.real ? '' : ' (estimado: subí el padrón con teléfonos o mails)'}</span></div>
-      <div><span class="lbl">Veces que la ve cada uno</span><b>${fmt(c.freq, c.freq < 10 ? 1 : 0)}</b><span class="sub">${fmt(c.perWeek, 1)} por semana <span class="chip v-${v[0]}">${v[1]}</span></span></div>
-      <div><span class="lbl">Vistas en total</span><b>${fmtK(c.imps)}</b><span class="sub">en ${fmt(c.days)} días</span></div>
-      <div><span class="lbl">Por día</span><b>${usd(c.perDay)}</b><span class="sub">${usd(c.net)} de pauta + ${usd(c.budget - c.net)} de IVA</span></div>
+  return `<section class="pz-big">
+      <div><span class="lbl">Socios alcanzados</span><b>${fmt(c.people)}</b><span class="sub">${c.real ? 'de los contactos del padrón' : 'estimado sobre el padrón'}</span></div>
+      <div><span class="lbl">Veces que la ve cada uno</span><b>${has ? fmt(c.freq, c.freq < 10 ? 1 : 0) : '—'}</b><span class="sub">${has ? `${fmt(c.perWeek, 1)} por semana <span class="chip v-${v[0]}">${v[1]}</span>` : 'cargá la inversión'}</span></div>
+      <div><span class="lbl">Vistas en total</span><b>${has ? fmtK(c.imps) : '—'}</b><span class="sub">en ${fmt(c.days)} días</span></div>
+      <div><span class="lbl">Por día</span><b>${has ? usd(c.perDay) : '—'}</b><span class="sub">${has ? `${usd(c.perDay * 7)} por semana` : ''}</span></div>
     </section>
-    <section class="card">
-      <div class="card-head"><h2 class="h2">Vistas por socio, acumuladas semana a semana</h2><span class="small muted">${v[2]}</span></div>
-      <svg class="pz-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Vistas por socio acumuladas por semana">
-        <line class="axis" x1="${padL}" x2="${W}" y1="${H - padB}" y2="${H - padB}"/>
-        <line class="ref" x1="${padL}" x2="${W}" y1="${refY}" y2="${refY}"/><text class="ref-t" x="${padL}" y="${refY - 6}">8 vistas: el mensaje se instala</text>
-        ${bars}
+    <section class="card pz-chart-card">
+      <div class="card-head"><h2 class="h2">Vistas por socio, acumuladas</h2><span class="small muted">${has ? v[2] : 'Poné un monto para ver la curva.'}</span></div>
+      <svg class="pz-chart" viewBox="0 0 ${VW} ${H}" preserveAspectRatio="none" role="img" aria-label="Vistas por socio acumuladas por semana">
+        <line class="axis" x1="0" x2="${VW}" y1="${H - padB}" y2="${H - padB}"/>
+        <line class="ref" x1="0" x2="${VW}" y1="${refY}" y2="${refY}"/>
+        ${W.map((w) => `<g class="pz-bar"><rect x="${w.i * bw + bw * 0.2}" y="${y(w.cum)}" width="${bw * 0.6}" height="${Math.max(has ? 2 : 0, H - padB - y(w.cum))}" rx="4"/><rect class="hit" x="${w.i * bw}" y="0" width="${bw}" height="${H - padB}"><title>${fmtShort(ymd(w.d0))} al ${fmtShort(ymd(w.d1))}: ${fmt(w.cum, 1)} vistas por socio acumuladas</title></rect></g>`).join('')}
       </svg>
-    </section>
-    <p class="small muted">Es solo la plata que cobra Meta por mostrar los videos; la plataforma va aparte. TikTok no acepta propaganda política paga. Meta exige verificar al anunciante y mostrar quién paga.</p>
-  </div>`;
+      <div class="pz-xl" style="grid-template-columns:repeat(${W.length},1fr)">${W.map((w) => `<span>${has ? `<b>${fmt(w.cum, 1)}</b>` : ''}${w.d0.getDate()}/${w.d0.getMonth() + 1}</span>`).join('')}</div>
+      <p class="pz-ref-t">- - - 8 vistas: el mensaje se instala</p>
+    </section>`;
+}
+function pautaTabla(p, c) {
+  const W = pautaWeeks(c), has = c.budget > 0;
+  const n = (x, d = 0) => has ? fmt(x, d) : '—', u = (x) => has ? usd(x) : '—';
+  return `<div class="card-head"><h2 class="h2">Detalle semana a semana</h2><span class="small muted">La inversión se reparte pareja entre los días · ${fmt(c.people)} socios alcanzados</span></div>
+  <div class="table-wrap"><table class="list pz-table">
+    <thead><tr><th>Semana</th><th class="r">Días</th><th class="r">Inversión</th><th class="r">Pauta</th><th class="r">IVA</th><th class="r">Vistas</th><th class="r">Vistas por socio</th><th class="r">Acumulado por socio</th></tr></thead>
+    <tbody>${W.map((w) => `<tr><td>${fmtShort(ymd(w.d0))} – ${fmtShort(ymd(w.d1))}</td><td class="r num">${w.dd}</td><td class="r num">${u(w.budget)}</td><td class="r num">${u(w.net)}</td><td class="r num">${u(w.iva)}</td><td class="r num">${n(w.imps)}</td><td class="r num">${n(w.per, 1)}</td><td class="r num">${n(w.cum, 1)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td>Total</td><td class="r num">${c.days}</td><td class="r num">${u(c.budget)}</td><td class="r num">${u(c.net)}</td><td class="r num">${u(c.budget - c.net)}</td><td class="r num">${n(c.imps)}</td><td class="r num">${n(c.freq, 1)}</td><td class="r num">${n(c.freq, 1)}</td></tr></tfoot>
+  </table></div>
+  <p class="small muted" style="margin-top:12px">Es solo la plata que cobra Meta por mostrar los videos; la plataforma va aparte. TikTok no acepta propaganda política paga. Meta exige verificar al anunciante y mostrar quién paga.</p>`;
 }
 
 function ajustesView() {
@@ -628,7 +667,8 @@ function afterRender(r) {
     const read = () => ({ budget: Number(pform.querySelector('[name=budget]').value) || 0, start_date: pform.querySelector('[name=start_date]').value, end_date: pform.querySelector('[name=end_date]').value });
     const update = () => {
       const pa = read();
-      $('#pauta-out').innerHTML = pautaOut(state.project, pautaCalc(state.project, pa));
+      const c = pautaCalc(state.project, pa);
+      $('#pauta-out').innerHTML = pautaOut(state.project, c); $('#pauta-tabla').innerHTML = pautaTabla(state.project, c); $('#pauta-datos').innerHTML = pautaDatos(state.project, c);
       clearTimeout(timer); timer = setTimeout(() => api(`/api/projects/${state.project.id}/pauta`, { method: 'PUT', body: pa }).then((x) => (state.project.pauta = x)).catch(fail), 500);
     };
     pform.addEventListener('input', update);
