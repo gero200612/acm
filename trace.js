@@ -30,7 +30,10 @@ export function mask(text, secrets = []) {
     .replace(/(access_token|client_secret|refresh_token|client_key|token|secret|password)(\s*["']?\s*[=:]\s*["']?)[^"&,\s}]+/gi, '$1$2••••')
     .replace(/\bEAA[A-Za-z0-9_-]{4,}/g, '••••')
     .replace(/\bya29\.[A-Za-z0-9_.-]+/g, '••••')
-    .replace(/Bearer\s+[A-Za-z0-9_.-]+/g, 'Bearer ••••');
+    .replace(/Bearer\s+[A-Za-z0-9_.-]+/g, 'Bearer ••••')
+    // datos personales: las listas del padrón y cualquier huella SHA-256 nunca quedan en la traza
+    .replace(/"data"\s*:\s*\[[\s\S]*?\]\s*\]/g, '"data":"[filas del padrón: no se guardan]"')
+    .replace(/\b[a-f0-9]{64}\b/gi, '••••');
 }
 
 export function step(kind, label, status = '', ms = null, detail = '') {
