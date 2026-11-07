@@ -8,6 +8,10 @@ import path from 'node:path';
 import { readPadron } from './padron.js';
 import { publish } from './publisher.js';
 import { testAds, uploadAudience, createCampaign } from './ads.js';
+import { initTrace, traced } from './trace.js';
+import { runBanco } from './banco.js';
+import { probe, review } from './mp4probe.js';
+import { postBlocked, pautaNumbers } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -67,6 +71,9 @@ db.exec("UPDATE posts SET status = 'programado' WHERE status = 'publicando'");
 for (const [c, def] of [['ads_creds', "TEXT DEFAULT ''"], ['ads_name', "TEXT DEFAULT ''"], ['ads_currency', "TEXT DEFAULT ''"], ['ads_rate', 'REAL DEFAULT 0'], ['ads_political', 'INTEGER DEFAULT 1'],
   ['ads_audience_id', "TEXT DEFAULT ''"], ['ads_audience_count', 'INTEGER DEFAULT 0'], ['ads_campaign_id', "TEXT DEFAULT ''"], ['ads_ads', 'INTEGER DEFAULT 0'], ['ads_error', "TEXT DEFAULT ''"], ['ads_at', "TEXT DEFAULT ''"]])
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
+for (const [c, def] of [['duration', 'REAL'], ['width', 'INTEGER'], ['height', 'INTEGER']])
+  if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
+initTrace(db);
 db.exec('CREATE TABLE IF NOT EXISTS padron (project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, em TEXT, ph TEXT)');
 db.exec('CREATE INDEX IF NOT EXISTS padron_project ON padron(project_id)');
 for (const [c, def] of [['creds', "TEXT DEFAULT ''"], ['connected_as', "TEXT DEFAULT ''"], ['last_error', "TEXT DEFAULT ''"], ['last_checked_at', "TEXT DEFAULT ''"]])
@@ -276,7 +283,8 @@ app.post('/api/accounts/:id/test', async (req, res) => {
   let creds = mergeFields(a.network, vault.open(a.creds), req.body || {});
   const now = new Date().toISOString();
   try {
-    const r = await testConnection(a.network, creds);
+    const r = await traced({ kind: 'conexion', title: `Probar conexión de ${({ instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' })[a.network]}`, project_id: a.project_id, account_id: a.id, network: a.network, secrets: Object.values(creds) },
+      async () => { const x = await testConnection(a.network, creds); return { ...x, summary: `Conectada como ${x.connectedAs}` }; });
     if (r.extra) creds = { ...creds, ...r.extra };
     run(`UPDATE accounts SET creds = ?, connected_as = ?, handle = ?, followers = ?, last_error = '', last_checked_at = ?,
          status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'conectada' END WHERE id = ?`,
@@ -301,8 +309,9 @@ app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
   if (!files.length) return res.status(400).json({ error: 'No llegó ningún video' });
   const out = files.map((f) => {
     const title = (req.body?.title && files.length === 1) ? req.body.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
-    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size) VALUES (?, ?, ?, ?, ?, ?)',
-      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size);
+    const m = probe(f.path) || {};
+    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null);
     return get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid);
   });
   res.json(out);
@@ -372,7 +381,8 @@ app.put('/api/projects/:id/ads', (req, res) => {
 const adsFail = (res, id, e) => { run('UPDATE projects SET ads_error = ? WHERE id = ?', e.message, id); res.status(400).json({ error: e.message }); };
 app.post('/api/projects/:id/ads/test', async (req, res) => {
   const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
-  try { const r = await testAds(vault.open(p.ads_creds)); run("UPDATE projects SET ads_name = ?, ads_currency = ?, ads_error = '' WHERE id = ?", r.name, r.currency, p.id); sendProject(res, p.id); }
+  const adsRun = (title, fn) => traced({ kind: 'meta_ads', title, project_id: p.id, network: 'meta', secrets: Object.values(vault.open(p.ads_creds)) }, fn);
+  try { const r = await adsRun('Probar cuenta publicitaria', async () => { const x = await testAds(vault.open(p.ads_creds)); return { ...x, summary: `${x.name} (${x.currency})` }; }); run("UPDATE projects SET ads_name = ?, ads_currency = ?, ads_error = '' WHERE id = ?", r.name, r.currency, p.id); sendProject(res, p.id); }
   catch (e) { adsFail(res, p.id, e); }
 });
 app.post('/api/projects/:id/ads/audience', async (req, res) => {
@@ -380,7 +390,8 @@ app.post('/api/projects/:id/ads/audience', async (req, res) => {
   const rows = all('SELECT em, ph FROM padron WHERE project_id = ?', p.id);
   if (!rows.length) return res.status(400).json({ error: 'Primero subí el padrón con teléfonos o mails en Ajustes.' });
   try {
-    const r = await uploadAudience(vault.open(p.ads_creds), `ACM · ${p.name} · padrón`, rows, p.ads_audience_id);
+    const r = await traced({ kind: 'meta_ads', title: 'Subir padrón como público', project_id: p.id, network: 'meta', secrets: Object.values(vault.open(p.ads_creds)) },
+      async () => { const x = await uploadAudience(vault.open(p.ads_creds), `ACM · ${p.name} · padrón`, rows, p.ads_audience_id); return { ...x, summary: `${x.received} contactos` }; });
     run("UPDATE projects SET ads_audience_id = ?, ads_audience_count = ?, ads_error = '', ads_at = ? WHERE id = ?", r.id, r.received || rows.length, localNow(), p.id);
     sendProject(res, p.id);
   } catch (e) { adsFail(res, p.id, e); }
@@ -397,19 +408,47 @@ app.post('/api/projects/:id/ads/campaign', async (req, res) => {
   const from = pa.start_date && pa.start_date > today ? pa.start_date : today;
   const to = [pa.end_date, p.propaganda_until, p.election_date].filter(Boolean).sort()[0];
   if (!to || to < from) return res.status(400).json({ error: 'Revisá las fechas de la pauta.' });
-  const days = Math.round((new Date(to) - new Date(from)) / 864e5) + 1;
-  const people = Math.round((p.padron_contacts || p.padron) * 0.6);
-  const perWeek = people ? (usdNet / 6 * 1000 / people) / (days / 7) : 1;
+  const { perWeek } = pautaNumbers({ budget: pa.budget, from, to, padron: p.padron, contacts: p.padron_contacts });
   const ig = all("SELECT creds FROM accounts WHERE project_id = ? AND network = 'instagram' AND status = 'conectada'", p.id).map((a) => vault.open(a.creds))[0] || {};
   const media = all(`SELECT DISTINCT po.external_id AS id, r.title FROM posts po JOIN reels r ON r.id = po.reel_id JOIN accounts a ON a.id = po.account_id
     WHERE po.project_id = ? AND a.network = 'instagram' AND po.status = 'publicado' AND po.external_id != '' GROUP BY po.reel_id`, p.id);
   try {
     const c = { ...vault.open(p.ads_creds), pageId: ig.pageId, instagramId: ig.instagramBusinessId };
     const startNow = from === today ? new Date(Date.now() + 15 * 6e4).toISOString() : `${from}T00:00:00-03:00`;
-    const r = await createCampaign(c, { name: `ACM · ${p.name}`, budget: cur === 'USD' ? usdNet : usdNet * p.ads_rate, start: startNow, end: `${to}T23:59:00-03:00`, perWeek, audienceId: p.ads_audience_id, political: !!p.ads_political, media: ig.pageId ? media : [] });
+    const r = await traced({ kind: 'meta_ads', title: 'Crear campaña en pausa', project_id: p.id, network: 'meta', secrets: Object.values(c) }, async () => { const x = await createCampaign(c, { name: `ACM · ${p.name}`, budget: cur === 'USD' ? usdNet : usdNet * p.ads_rate, start: startNow, end: `${to}T23:59:00-03:00`, perWeek, audienceId: p.ads_audience_id, political: !!p.ads_political, media: ig.pageId ? media : [] }); return { ...x, summary: `Campaña ${x.campaignId} con ${x.ads.length} anuncios` }; });
     run("UPDATE projects SET ads_campaign_id = ?, ads_ads = ?, ads_error = '', ads_at = ? WHERE id = ?", r.campaignId, r.ads.length, localNow(), p.id);
     sendProject(res, p.id);
   } catch (e) { adsFail(res, p.id, e); }
+});
+
+// laboratorio
+app.get('/api/lab/runs', (req, res) => {
+  const kind = String(req.query.kind || '');
+  res.json(all(`SELECT r.*, pr.name AS project, pr.color, (SELECT count(*) FROM run_steps s WHERE s.run_id = r.id) AS steps
+    FROM runs r LEFT JOIN projects pr ON pr.id = r.project_id ${kind ? 'WHERE r.kind = ?' : ''} ORDER BY r.id DESC LIMIT 200`, ...(kind ? [kind] : [])));
+});
+app.get('/api/lab/runs/:id', (req, res) => {
+  const r = get('SELECT r.*, pr.name AS project FROM runs r LEFT JOIN projects pr ON pr.id = r.project_id WHERE r.id = ?', req.params.id);
+  if (!r) return res.status(404).json({ error: 'No existe' });
+  res.json({ run: r, steps: all('SELECT * FROM run_steps WHERE run_id = ? ORDER BY id', r.id) });
+});
+let bancoBusy = false;
+app.post('/api/lab/banco', async (req, res) => {
+  if (bancoBusy) return res.status(409).json({ error: 'El banco ya está corriendo' });
+  bancoBusy = true;
+  try { const r = await runBanco(); res.json({ ...r, run: get("SELECT * FROM runs WHERE kind = 'banco' ORDER BY id DESC LIMIT 1") }); }
+  finally { bancoBusy = false; }
+});
+app.get('/api/lab/reels', (req, res) => {
+  const R = all('SELECT r.*, pr.name AS project, pr.color FROM reels r JOIN projects pr ON pr.id = r.project_id ORDER BY r.created_at DESC');
+  for (const r of R) {
+    if (r.duration == null) {
+      const m = probe(path.join(UPLOADS, path.basename(r.file)));
+      if (m) { run('UPDATE reels SET duration = ?, width = ?, height = ? WHERE id = ?', m.duration, m.width, m.height, r.id); Object.assign(r, m, { size: r.size }); }
+    }
+    r.review = review(r.duration == null ? null : { duration: r.duration, width: r.width, height: r.height, size: r.size });
+  }
+  res.json(R);
 });
 
 // pauta
@@ -443,14 +482,13 @@ async function tick() {
       // se marca antes de subir: si dos vueltas se cruzan, solo una la toma
       if (!run("UPDATE posts SET status = 'publicando', attempts = attempts + 1 WHERE id = ? AND status = 'programado'", p.id).changes) continue;
       const fail = (msg) => run("UPDATE posts SET status = 'fallido', error = ? WHERE id = ?", msg, p.id);
-      if (p.propaganda_until && p.scheduled_at.slice(0, 10) > p.propaganda_until) { fail(`Cae después del ${p.propaganda_until}, la fecha máxima de propaganda.`); continue; }
-      if (p.acc_status === 'pausada') { fail('La cuenta está pausada.'); continue; }
-      if (p.acc_status !== 'conectada') { fail('La cuenta no está conectada: conectala y tocá Reintentar.'); continue; }
+      const blocked = postBlocked(p);
+      if (blocked) { fail(blocked); continue; }
       const creds = vault.open(p.creds);
       const save = (fresh) => run('UPDATE accounts SET creds = ? WHERE id = ?', vault.seal({ ...vault.open(get('SELECT creds FROM accounts WHERE id = ?', p.acc_id).creds), ...fresh }), p.acc_id);
       try {
-        const r = await publish(p.network, creds, path.join(UPLOADS, path.basename(p.file)), (p.caption || p.title || '').trim(), p.title, save,
-          (m) => console.log(`[publicar ${p.id}] ${m}`));
+        const r = await traced({ kind: 'publicacion', title: `${p.title} en ${({ instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' })[p.network]}`, project_id: p.project_id, account_id: p.acc_id, post_id: p.id, network: p.network, secrets: Object.values(creds) },
+          async () => { const x = await publish(p.network, creds, path.join(UPLOADS, path.basename(p.file)), (p.caption || p.title || '').trim(), p.title, save, (m) => console.log(`[publicar ${p.id}] ${m}`)); return { ...x, summary: x.url || x.note || 'Publicado' }; });
         run("UPDATE posts SET status = 'publicado', external_id = ?, external_url = ?, note = ?, error = '', published_at = ? WHERE id = ?", String(r.id || ''), r.url || '', r.note || '', localNow(), p.id);
         console.log(`[publicar ${p.id}] publicado en ${p.network}`);
       } catch (e) {

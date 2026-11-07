@@ -1,6 +1,7 @@
 // Conexión de cada cuenta con su red (como las integraciones de Efaysto): los datos se guardan cifrados
 // y "Probar conexión" consulta la API oficial de la red para confirmar a qué cuenta se entra.
 import crypto from 'node:crypto';
+import { als } from './trace.js';
 
 // campos que acepta cada red; los secretos nunca vuelven a la pantalla
 export const FIELDS = {
@@ -59,7 +60,8 @@ export const BASES = {
   youtube: process.env.ACM_YOUTUBE_URL || 'https://www.googleapis.com',
   ytUpload: process.env.ACM_YT_UPLOAD_URL || 'https://www.googleapis.com',
 };
-const GRAPH = BASES.graph;
+// dentro de una corrida del banco de pruebas las APIs apuntan al simulador; afuera, a las reales
+export const bases = () => als.getStore()?.bases || BASES;
 
 async function getJson(who, url, opt = {}) {
   let res;
@@ -84,27 +86,27 @@ const LABELS = {
 const TESTERS = {
   async instagram(c) {
     need(c, ['pageId', 'pageAccessToken'], LABELS);
-    const p = await getJson('Meta', `${GRAPH}/${encodeURIComponent(c.pageId)}?fields=name,instagram_business_account{id,username,followers_count}&access_token=${encodeURIComponent(c.pageAccessToken)}`);
+    const p = await getJson('Meta', `${bases().graph}/${encodeURIComponent(c.pageId)}?fields=name,instagram_business_account{id,username,followers_count}&access_token=${encodeURIComponent(c.pageAccessToken)}`);
     const ig = p.instagram_business_account;
     if (!ig) throw new Error(`La Página «${p.name}» no tiene una cuenta de Instagram profesional vinculada.`);
     return { connectedAs: '@' + ig.username, followers: ig.followers_count || 0, extra: { instagramBusinessId: ig.id } };
   },
   async facebook(c) {
     need(c, ['pageId', 'pageAccessToken'], LABELS);
-    const p = await getJson('Meta', `${GRAPH}/${encodeURIComponent(c.pageId)}?fields=name,followers_count,fan_count&access_token=${encodeURIComponent(c.pageAccessToken)}`);
+    const p = await getJson('Meta', `${bases().graph}/${encodeURIComponent(c.pageId)}?fields=name,followers_count,fan_count&access_token=${encodeURIComponent(c.pageAccessToken)}`);
     return { connectedAs: p.name, followers: p.followers_count ?? p.fan_count ?? 0 };
   },
   async tiktok(c) {
     need(c, ['accessToken'], LABELS);
     const extra = {};
     const token = await getTikTokToken(c, (x) => Object.assign(extra, x));
-    const u = await getJson('TikTok', `${BASES.tiktok}/v2/user/info/?fields=open_id,display_name,username,follower_count`, { headers: { Authorization: `Bearer ${token}` } });
+    const u = await getJson('TikTok', `${bases().tiktok}/v2/user/info/?fields=open_id,display_name,username,follower_count`, { headers: { Authorization: `Bearer ${token}` } });
     const d = u.data?.user || {};
     return { connectedAs: d.username ? '@' + d.username : d.display_name || 'cuenta de TikTok', followers: d.follower_count || 0, extra };
   },
   async youtube(c) {
     const token = await getGoogleToken(c);
-    const r = await getJson('YouTube', `${BASES.youtube}/youtube/v3/channels?part=snippet,statistics&mine=true`, { headers: { Authorization: `Bearer ${token}` } });
+    const r = await getJson('YouTube', `${bases().youtube}/youtube/v3/channels?part=snippet,statistics&mine=true`, { headers: { Authorization: `Bearer ${token}` } });
     const ch = r.items?.[0];
     if (!ch) throw new Error('La cuenta de Google autorizada no tiene un canal de YouTube.');
     return { connectedAs: ch.snippet?.customUrl || ch.snippet?.title, followers: Number(ch.statistics?.subscriberCount) || 0 };
@@ -128,10 +130,10 @@ export async function testConnection(network, creds) {
 const tiktokCache = new Map();
 export async function getTikTokToken(c, save = () => {}) {
   need(c, ['accessToken'], LABELS);
-  const ok = async (t) => { try { await getJson('TikTok', `${BASES.tiktok}/v2/user/info/?fields=open_id`, { headers: { Authorization: `Bearer ${t}` } }); return true; } catch { return false; } };
+  const ok = async (t) => { try { await getJson('TikTok', `${bases().tiktok}/v2/user/info/?fields=open_id`, { headers: { Authorization: `Bearer ${t}` } }); return true; } catch { return false; } };
   if (tiktokCache.get(c.accessToken) > Date.now() || await ok(c.accessToken)) { tiktokCache.set(c.accessToken, Date.now() + 30 * 60e3); return c.accessToken; }
   if (!(c.clientKey && c.clientSecret && c.refreshToken)) throw new Error('El token de TikTok venció y faltan el Client key, el Client secret o el token de renovación para renovarlo.');
-  const t = await getJson('TikTok', `${BASES.tiktok}/v2/oauth/token/`, {
+  const t = await getJson('TikTok', `${bases().tiktok}/v2/oauth/token/`, {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_key: c.clientKey, client_secret: c.clientSecret, grant_type: 'refresh_token', refresh_token: c.refreshToken }),
   });
@@ -144,7 +146,7 @@ export async function getTikTokToken(c, save = () => {}) {
 // Google: con el token de renovación se pide uno de acceso (dura 1 h)
 export async function getGoogleToken(c) {
   need(c, ['clientId', 'clientSecret', 'refreshToken'], LABELS);
-  const t = await getJson('Google', `${BASES.googleOauth}/token`, {
+  const t = await getJson('Google', `${bases().googleOauth}/token`, {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: c.clientId, client_secret: c.clientSecret, refresh_token: c.refreshToken, grant_type: 'refresh_token' }),
   });

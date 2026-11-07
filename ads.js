@@ -1,8 +1,8 @@
 // Meta Ads: público personalizado con el padrón (solo huellas SHA-256) y campaña creada EN PAUSA para revisar.
-import { BASES } from './connections.js';
+import { bases } from './connections.js';
 
 async function g(method, path, token, params = {}, json) {
-  const url = `${BASES.graph}/${path}`;
+  const url = `${bases().graph}/${path}`;
   const opt = { method, signal: AbortSignal.timeout(60000) };
   if (method === 'GET') {
     const q = new URLSearchParams({ ...params, access_token: token });

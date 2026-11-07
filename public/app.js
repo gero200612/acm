@@ -29,6 +29,7 @@ const ICON = {
   left: 'm15 6-6 6 6 6',
   right: 'm9 6 6 6-6 6',
   file: 'M7 3h7l5 5v13H7zM14 3v5h5',
+  flask: 'M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9',
 };
 const icon = (k, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[k]}"/></svg>`;
 const netBadge = (n) => `<span class="net ${n}" title="${NETS[n]?.name || n}">${NETS[n]?.svg || ''}</span>`;
@@ -80,6 +81,7 @@ async function loadProject(id) {
 function route() {
   const [, a, id, tab] = location.hash.replace(/^#/, '').split('/');
   if (a === 'p' && id) return { view: 'project', id: Number(id), tab: tab || 'resumen' };
+  if (a === 'lab') return { view: 'lab', tab: id || 'corridas' };
   return { view: 'home' };
 }
 
@@ -91,10 +93,11 @@ async function render() {
   try {
     await loadProjects();
     if (r.view === 'project') await loadProject(r.id);
+    else if (r.view === 'lab') await loadLab(r.tab);
     else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
-  const head = r.view === 'project' ? projectHead(state.project) : `<div><h1 class="page-title">Inicio</h1><p class="lead">Todas las campañas, sus cuentas y lo que sale publicado.</p></div><button class="btn primary" data-act="new-project">${icon('plus')} Nuevo proyecto</button>`;
-  const body = r.view === 'project' ? projectView(r.tab) : homeView();
+  const head = r.view === 'lab' ? `<div><h1 class="page-title">Laboratorio</h1><p class="lead">Lo que hizo ACM paso a paso, el banco de pruebas y el control técnico de los reels.</p></div>` : r.view === 'project' ? projectHead(state.project) : `<div><h1 class="page-title">Inicio</h1><p class="lead">Todas las campañas, sus cuentas y lo que sale publicado.</p></div><button class="btn primary" data-act="new-project">${icon('plus')} Nuevo proyecto</button>`;
+  const body = r.view === 'lab' ? labView(r.tab) : r.view === 'project' ? projectView(r.tab) : homeView();
   app.innerHTML = `
   <div class="layout">
     <header class="mobilebar"><button class="burger" data-act="menu" aria-label="Abrir menú"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>ACM</header>
@@ -110,6 +113,7 @@ function sideNav(r) {
   <a class="brand" href="#"><span class="mark">${LOGO()}ACM</span><span class="sub">Agentic Campaign Manager</span></a>
   <nav aria-label="Principal">
     <a class="item ${r.view === 'home' ? 'active' : ''}" href="#">${icon('home', 20)}<span class="t">Inicio</span></a>
+    <a class="item ${r.view === 'lab' ? 'active' : ''}" href="#/lab">${icon('flask', 20)}<span class="t">Laboratorio</span></a>
     <div class="nav-label">Proyectos</div>
     ${state.projects.map((p) => `<a class="item ${r.id === p.id ? 'active' : ''}" href="#/p/${p.id}"><span class="dot" style="background:${esc(p.color)}"></span><span class="t">${esc(p.name)}</span></a>`).join('')}
     <button class="item add" data-act="new-project">${icon('plus', 20)}<span class="t">Nuevo proyecto</span></button>
@@ -176,6 +180,93 @@ function homeView() {
       </aside>
     </div>
   </div>`;
+}
+
+
+// ---------- laboratorio ----------
+const RUN_KIND = { publicacion: 'Publicación', conexion: 'Prueba de conexión', meta_ads: 'Meta Ads', banco: 'Banco de pruebas' };
+const RUN_ST = { ok: 'Bien', error: 'Falló', corriendo: 'Corriendo', cortada: 'Cortada' };
+async function loadLab(tab) {
+  state.lab ||= { kind: '', sel: null, detail: null };
+  if (tab === 'reels') { state.lab.reels = await api('/api/lab/reels'); return; }
+  const kind = tab === 'banco' ? 'banco' : state.lab.kind;
+  state.lab.runs = await api('/api/lab/runs' + (kind ? `?kind=${kind}` : ''));
+  if (tab === 'banco' && !state.lab.bancoSel && state.lab.runs[0]) state.lab.bancoSel = state.lab.runs[0].id;
+  const want = tab === 'banco' ? state.lab.bancoSel : state.lab.sel;
+  state.lab.detail = want ? await api(`/api/lab/runs/${want}`).catch(() => null) : null;
+}
+const when = (s) => { const d = new Date(String(s).replace(' ', 'T') + (String(s).includes('Z') || String(s).includes('T') ? '' : 'Z')); return d.toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); };
+const ms = (n) => n == null ? '' : n < 1000 ? `${n} ms` : `${fmt(n / 1000, 1)} s`;
+function labView(tab) {
+  const tabs = [['corridas', 'Corridas'], ['banco', 'Banco de pruebas'], ['reels', 'Revisión de reels']];
+  const nav = `<nav class="tabs">${tabs.map(([k, l]) => `<a href="#/lab/${k}" class="${tab === k ? 'active' : ''}">${l}</a>`).join('')}</nav>`;
+  return nav + (tab === 'banco' ? labBanco() : tab === 'reels' ? labReels() : labCorridas());
+}
+function traceView(d) {
+  if (!d) return `<div class="empty"><h2 class="h2">Elegí una corrida</h2><p>Vas a ver cada llamada a las redes con su respuesta y su tiempo. Los tokens nunca se guardan.</p></div>`;
+  const r = d.run;
+  return `<div class="card-head"><div><h2 class="h2">${esc(r.title || RUN_KIND[r.kind])}</h2><p class="small muted">${RUN_KIND[r.kind] || r.kind}${r.project ? ' · ' + esc(r.project) : ''} · ${when(r.started_at)} · ${ms(r.ms)}</p></div><span class="chip s-run-${r.status}">${RUN_ST[r.status] || r.status}</span></div>
+    ${r.error ? `<p class="banner err">${esc(r.error)}</p>` : r.summary ? `<p class="banner ok">${esc(r.summary)}</p>` : ''}
+    <ol class="tr">${d.steps.map((s) => `<li class="tr-${s.kind} ${/^[45]|falló|sin respuesta/.test(String(s.status)) ? 'bad' : ''}">
+      <div class="tr-h"><span class="tr-k">${s.kind === 'http' ? 'API' : s.kind === 'caso' ? 'Caso' : 'Nota'}</span><code>${esc(s.label)}</code><span class="spacer"></span><span class="tr-s">${esc(s.status)}</span><span class="small muted">${ms(s.ms)}</span></div>
+      ${s.detail ? `<pre>${esc(s.detail)}</pre>` : ''}</li>`).join('') || '<li class="muted small">Sin pasos registrados.</li>'}</ol>`;
+}
+function labCorridas() {
+  const L = state.lab, R = L.runs || [];
+  const kinds = [['', 'Todas'], ['publicacion', 'Publicaciones'], ['conexion', 'Conexiones'], ['meta_ads', 'Meta Ads'], ['banco', 'Banco']];
+  const cnt = (k) => R.filter((r) => !k || r.kind === k);
+  return `<div class="lab">
+    <section class="card lab-list">
+      <div class="card-head"><div class="seg">${kinds.map(([k, l]) => `<button data-act="lab-kind" data-k="${k}" aria-pressed="${L.kind === k}">${l}</button>`).join('')}</div>
+        <span class="small muted">${R.length} corridas · ${R.filter((r) => r.status === 'error').length} con error</span></div>
+      <div class="table-wrap"><table class="list lab-t"><thead><tr><th>Cuándo</th><th>Qué</th><th>Proyecto</th><th>Estado</th><th class="r">Duró</th><th>Resultado</th></tr></thead><tbody>
+        ${R.map((r) => `<tr data-act="lab-open" data-rid="${r.id}" class="${L.sel === r.id ? 'sel' : ''}">
+          <td class="nowrap small">${when(r.started_at)}</td>
+          <td><div class="handle" style="font-weight:500">${r.network && NETS[r.network] ? netBadge(r.network) : `<span class="net" style="background:var(--navy)">${icon('flask', 14)}</span>`}<div>${esc(r.title || RUN_KIND[r.kind])}<small>${RUN_KIND[r.kind] || r.kind} · ${r.steps} ${r.steps === 1 ? 'paso' : 'pasos'}</small></div></div></td>
+          <td class="small">${r.project ? `<span class="pdot" style="background:${esc(r.color)}"></span>${esc(r.project)}` : '—'}</td>
+          <td><span class="chip s-run-${r.status}">${RUN_ST[r.status] || r.status}</span></td>
+          <td class="r num small">${ms(r.ms)}</td>
+          <td class="small lab-sum">${esc(r.error || r.summary || '')}</td></tr>`).join('') || `<tr><td colspan="6" class="muted small" style="padding:30px;text-align:center">Todavía no hay corridas. Aparecen cuando ACM publica, prueba una conexión o usa Meta Ads.</td></tr>`}
+      </tbody></table></div>
+    </section>
+    <section class="card lab-trace">${traceView(L.detail)}</section>
+  </div>`;
+}
+function labBanco() {
+  const L = state.lab, R = (L.runs || []).filter((r) => r.kind === 'banco'), d = L.detail;
+  const casos = d ? d.steps.filter((s) => s.kind === 'caso') : [];
+  const groups = [...new Set(casos.map((c) => c.label.split(' · ')[0]))];
+  const ok = casos.filter((c) => c.status === 'ok').length;
+  return `<div class="lab bk">
+    <div class="lab-main">
+      <section class="bk-hero">
+        <div><span class="lbl">Último banco</span><b>${d ? `${ok}/${casos.length}` : '—'}</b><span class="sub">${d ? `${when(d.run.started_at)} · ${ms(d.run.ms)}` : 'todavía no se corrió'}</span></div>
+        <div class="bk-txt"><p>Corre los casos contra un <b>simulador de Meta, TikTok y Google</b> que vive dentro de ACM: conectar y publicar en las cuatro redes, que los errores no muestren tokens, el padrón, la pauta, Meta Ads y las reglas del programador. No toca ninguna cuenta real.</p>
+          <button class="btn accent" data-act="lab-banco" ${L.running ? 'disabled' : ''}>${L.running ? '<span class="spin"></span> Corriendo…' : 'Correr el banco de pruebas'}</button></div>
+      </section>
+      <div class="bk-groups">${groups.map((g) => `<section class="card"><div class="card-head"><h2 class="h2">${esc(g)}</h2><span class="small muted">${casos.filter((c) => c.label.startsWith(g + ' · ') && c.status === 'ok').length}/${casos.filter((c) => c.label.startsWith(g + ' · ')).length}</span></div>
+        <ul class="bk-cases">${casos.filter((c) => c.label.startsWith(g + ' · ')).map((c) => `<li class="${c.status === 'ok' ? 'ok' : 'bad'}"><span class="ic">${c.status === 'ok' ? icon('check', 14) : icon('x', 14)}</span><div><b>${esc(c.label.slice(g.length + 3))}</b>${c.detail ? `<span>${esc(c.detail)}</span>` : ''}</div><span class="small muted">${ms(c.ms)}</span></li>`).join('')}</ul></section>`).join('') || `<section class="card empty"><h2 class="h2">Sin resultados todavía</h2><p>Tocá «Correr el banco de pruebas».</p></section>`}</div>
+    </div>
+    <section class="card lab-hist"><div class="card-head"><h2 class="h2">Historial</h2></div>
+      <ul class="bk-hist">${R.map((r) => `<li><button data-act="lab-banco-sel" data-rid="${r.id}" class="${L.bancoSel === r.id ? 'sel' : ''}"><span class="chip s-run-${r.status}">${esc((r.summary || r.error || '').replace(/^Pasaron (los )?/, '').replace(' casos', ''))}</span><span class="small">${when(r.started_at)}</span><span class="small muted">${ms(r.ms)}</span></button></li>`).join('') || '<li class="muted small">Nada todavía.</li>'}</ul></section>
+  </div>`;
+}
+function labReels() {
+  const R = state.lab.reels || [];
+  const nets = Object.keys(NETS);
+  const okAll = R.filter((r) => nets.every((n) => r.review[n].ok)).length;
+  return `<section class="card">
+    <div class="card-head"><div><h2 class="h2">Control técnico de los reels</h2><p class="small muted">Duración, tamaño, proporción y peso de cada video contra lo que pide cada red. Se mide solo al subirlo.</p></div><span class="chip ${okAll === R.length ? 's-conectada' : 's-pausada'}">${okAll} de ${R.length} sirven para las cuatro redes</span></div>
+    <div class="table-wrap"><table class="list rv-t"><thead><tr><th>Reel</th><th>Proyecto</th><th class="r">Duración</th><th class="r">Tamaño</th><th class="r">Peso</th>${nets.map((n) => `<th class="c">${netBadge(n)}</th>`).join('')}</tr></thead><tbody>
+      ${R.map((r) => `<tr><td><div class="handle"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted></video><div>${esc(r.title)}<small>${esc(r.original_name || '')}</small></div></div></td>
+        <td class="small"><span class="pdot" style="background:${esc(r.color)}"></span>${esc(r.project)}</td>
+        <td class="r num">${r.duration != null ? fmt(r.duration, 1) + ' s' : '—'}</td>
+        <td class="r num small">${r.width ? `${r.width}×${r.height}` : '—'}</td>
+        <td class="r num small">${fmt(r.size / 1048576, 1)} MB</td>
+        ${nets.map((n) => { const v = r.review[n]; return `<td class="c"><span class="rv ${v.ok ? 'ok' : 'bad'}" title="${esc(v.why.join(' · ') || 'Cumple')}">${v.ok ? icon('check', 14) : icon('x', 14)}</span>${v.ok ? '' : `<small class="rv-why">${esc(v.why[0])}</small>`}</td>`; }).join('')}</tr>`).join('') || `<tr><td colspan="9" class="muted small" style="padding:30px;text-align:center">No hay reels cargados.</td></tr>`}
+    </tbody></table></div>
+    <p class="small muted" style="margin-top:12px">Reglas: Instagram 3 s a 15 min · Facebook 3 a 90 s · TikTok hasta 10 min · YouTube Shorts hasta 3 min; todos verticales (9:16), al menos 540 px de ancho para Meta.</p>
+  </section>`;
 }
 
 // ---------- proyecto ----------
@@ -791,6 +882,10 @@ document.addEventListener('click', async (e) => {
         render(); break; }
       case 'ads-audience': el.disabled = true; el.textContent = 'Subiendo…'; try { await api(`/api/projects/${state.project.id}/ads/audience`, { method: 'POST' }); toast('Padrón subido a Meta'); } catch (err) { fail(err); } render(); break;
       case 'ads-campaign': el.disabled = true; el.textContent = 'Creando…'; try { await api(`/api/projects/${state.project.id}/ads/campaign`, { method: 'POST' }); toast('Campaña creada en pausa'); } catch (err) { fail(err); } render(); break;
+      case 'lab-kind': state.lab.kind = el.dataset.k; state.lab.sel = null; render(); break;
+      case 'lab-open': state.lab.sel = Number(el.dataset.rid); render(); break;
+      case 'lab-banco-sel': state.lab.bancoSel = Number(el.dataset.rid); render(); break;
+      case 'lab-banco': { state.lab.running = true; render(); try { const r = await api('/api/lab/banco', { method: 'POST' }); state.lab.bancoSel = r.run?.id; toast(r.ok === r.total ? `Pasaron los ${r.total} casos` : `Pasaron ${r.ok} de ${r.total}`, r.ok !== r.total); } catch (err) { fail(err); } state.lab.running = false; render(); break; }
       case 'post-now': { el.disabled = true; el.textContent = 'Publicando…'; await api(`/api/posts/${id}/now`, { method: 'POST' }); toast('Se está publicando: en un rato cambia el estado'); el.closest('dialog')?.close(); break; }
       case 'open-day': postDialog(state.posts.filter((x) => ymd(pdate(x.scheduled_at)) === el.dataset.day).map((x) => x.id)); break;
       case 'del-padron': if (await confirmBox('Quitar padrón', 'Se borran las huellas de teléfonos y mails. El número de socios queda.', 'Quitar')) { await api(`/api/projects/${state.project.id}/padron`, { method: 'DELETE' }); toast('Padrón quitado'); render(); } break;
