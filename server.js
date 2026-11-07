@@ -73,12 +73,14 @@ app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next
 app.set('trust proxy', 1);
 const attempts = new Map();
 const total = { n: 0, t: Date.now() };
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const now = Date.now();
   if (now - total.t > 15 * 60e3) { total.n = 0; total.t = now; attempts.clear(); }
   const ip = req.ip;
   const a = attempts.get(ip) || { n: 0 };
-  if (a.n >= 10 || total.n >= 50) return res.status(429).json({ error: 'Demasiados intentos. Probá en 15 minutos.' });
+  if (a.n >= 10) return res.status(429).json({ error: 'Demasiados intentos. Probá en 15 minutos.' });
+  // El contador global no bloquea (no puede dejar afuera al dueño): solo frena cada intento cuando hay muchos fallos.
+  if (total.n > 20) await new Promise((r) => setTimeout(r, Math.min(5000, (total.n - 20) * 250)));
   const given = Buffer.from(String(req.body?.password || ''));
   const want = Buffer.from(PASSWORD);
   if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) { a.n++; total.n++; attempts.set(ip, a); return res.status(401).json({ error: 'Contraseña incorrecta' }); }
