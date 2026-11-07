@@ -91,6 +91,7 @@ async function render() {
   try {
     await loadProjects();
     if (r.view === 'project') await loadProject(r.id);
+    else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
   const head = r.view === 'project' ? projectHead(state.project) : `<div><h1 class="page-title">Inicio</h1><p class="lead">Todas las campañas, sus cuentas y lo que sale publicado.</p></div><button class="btn primary" data-act="new-project">${icon('plus')} Nuevo proyecto</button>`;
   const body = r.view === 'project' ? projectView(r.tab) : homeView();
@@ -127,24 +128,53 @@ function loginView() {
 
 // ---------- inicio ----------
 function homeView() {
-  const P = state.projects;
+  const P = state.projects, O = state.overview || { upcoming: [], upcoming14: [], networks: [], byProject: [], next: [] };
   const sum = (k) => P.reduce((a, p) => a + (p[k] || 0), 0);
-  const padron = sum('padron');
-  const kpis = `<div class="grid g4">
-    <div class="kpi dark"><div class="label">Proyectos activos</div><div class="value"><em>${P.length}</em></div><div class="hint">${padron ? fmt(padron) + ' personas en los padrones' : 'Cargá el primero'}</div></div>
-    <div class="kpi"><div class="label">Cuentas</div><div class="value">${sum('accounts')}</div><div class="hint">${sum('accounts_live')} conectadas</div></div>
-    <div class="kpi"><div class="label">Reels cargados</div><div class="value">${sum('reels')}</div><div class="hint">listos para repartir</div></div>
-    <div class="kpi"><div class="label">Publicaciones</div><div class="value">${sum('scheduled')}</div><div class="hint">programadas · ${sum('published')} publicadas</div></div>
+  const nets = (pid) => O.byProject.filter((x) => x.project_id === pid);
+  const nextOf = (pid) => O.next.find((x) => x.project_id === pid)?.at;
+  const kpis = `<div class="home-kpis">
+    <div><span class="lbl">Proyectos</span><b>${P.length}</b><span class="sub">${fmt(sum('padron'))} personas en los padrones</span></div>
+    <div><span class="lbl">Cuentas conectadas</span><b>${sum('accounts_live')}<small>/${sum('accounts')}</small></b><span class="sub">en ${O.networks.length} redes</span></div>
+    <div><span class="lbl">Reels</span><b>${sum('reels')}</b><span class="sub">cargados en total</span></div>
+    <div><span class="lbl">Programadas</span><b>${sum('scheduled')}</b><span class="sub">${sum('published')} ya publicadas</span></div>
+    <div><span class="lbl">Pauta</span><b>${usd(P.reduce((a, p) => a + (Number(p.pauta?.budget) || 0), 0))}</b><span class="sub">invertida en todos</span></div>
   </div>`;
-  const cards = P.map((p) => `
-    <a class="pcard" href="#/p/${p.id}" style="--c:${esc(p.color)}">
-      <div class="top">${avatar(p)}<div style="min-width:0"><div class="name">${esc(p.name)}</div><div class="muted small">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Sin cargo cargado')}</div></div></div>
-      <div class="row">${countdown(p)}${p.padron ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>
-      <div class="stats"><div><b>${p.accounts}</b><span>cuentas</span></div><div><b>${p.reels}</b><span>reels</span></div><div><b>${p.scheduled}</b><span>programadas</span></div></div>
-    </a>`).join('');
-  return `<div class="stack">${kpis}
-    <div class="card-head" style="margin:12px 0 0"><h2 class="h2">Proyectos</h2></div>
-    <div class="grid g3">${cards}<button class="pcard new" data-act="new-project">${icon('plus', 28)}Nuevo proyecto<span class="small muted" style="font-weight:400">Un dirigente o candidato con sus cuentas</span></button></div>
+  const rows = P.map((p) => { const c = pautaCalc(p, p.pauta); const dE = daysTo(p.election_date); const nx = nextOf(p.id); return `
+    <a class="hp" href="#/p/${p.id}" style="--c:${esc(p.color)}">
+      <div class="hp-who">${avatar(p, true)}<div class="hp-name"><b>${esc(p.name)}</b><span>${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Sin cargo cargado')}</span></div>${countdown(p)}</div>
+      <div class="hp-stats">
+        <div><span class="lbl">Elección</span><b>${dE === null ? '—' : dE >= 0 ? dE + ' días' : 'Terminó'}</b><span>${p.election_date ? fmtShort(p.election_date) : 'sin fecha'}${p.propaganda_until ? ' · propaganda hasta ' + fmtShort(p.propaganda_until) : ''}</span></div>
+        <div><span class="lbl">Padrón</span><b>${p.padron ? fmt(p.padron) : '—'}</b><span>${p.padron_contacts ? fmt(p.padron_contacts) + ' contactables' : 'sin archivo'}</span></div>
+        <div><span class="lbl">Cuentas</span><b>${p.accounts_live}/${p.accounts}</b><span class="hp-nets">${nets(p.id).map((x) => `${netBadge(x.network)}<small>${x.n}</small>`).join('') || 'ninguna'}</span></div>
+        <div><span class="lbl">Reels</span><b>${p.reels}</b><span>${p.scheduled} programadas · ${p.published} publicadas</span></div>
+        <div><span class="lbl">Pauta</span><b>${c.budget ? usd(c.budget) : '—'}</b><span>${c.budget ? `cada socio la ve ${fmt(c.freq, c.freq < 10 ? 1 : 0)} veces` : 'sin cargar'}</span></div>
+        <div><span class="lbl">Próxima</span><b>${nx ? fmtTime(nx) : '—'}</b><span>${nx ? fmtDay(nx) : 'nada programado'}</span></div>
+      </div>
+    </a>`; }).join('');
+  // actividad de los próximos 14 días, todos los proyectos
+  const days14 = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + i); return d; });
+  const perDay = days14.map((d) => O.upcoming14.filter((x) => sameDay(pdate(x.scheduled_at), d)));
+  const maxD = Math.max(1, ...perDay.map((l) => l.length));
+  const activity = `<section class="card home-act"><div class="card-head"><h2 class="h2">Próximas dos semanas</h2><span class="small muted">${perDay.reduce((a, l) => a + l.length, 0)} publicaciones en todos los proyectos</span></div>
+    <div class="ha">${days14.map((d, i) => { const L = perDay[i]; return `<div class="ha-d ${i === 0 ? 'today' : ''}" title="${L.length} publicaciones">
+      <span class="ha-bar">${P.map((p) => { const n = L.filter((x) => x.project_id === p.id).length; return n ? `<i style="height:${n / maxD * 100}%;background:${esc(p.color)}"></i>` : ''; }).join('')}</span>
+      <b>${L.length || ''}</b><span>${d.toLocaleDateString('es-AR', { weekday: 'narrow' })} ${d.getDate()}</span></div>`; }).join('')}</div>
+    <div class="ha-leg">${P.map((p) => `<span><i style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join('')}</div></section>`;
+  const agenda = O.upcoming.length ? O.upcoming.slice(0, 9).map((x) => `<a class="ag" href="#/p/${x.project_id}/calendario"><span class="ag-t"><b>${fmtTime(x.scheduled_at)}</b>${fmtDay(x.scheduled_at)}</span>${netBadge(x.network)}<span class="ag-w"><b>${esc(x.reel_title)}</b><span><i class="dot" style="background:${esc(x.color)}"></i>${esc(x.project)} · ${esc(x.handle ? '@' + x.handle : NETS[x.network].name)}</span></span></a>`).join('')
+    : '<p class="muted small">No hay publicaciones programadas.</p>';
+  const netCards = Object.keys(NETS).map((n) => { const x = O.networks.find((y) => y.network === n) || { total: 0, live: 0, followers: 0 }; return `<div class="hn">${netBadge(n)}<div><b>${x.live}/${x.total}</b><span>${NETS[n].name} · ${x.followers ? fmtK(x.followers) + ' seg.' : 'conectadas'}</span></div></div>`; }).join('');
+  return `<div class="home">
+    ${kpis}
+    <div class="home-grid">
+      <section class="card home-projects"><div class="card-head"><h2 class="h2">Proyectos</h2><button class="btn sm primary" data-act="new-project">${icon('plus', 16)} Nuevo proyecto</button></div>
+        ${rows ? rows : `<div class="empty"><h2 class="h2">Todavía no hay proyectos</h2><p>Cada proyecto es un dirigente o candidato con sus cuentas, reels y pauta.</p><button class="btn primary" data-act="new-project">${icon('plus')} Nuevo proyecto</button></div>`}
+      </section>
+      ${P.length ? activity : ''}
+      <aside class="home-side">
+        <section class="card"><div class="card-head"><h2 class="h2">Cuentas por red</h2></div><div class="hn-grid">${netCards}</div></section>
+        <section class="card home-agenda"><div class="card-head"><h2 class="h2">Agenda</h2><span class="small muted">próximas en todos los proyectos</span></div>${agenda}</section>
+      </aside>
+    </div>
   </div>`;
 }
 
@@ -242,30 +272,45 @@ function resumenView() {
 
 function cuentasView() {
   const A = state.accounts;
-  if (!A.length) return `<div class="card empty"><h2 class="h2">Sin cuentas todavía</h2><p>Agregá las cuentas que van a publicar los reels. Cada una se conecta con su red, como en Efaysto, y el nombre lo trae la conexión.</p><button class="btn primary" data-act="new-account">${icon('plus')} Agregar cuenta</button></div>`;
   const live = A.filter((a) => a.status === 'conectada').length;
-  return `<section class="card"><div class="card-head"><div><h2 class="h2">Cuentas</h2><p class="small muted">${live} de ${A.length} conectadas</p></div><button class="btn primary" data-act="new-account">${icon('plus')} Agregar cuenta</button></div>
-  <div class="table-wrap"><table class="list"><thead><tr><th>Cuenta</th><th class="r">Seguidores</th><th>Conexión</th><th></th></tr></thead><tbody>
+  const side = `<aside class="ac-side">
+    <section class="card"><div class="card-head"><h2 class="h2">Agregar cuenta</h2></div>
+      <div class="ac-add">${Object.entries(NETS).map(([k, n]) => `<button data-act="add-net" data-net="${k}">${netBadge(k)}<span>${n.name}</span>${icon('plus', 16)}</button>`).join('')}</div>
+      <p class="small muted" style="margin-top:10px">El nombre de la cuenta lo trae la conexión.</p></section>
+    <section class="card"><div class="card-head"><h2 class="h2">Por red</h2></div>
+      <div class="ac-nets">${Object.keys(NETS).map((n) => { const L = A.filter((a) => a.network === n), on = L.filter((a) => a.status === 'conectada'); return `<div>${netBadge(n)}<span class="t">${NETS[n].name}</span><span class="bar"><i style="width:${L.length ? on.length / L.length * 100 : 0}%"></i></span><b>${on.length}/${L.length}</b></div>`; }).join('')}</div>
+      <div class="ac-tot"><div><b>${live}</b><span>conectadas</span></div><div><b>${A.filter((a) => a.status === 'error').length}</b><span>con error</span></div><div><b>${fmtK(A.reduce((x, a) => x + (a.connected_as ? a.followers : 0), 0))}</b><span>seguidores</span></div></div></section>
+    <p class="note"><b>Cómo se conecta:</b> cada cuenta entra por la vía oficial de su red, con el permiso de su dueño; ACM nunca guarda contraseñas. Los tokens quedan cifrados en el servidor y no se vuelven a mostrar.</p>
+  </aside>`;
+  const table = A.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Cuenta</th><th class="r">Seguidores</th><th>Conexión</th><th>Última prueba</th><th></th></tr></thead><tbody>
   ${A.map((a) => `<tr data-id="${a.id}">
     <td><div class="handle">${netBadge(a.network)}<div class="${a.connected_as ? '' : 'muted'}">${esc(accName(a))}<small>${NETS[a.network].name}</small></div></div></td>
     <td class="r num">${a.connected_as ? fmt(a.followers) : '—'}</td>
     <td><span class="chip s-${a.status}" ${a.status === 'error' ? `title="${esc(a.last_error)}"` : ''}>${ACC_STATUS[a.status] || esc(a.status)}</span></td>
+    <td class="small muted">${a.last_checked_at ? new Date(a.last_checked_at).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
     <td class="r nowrap"><button class="btn sm ${a.status === 'conectada' ? '' : 'primary'}" data-act="connect-account">${a.status === 'conectada' ? 'Ver conexión' : 'Conectar'}</button>
       <button class="icon-btn" data-act="pause-account" title="${a.status === 'pausada' ? 'Reanudar' : 'Pausar'}">${icon(a.status === 'pausada' ? 'play' : 'pause', 16)}</button><button class="icon-btn danger" data-act="del-account" title="Borrar">${icon('trash', 16)}</button></td>
   </tr>`).join('')}
-  </tbody></table></div>
-  <p class="note" style="margin-top:16px"><b>Cómo se conecta:</b> cada cuenta entra por la vía oficial de su red, con el permiso de su dueño; ACM nunca guarda contraseñas. Los tokens quedan cifrados en el servidor y no se vuelven a mostrar.</p>
-  </section>`;
+  </tbody></table></div>` : `<div class="empty"><h2 class="h2">Sin cuentas todavía</h2><p>Elegí una red a la derecha para agregar la primera.</p></div>`;
+  return `<div class="ac"><section class="card ac-main"><div class="card-head"><div><h2 class="h2">Cuentas</h2><p class="small muted">${live} de ${A.length} conectadas</p></div></div>${table}</section>${side}</div>`;
 }
 
 function reelsView() {
   const R = state.reels;
-  const up = state.uploads.length ? `<div class="card"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
-  return `<div class="stack">
-  <label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los reels acá</b> o tocá para elegirlos</p><p class="small">MP4 o MOV ya editados, vertical 9:16. Podés subir varios juntos.</p></label>
-  ${up}
-  ${R.length ? `<div class="row"><h2 class="h2">${R.length} ${R.length === 1 ? 'reel' : 'reels'}</h2><span class="spacer"></span>${state.accounts.length ? '' : '<span class="small muted">Cargá cuentas para poder repartirlos</span>'}</div>
-  <div class="reels">${R.map((r) => `<article class="reel" data-id="${r.id}">
+  const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
+  const sinRepartir = R.filter((r) => !r.posts).length;
+  const side = `<aside class="rl-side">
+    <label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los reels acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos</p></label>
+    ${up}
+    <div class="rl-stats">
+      <div><b>${R.length}</b><span>reels</span></div>
+      <div><b>${R.filter((r) => r.status === 'aprobado').length}</b><span>aprobados</span></div>
+      <div><b>${sinRepartir}</b><span>sin repartir</span></div>
+      <div><b>${R.reduce((a, r) => a + r.posts, 0)}</b><span>publicaciones</span></div>
+    </div>
+    <p class="note">${state.accounts.length ? `Con <b>Repartir</b> cada reel sale en las cuentas que elijas, con horarios separados para que no publiquen lo mismo a la vez.` : 'Cargá cuentas para poder repartir los reels.'}</p>
+  </aside>`;
+  const grid = R.length ? `<div class="reels">${R.map((r) => `<article class="reel" data-id="${r.id}">
     <video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>
     <div class="body">
       <input class="title" value="${esc(r.title)}" data-act="reel-title" aria-label="Título">
@@ -275,8 +320,9 @@ function reelsView() {
         <button class="btn sm" data-act="reel-approve">${r.status === 'aprobado' ? 'A borrador' : 'Aprobar'}</button>
         <span class="spacer"></span><button class="icon-btn danger" data-act="del-reel" title="Borrar">${icon('trash', 16)}</button>
       </div>
-    </div></article>`).join('')}</div>` : (state.uploads.length ? '' : `<p class="muted small" style="text-align:center">Todavía no hay reels en este proyecto.</p>`)}
-  </div>`;
+    </div></article>`).join('')}</div>`
+    : `<div class="card empty rl-empty"><h2 class="h2">Todavía no hay reels</h2><p>Arrastrá los videos ya editados a la izquierda.</p></div>`;
+  return `<div class="rl">${side}<div class="rl-main">${grid}</div></div>`;
 }
 
 function calendarioView() {
@@ -692,6 +738,7 @@ document.addEventListener('click', async (e) => {
       case 'logout': await api('/api/logout', { method: 'POST' }); state.authed = false; location.hash = ''; render(); break;
       case 'new-project': newProjectDialog(); break;
       case 'new-account': addAccountDialog(); break;
+      case 'add-net': { const acc = await api(`/api/projects/${state.project.id}/accounts`, { method: 'POST', body: { network: el.dataset.net } }); await render(); connectPanel(acc); break; }
       case 'cal-prev': case 'cal-next': case 'cal-today': {
         const m = state.calMonth || new Date();
         state.calMonth = act === 'cal-today' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : new Date(m.getFullYear(), m.getMonth() + (act === 'cal-next' ? 1 : -1), 1);

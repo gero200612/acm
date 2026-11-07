@@ -155,6 +155,19 @@ function projectSummary(p) {
   };
 }
 
+// vista general de todos los proyectos (Inicio)
+app.get('/api/overview', (req, res) => {
+  res.json({
+    upcoming: all(`SELECT p.id, p.scheduled_at, p.status, p.project_id, pr.name AS project, pr.color, r.title AS reel_title, a.network, a.handle
+      FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id JOIN projects pr ON pr.id = p.project_id
+      WHERE p.status = 'programado' AND p.scheduled_at >= strftime('%Y-%m-%d %H:%M', 'now', 'localtime', '-1 hour') ORDER BY p.scheduled_at LIMIT 14`),
+    upcoming14: all(`SELECT project_id, scheduled_at FROM posts WHERE scheduled_at >= date('now', 'localtime') AND scheduled_at < date('now', 'localtime', '+14 days')`),
+    networks: all(`SELECT network, count(*) AS total, sum(status = 'conectada') AS live, sum(CASE WHEN status = 'conectada' THEN followers ELSE 0 END) AS followers FROM accounts GROUP BY network`),
+    byProject: all(`SELECT project_id, network, count(*) AS n FROM accounts GROUP BY project_id, network`),
+    next: all(`SELECT project_id, min(scheduled_at) AS at FROM posts WHERE status = 'programado' AND scheduled_at >= strftime('%Y-%m-%d %H:%M', 'now', 'localtime') GROUP BY project_id`),
+  });
+});
+
 // proyectos
 app.get('/api/projects', (req, res) => res.json(all('SELECT * FROM projects ORDER BY created_at DESC').map(projectSummary)));
 app.post('/api/projects', upload.single('photo'), (req, res) => {
