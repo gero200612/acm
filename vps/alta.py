@@ -88,7 +88,7 @@ if acm:
 else:
     proyectos = coolify('GET', '/projects')
     proyecto = next((p['uuid'] for p in proyectos if p.get('name') == 'acm'), None) or \
-        coolify('POST', '/projects', {'name': 'acm', 'description': 'ACM · Agentic Campaign Manager'})['uuid']
+        coolify('POST', '/projects', {'name': 'acm', 'description': 'ACM - Agentic Campaign Manager'})['uuid']
     uuid = coolify('POST', '/applications/public', {
         'project_uuid': proyecto, 'server_uuid': SERVIDOR, 'environment_name': 'production',
         'git_repository': REPO, 'git_branch': 'main', 'build_pack': 'dockerfile', 'ports_exposes': '3000',
@@ -114,14 +114,15 @@ print('Variables: cargadas')
 d = coolify('POST', f'/deploy?uuid={uuid}')
 print('Desplegando:', (d.get('deployments') or [{}])[0].get('deployment_uuid'))
 
-# 8. La contraseña va por Telegram, no por pantalla
-if nueva:
+# 8. La contraseña va por Telegram, no por pantalla (una vez: queda una marca al lado del secreto)
+if not os.path.exists(SECRETO + '.enviada'):
     try:
         tg = leer('/root/telegram-acceso.token')
         texto = f'ACM · https://{DOMINIO}\nContraseña del panel: {sec["ACM_PASSWORD"]}\n(guardada en {SECRETO})'
         req = urllib.request.Request(f'https://api.telegram.org/bot{tg}/sendMessage', method='POST',
                                      data=json.dumps({'chat_id': 5843375718, 'text': texto}).encode(), headers={'Content-Type': 'application/json'})
         urllib.request.urlopen(req, timeout=20).read()
+        open(SECRETO + '.enviada', 'w').close()
         print('Contraseña: enviada por Telegram')
     except Exception as e:
         print(f'Contraseña: no se pudo mandar por Telegram ({type(e).__name__}); está en {SECRETO}')
