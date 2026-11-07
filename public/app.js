@@ -5,6 +5,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const fmt = (n, d = 0) => Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: d, minimumFractionDigits: d });
 const usd = (n) => 'USD ' + fmt(Math.round(n));
 
+const LOGO = (hub = 'var(--blue)', node = '#fff') => `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><g stroke="${node}" stroke-width="3.2" stroke-linecap="round"><path d="M24 33 9.5 14.5M24 33V10M24 33l14.5-18.5"/></g><circle cx="9.5" cy="14.5" r="4.6" fill="${node}"/><circle cx="24" cy="9.5" r="4.6" fill="${node}"/><circle cx="38.5" cy="14.5" r="4.6" fill="${node}"/><circle cx="24" cy="34" r="7.5" fill="${hub}"/></svg>`;
 const NETS = {
   instagram: { name: 'Instagram', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg>' },
   facebook: { name: 'Facebook', svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 8h3V4h-3a4 4 0 0 0-4 4v2H7v4h3v8h4v-8h3l1-4h-4V8a0 0 0 0 1 0 0Z"/></svg>' },
@@ -12,7 +13,7 @@ const NETS = {
   youtube: { name: 'YouTube', svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 15.5v-7l6 3.5-6 3.5Z"/></svg>' },
 };
 const KINDS = { principal: 'Principal', apoyo: 'Apoyo', tematica: 'Temática', fan: 'Fan / hinchas', medio: 'Medio / noticias' };
-const ACC_STATUS = { pendiente: 'Sin conectar', conectada: 'Conectada', pausada: 'Pausada' };
+const ACC_STATUS = { pendiente: 'Sin conectar', conectada: 'Conectada', error: 'Con error', pausada: 'Pausada' };
 const ICON = {
   home: 'M3 11.5 12 4l9 7.5M5 10v10h14V10',
   plus: 'M12 5v14M5 12h14',
@@ -22,6 +23,8 @@ const ICON = {
   cal: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
   up: 'M12 16V4m0 0-5 5m5-5 5 5M4 20h16',
   edit: 'M4 20h4L19 9l-4-4L4 16v4ZM13.5 6.5l4 4',
+  pause: 'M9 5v14M15 5v14',
+  play: 'M7 5v14l11-7Z',
 };
 const icon = (k, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[k]}"/></svg>`;
 const netBadge = (n) => `<span class="net ${n}" title="${NETS[n]?.name || n}">${NETS[n]?.svg || ''}</span>`;
@@ -93,7 +96,7 @@ async function render() {
 
 function sideNav(r) {
   return `
-  <a class="brand" href="#"><span class="mark">ACM <i></i></span><span class="sub">Agentic Campaign Manager</span></a>
+  <a class="brand" href="#"><span class="mark">${LOGO()}ACM</span><span class="sub">Agentic Campaign Manager</span></a>
   <nav aria-label="Principal">
     <a class="item ${r.view === 'home' ? 'active' : ''}" href="#">${icon('home', 20)}<span class="t">Inicio</span></a>
     <div class="nav-label">Proyectos</div>
@@ -105,7 +108,7 @@ function sideNav(r) {
 
 function loginView() {
   return `<div class="login"><form id="login-form">
-    <div><div class="mark">ACM <i></i></div><p class="muted small">Agentic Campaign Manager</p></div>
+    <div><div class="mark">${LOGO('var(--blue)', 'var(--ink)')}ACM</div><p class="muted small">Agentic Campaign Manager</p></div>
     <label class="field">Contraseña<input class="input" id="pw" type="password" autocomplete="current-password" required></label>
     <div class="err" id="login-err"></div>
     <button class="btn primary" type="submit">Entrar</button>
@@ -149,14 +152,22 @@ function projectView(tab) {
   return tabs + (views[tab] || resumenView)();
 }
 
+// Datos fijos del cálculo (no se tocan desde la pantalla): CPM de Meta en Argentina en campaña con públicos chicos,
+// parte del padrón que Meta reconoce con teléfono o mail, e IVA de servicios digitales del exterior.
+const PAUTA_DATOS = { cpm: 6, match_pct: 60, iva: 0.21 };
+const today = () => localInput(new Date()).slice(0, 10);
 function pautaCalc(p, pa) {
-  pa = pa || { match_pct: 60, frequency: 10, cpm: 6, iva: 1 };
-  const people = Math.round((p.padron || 0) * pa.match_pct / 100);
-  const imps = people * pa.frequency;
-  const spend = imps / 1000 * pa.cpm;
-  const total = spend * (pa.iva ? 1.21 : 1);
-  const days = Math.max(1, daysTo(p.election_date) ?? 35);
-  return { people, imps, spend, total, days, weeks: days / 7, perWeek: pa.frequency / Math.max(1, days / 7), perPerson: people ? total / people : 0 };
+  pa = pa || {};
+  const from = pa.start_date || today();
+  const to = pa.end_date || p.election_date || '';
+  const days = to ? Math.max(1, Math.round((new Date(to + 'T00:00') - new Date(from + 'T00:00')) / 864e5) + 1) : 30;
+  const budget = Number(pa.budget) || 0;
+  const net = budget / (1 + PAUTA_DATOS.iva);
+  const imps = net / PAUTA_DATOS.cpm * 1000;
+  const people = Math.round((p.padron || 0) * PAUTA_DATOS.match_pct / 100);
+  const freq = people ? imps / people : 0;
+  const weeks = days / 7;
+  return { from, to, days, weeks, budget, net, imps, people, freq, perWeek: freq / Math.max(1, weeks), perDay: budget / days };
 }
 
 function resumenView() {
@@ -168,11 +179,11 @@ function resumenView() {
     [A.length > 0, 'Cargar las cuentas', 'cuentas'],
     [state.reels.length > 0, 'Subir los reels', 'reels'],
     [state.posts.length > 0, 'Repartir los reels en el calendario', 'calendario'],
-    [!!p.padron, 'Cargar el padrón y calcular la pauta', p.padron ? 'pauta' : 'ajustes'],
+    [!!(p.padron && p.pauta?.budget), 'Cargar el padrón y la inversión en pauta', p.padron ? 'pauta' : 'ajustes'],
   ];
   return `<div class="stack">
   <div class="grid g4">
-    <div class="kpi dark"><div class="label">Personas a alcanzar</div><div class="value"><em>${fmt(c.people)}</em></div><div class="hint">${p.padron ? `de ${fmt(p.padron)} en el padrón` : 'cargá el padrón en Ajustes'}</div></div>
+    <div class="kpi dark"><div class="label">Personas a alcanzar</div><div class="value"><em>${fmt(c.people)}</em></div><div class="hint">${!p.padron ? 'cargá el padrón en Ajustes' : c.budget ? `la ven ${fmt(c.freq, c.freq < 10 ? 1 : 0)} veces · ${usd(c.budget)}` : `de ${fmt(p.padron)} en el padrón`}</div></div>
     <div class="kpi"><div class="label">Cuentas</div><div class="value">${A.length}</div><div class="hint">${A.filter((a) => a.status === 'conectada').length} conectadas · ${new Set(A.map((a) => a.network)).size} redes</div></div>
     <div class="kpi"><div class="label">Reels</div><div class="value">${state.reels.length}</div><div class="hint">${state.reels.filter((r) => r.status === 'aprobado').length} aprobados</div></div>
     <div class="kpi"><div class="label">Programadas</div><div class="value">${p.scheduled}</div><div class="hint">${p.published} ya publicadas</div></div>
@@ -182,7 +193,7 @@ function resumenView() {
       ${next.length ? next.map(slotRow).join('') : `<p class="muted small">Todavía no hay nada programado. Subí reels y usá <b>Repartir</b> para mandarlos a las cuentas.</p>`}
     </section>
     <section class="card"><div class="card-head"><h2 class="h2">Puesta en marcha</h2></div>
-      <div class="stack" style="gap:8px">${steps.map(([ok, t, tab]) => `<a href="#/p/${p.id}/${tab}" class="slot" style="text-decoration:none;color:inherit"><span class="net" style="background:${ok ? 'var(--green)' : 'var(--line-2)'};color:${ok ? 'var(--navy)' : 'var(--muted)'}">${ok ? icon('check', 16) : ''}</span><span class="what"><b style="${ok ? 'color:var(--muted);text-decoration:line-through' : ''}">${t}</b></span></a>`).join('')}</div>
+      <div class="stack" style="gap:8px">${steps.map(([ok, t, tab]) => `<a href="#/p/${p.id}/${tab}" class="slot" style="text-decoration:none;color:inherit"><span class="net" style="background:${ok ? 'var(--ok)' : 'var(--line-2)'};color:${ok ? '#fff' : 'var(--muted)'}">${ok ? icon('check', 16) : ''}</span><span class="what"><b style="${ok ? 'color:var(--muted);text-decoration:line-through' : ''}">${t}</b></span></a>`).join('')}</div>
       ${byNet.length ? `<div class="row" style="margin-top:18px">${byNet.map(([n, l]) => `<span class="chip nodot" style="gap:8px;height:32px;padding:0 12px 0 4px;background:var(--bg)">${netBadge(n)}${l.length} ${l.length === 1 ? 'cuenta' : 'cuentas'}</span>`).join('')}</div>` : ''}
     </section>
   </div></div>`;
@@ -190,19 +201,21 @@ function resumenView() {
 
 function cuentasView() {
   const A = state.accounts;
-  if (!A.length) return `<div class="card empty"><h2 class="h2">Sin cuentas todavía</h2><p>Cargá la cuenta principal del dirigente y las de apoyo, fans y temáticas que van a publicar los reels.</p><button class="btn primary" data-act="new-account">${icon('plus')} Agregar cuenta</button></div>`;
-  return `<section class="card"><div class="card-head"><h2 class="h2">Ecosistema de cuentas</h2><button class="btn primary" data-act="new-account">${icon('plus')} Agregar cuenta</button></div>
-  <div class="table-wrap"><table class="list"><thead><tr><th>Cuenta</th><th>Tipo</th><th class="r">Seguidores</th><th class="r">Por día</th><th>Estado</th><th></th></tr></thead><tbody>
+  if (!A.length) return `<div class="card empty"><h2 class="h2">Sin cuentas todavía</h2><p>Cargá la cuenta principal del dirigente y las de apoyo, fans y temáticas que van a publicar los reels. Cada una se conecta con su red, como en Efaysto.</p><button class="btn primary" data-act="new-account">${icon('plus')} Agregar cuenta</button></div>`;
+  const live = A.filter((a) => a.status === 'conectada').length;
+  return `<section class="card"><div class="card-head"><div><h2 class="h2">Ecosistema de cuentas</h2><p class="small muted">${live} de ${A.length} conectadas</p></div><button class="btn primary" data-act="new-account">${icon('plus')} Agregar cuenta</button></div>
+  <div class="table-wrap"><table class="list"><thead><tr><th>Cuenta</th><th>Tipo</th><th class="r">Seguidores</th><th class="r">Por día</th><th>Conexión</th><th></th></tr></thead><tbody>
   ${A.map((a) => `<tr data-id="${a.id}">
     <td><div class="handle">${netBadge(a.network)}<div>@${esc(a.handle)}<small>${NETS[a.network].name}${a.notes ? ' · ' + esc(a.notes) : ''}</small></div></div></td>
     <td><span class="chip nodot ${a.kind === 'principal' ? 'k-principal' : ''}">${KINDS[a.kind] || esc(a.kind)}</span></td>
     <td class="r num">${fmt(a.followers)}</td>
     <td class="r num">${a.posts_per_day}</td>
-    <td><select class="select sm" data-act="acc-status">${Object.entries(ACC_STATUS).map(([k, l]) => `<option value="${k}" ${a.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
-    <td class="r"><button class="icon-btn" data-act="edit-account" title="Editar">${icon('edit', 16)}</button><button class="icon-btn danger" data-act="del-account" title="Borrar">${icon('trash', 16)}</button></td>
+    <td><span class="chip s-${a.status}" ${a.status === 'error' ? `title="${esc(a.last_error)}"` : ''}>${a.status === 'conectada' && a.connected_as ? esc(a.connected_as) : ACC_STATUS[a.status] || esc(a.status)}</span></td>
+    <td class="r nowrap"><button class="btn sm ${a.status === 'conectada' ? '' : 'primary'}" data-act="connect-account">${a.status === 'conectada' ? 'Ver conexión' : 'Conectar'}</button>
+      <button class="icon-btn" data-act="edit-account" title="Editar">${icon('edit', 16)}</button><button class="icon-btn" data-act="pause-account" title="${a.status === 'pausada' ? 'Reanudar' : 'Pausar'}">${icon(a.status === 'pausada' ? 'play' : 'pause', 16)}</button><button class="icon-btn danger" data-act="del-account" title="Borrar">${icon('trash', 16)}</button></td>
   </tr>`).join('')}
   </tbody></table></div>
-  <p class="note" style="margin-top:16px"><b>Conexión con las redes:</b> cada cuenta se conecta con el permiso de su dueño por la vía oficial de cada red (sin guardar contraseñas). Mientras tanto, el estado se marca a mano.</p>
+  <p class="note" style="margin-top:16px"><b>Cómo se conecta:</b> cada cuenta entra por la vía oficial de su red, con el permiso de su dueño; ACM nunca guarda contraseñas. Los tokens quedan cifrados en el servidor y no se vuelven a mostrar.</p>
   </section>`;
 }
 
@@ -246,34 +259,47 @@ function calendarioView() {
 }
 
 function pautaView() {
-  const p = state.project, pa = p.pauta || { match_pct: 60, frequency: 10, cpm: 6, iva: 1 };
-  if (!p.padron) return `<div class="card empty"><h2 class="h2">Falta el padrón</h2><p>Cargá cuántas personas hay en el padrón para calcular cuánta pauta hace falta.</p><a class="btn primary" href="#/p/${p.id}/ajustes">Cargar padrón</a></div>`;
-  const presets = [[5, 'Baja', 'una vez por semana'], [10, 'Media', 'dos por semana'], [20, 'Alta', 'cuatro por semana']];
+  const p = state.project, pa = p.pauta || {};
+  if (!p.padron) return `<div class="card empty"><h2 class="h2">Falta el padrón</h2><p>Cargá cuántas personas hay en el padrón para calcular la pauta.</p><a class="btn primary" href="#/p/${p.id}/ajustes">Cargar padrón</a></div>`;
+  const c = pautaCalc(p, pa);
   return `<div class="grid g2" style="align-items:start">
   <section class="card stack" id="pauta-form">
-    <div class="card-head" style="margin:0"><h2 class="h2">¿Cuántas veces la ve cada uno?</h2></div>
-    <div class="presets">${presets.map(([f, l, d]) => `<button data-act="preset" data-f="${f}" aria-pressed="${Number(pa.frequency) === f}"><b>${l} · ${f} veces</b><span>${d}</span></button>`).join('')}</div>
-    <div class="slider"><div class="lbl">Veces que ve la propaganda cada persona<span id="v-frequency">${pa.frequency}</span></div><input type="range" min="1" max="40" step="1" name="frequency" value="${pa.frequency}"></div>
-    <div class="slider"><div class="lbl">Parte del padrón que Meta reconoce<span id="v-match_pct">${pa.match_pct} %</span></div><input type="range" min="20" max="90" step="5" name="match_pct" value="${pa.match_pct}"><p>Con teléfono o mail de cada socio suele estar entre 50 y 70 %.</p></div>
-    <div class="slider"><div class="lbl">Costo cada mil vistas (CPM)<span id="v-cpm">USD ${pa.cpm}</span></div><input type="range" min="2" max="17" step="0.5" name="cpm" value="${pa.cpm}"><p>Argentina: USD 3 a 4,8 en promedio; en campaña y con públicos chicos sube, con picos de 16.</p></div>
-    <label class="check"><input type="checkbox" name="iva" ${pa.iva ? 'checked' : ''}> Sumar IVA (21 %)</label>
+    <div class="card-head" style="margin:0"><h2 class="h2">Inversión</h2></div>
+    <label class="field">Cuánto querés invertir (USD, con IVA)<input class="input big-input" type="number" min="0" step="50" name="budget" value="${pa.budget || ''}" placeholder="3000"></label>
+    <div class="form"><div class="two">
+      <label class="field">Desde<input class="input" type="date" name="start_date" value="${esc(c.from)}"></label>
+      <label class="field">Hasta<input class="input" type="date" name="end_date" value="${esc(c.to)}"></label>
+    </div></div>
+    <div class="datos">
+      <div class="dato-head">Datos del cálculo</div>
+      <div><span>Costo cada mil vistas en Meta (CPM)</span><b>USD ${fmt(PAUTA_DATOS.cpm)}</b></div>
+      <div><span>Padrón</span><b>${fmt(p.padron)}</b></div>
+      <div><span>Parte del padrón que Meta reconoce</span><b>${PAUTA_DATOS.match_pct} %</b></div>
+      <div><span>IVA incluido</span><b>${PAUTA_DATOS.iva * 100} %</b></div>
+      <p>El CPM es el de Argentina en época de campaña con un público chico (el padrón); cuando la campaña corra, se reemplaza por el real que informa Meta.</p>
+    </div>
   </section>
-  <section class="stack" id="pauta-out">${pautaOut(p, pa)}</section>
+  <section class="stack" id="pauta-out">${pautaOut(p, c)}</section>
   </div>`;
 }
-function pautaOut(p, pa) {
-  const c = pautaCalc(p, pa);
-  const max = p.padron;
-  return `<div class="kpi dark"><div class="label">Inversión en pauta hasta la elección</div><div class="value" style="font-size:40px"><em>${usd(c.total)}</em></div><div class="hint">${usd(c.total / Math.max(1, c.weeks))} por semana · ${pa.iva ? 'con IVA' : 'sin IVA'} · ${fmt(c.days)} días</div></div>
-  <div class="card"><div class="card-head"><h2 class="h2">Cómo se llega</h2></div><div class="funnel">
-    <div class="bar"><span>Padrón</span><span class="track"><i style="width:100%"></i></span><b>${fmt(p.padron)}</b></div>
-    <div class="bar"><span>Alcanzables en Meta</span><span class="track"><i class="g" style="width:${(c.people / max) * 100}%"></i></span><b>${fmt(c.people)}</b></div>
-    <div class="bar"><span>Vistas en total</span><span class="track"><i style="width:100%;opacity:.35"></i></span><b>${fmt(c.imps)}</b></div>
+function pautaOut(p, c) {
+  if (!c.budget) return `<div class="card empty"><h2 class="h2">Poné cuánto querés invertir</h2><p>Con el monto y las fechas se calcula a cuánta gente del padrón le llega y cuántas veces la ve cada uno.</p></div>`;
+  const f = c.freq;
+  const verdict = f < 3 ? ['Poco', 'Con menos de 3 vistas por persona casi nadie la recuerda. Conviene más plata o menos días.']
+    : f > 30 ? ['De más', 'Pasadas las 30 vistas por persona la gente se satura. Se puede bajar la inversión o estirar las fechas.']
+    : f < 8 ? ['Justo', 'Alcanza para que la vean, pero queda corto para que se instale el mensaje.']
+    : ['Bien', 'Cada persona la ve las veces suficientes para recordarla sin cansarse.'];
+  return `<div class="kpi dark"><div class="label">Cada persona del padrón la ve</div><div class="value" style="font-size:44px"><em>${fmt(f, f < 10 ? 1 : 0)} veces</em></div><div class="hint">${fmt(c.perWeek, 1)} por semana · durante ${fmt(c.days)} días</div></div>
+  <div class="card"><div class="card-head"><h2 class="h2">Qué compra la inversión</h2><span class="chip v-${verdict[0].toLowerCase().replace('á', 'a')}">${verdict[0]}</span></div>
+  <div class="funnel">
+    <div class="bar"><span>Padrón</span><span class="track"><i style="width:100%;opacity:.25"></i></span><b>${fmt(p.padron)}</b></div>
+    <div class="bar"><span>Personas alcanzadas</span><span class="track"><i style="width:${(c.people / p.padron) * 100}%"></i></span><b>${fmt(c.people)}</b></div>
   </div>
   <div class="grid g2" style="margin-top:18px">
-    <div class="note"><b>${fmt(c.perWeek, 1)} veces por semana</b><br>cada persona alcanzada, hasta la elección</div>
-    <div class="note"><b>USD ${fmt(c.perPerson, 2)} por persona</b><br>${fmt(pa.frequency)} vistas a USD ${pa.cpm} cada mil</div>
-  </div></div>
+    <div class="note"><b>${fmt(c.imps)} vistas</b><br>en total</div>
+    <div class="note"><b>${usd(c.perDay)} por día</b><br>${usd(c.net)} de pauta + ${usd(c.budget - c.net)} de IVA</div>
+  </div>
+  <p class="small muted" style="margin-top:14px">${verdict[1]}</p></div>
   <p class="note">Es solo la plata que cobra la red por mostrar los videos; la plataforma va aparte. TikTok no acepta propaganda política paga. Meta exige verificar al anunciante y mostrar quién paga: conviene arrancar ese trámite cuanto antes.</p>`;
 }
 
@@ -289,7 +315,7 @@ function projectForm(p = {}) {
     <label class="field">Institución<input class="input" name="org" value="${esc(p.org)}" placeholder="Club Atlético Independiente"></label></div>
     <div class="two"><label class="field">Fecha de la elección<input class="input" type="date" name="election_date" value="${esc(p.election_date)}"></label>
     <label class="field">Personas en el padrón<input class="input" type="number" min="0" name="padron" value="${p.padron || ''}" placeholder="65000"></label></div>
-    <div class="two"><label class="field">Color<input class="input" type="color" name="color" value="${esc(p.color || '#3842f3')}" style="padding:4px"></label>
+    <div class="two"><label class="field">Color<input class="input" type="color" name="color" value="${esc(p.color || '#ff5a1f')}" style="padding:4px"></label>
     <label class="field">Foto<input class="input" type="file" name="photo" accept="image/*" style="padding:8px"></label></div>
     <label class="field">Notas<textarea class="textarea" name="notes" rows="3" placeholder="Tono, temas, lo que nunca diría…">${esc(p.notes)}</textarea></label>
     <div class="row"><span class="spacer"></span><button class="btn primary" type="submit">${p.id ? 'Guardar' : 'Crear proyecto'}</button></div>
@@ -323,28 +349,140 @@ function newProjectDialog() {
 }
 function accountDialog(a) {
   const d = openDialog(a ? 'Editar cuenta' : 'Agregar cuenta', `<form class="form" id="acc-form">
-    <div class="two"><label class="field">Red<select class="select" name="network">${Object.entries(NETS).map(([k, n]) => `<option value="${k}" ${a?.network === k ? 'selected' : ''}>${n.name}</option>`).join('')}</select></label>
-    <label class="field">Usuario<input class="input" name="handle" required placeholder="@usuario" value="${esc(a?.handle ? '@' + a.handle : '')}"></label></div>
-    <div class="two"><label class="field">Tipo de cuenta<select class="select" name="kind">${Object.entries(KINDS).map(([k, l]) => `<option value="${k}" ${(a?.kind || 'apoyo') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-    <label class="field">Estado<select class="select" name="status">${Object.entries(ACC_STATUS).map(([k, l]) => `<option value="${k}" ${(a?.status || 'pendiente') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
-    <div class="two"><label class="field">Seguidores<input class="input" type="number" min="0" name="followers" value="${a?.followers || ''}"></label>
-    <label class="field">Publicaciones por día<input class="input" type="number" min="1" max="20" name="posts_per_day" value="${a?.posts_per_day || 3}"></label></div>
-    <label class="field">Nota<input class="input" name="notes" value="${esc(a?.notes)}" placeholder="Quién la maneja, a qué público apunta…"></label>
-    <div class="row"><span class="spacer"></span>${a ? '' : '<button class="btn" type="submit" data-more>Guardar y agregar otra</button>'}<button class="btn primary" type="submit">Guardar</button></div>
+    ${a ? '' : `<div class="field">Red<div class="net-pick">${Object.entries(NETS).map(([k, n], i) => `<label><input type="radio" name="network" value="${k}" ${i === 0 ? 'checked' : ''}><span>${netBadge(k)}${n.name}</span></label>`).join('')}</div></div>`}
+    <div class="two"><label class="field">Usuario<input class="input" name="handle" required placeholder="@usuario" value="${esc(a?.handle ? '@' + a.handle : '')}"></label>
+    <label class="field">Tipo de cuenta<select class="select" name="kind">${Object.entries(KINDS).map(([k, l]) => `<option value="${k}" ${(a?.kind || 'apoyo') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+    <div class="two"><label class="field">Publicaciones por día<input class="input" type="number" min="1" max="20" name="posts_per_day" value="${a?.posts_per_day || 3}"></label>
+    <label class="field">Nota<input class="input" name="notes" value="${esc(a?.notes)}" placeholder="Quién la maneja, a qué público apunta…"></label></div>
+    <div class="row"><span class="spacer"></span><button class="btn primary" type="submit">${a ? 'Guardar' : 'Agregar y conectar'}</button></div>
   </form>`);
   d.querySelector('form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const more = e.submitter?.hasAttribute('data-more');
     const body = Object.fromEntries(new FormData(e.target));
     try {
-      if (a) await api(`/api/accounts/${a.id}`, { method: 'PUT', body });
-      else await api(`/api/projects/${state.project.id}/accounts`, { method: 'POST', body });
-      toast(a ? 'Cuenta guardada' : 'Cuenta agregada');
-      if (more) { e.target.handle.value = ''; e.target.followers.value = ''; e.target.notes.value = ''; e.target.handle.focus(); await render(); }
-      else { d.close(); render(); }
+      if (a) { await api(`/api/accounts/${a.id}`, { method: 'PUT', body }); d.close(); toast('Cuenta guardada'); render(); return; }
+      const acc = await api(`/api/projects/${state.project.id}/accounts`, { method: 'POST', body });
+      d.close(); await render(); connectPanel(acc);
     } catch (err) { fail(err); }
   });
 }
+
+// ---------- conexión de una cuenta (como las integraciones de Efaysto) ----------
+const SYSTEM_USERS = { label: 'Abrir Usuarios del sistema', url: 'https://business.facebook.com/settings/system-users' };
+const META_PERMS = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'instagram_basic', 'instagram_content_publish', 'instagram_manage_comments', 'read_insights', 'instagram_manage_insights', 'business_management'];
+const FIELD_DEF = {
+  pageId: { label: 'ID de la Página de Facebook' },
+  pageAccessToken: { label: 'Token de la Página', secret: true },
+  instagramBusinessId: { label: 'ID de Instagram', hint: 'opcional, se completa solo al probar' },
+  clientKey: { label: 'Client key' },
+  clientSecret: { label: 'Client secret', secret: true },
+  accessToken: { label: 'Token de acceso', secret: true },
+  refreshToken: { label: 'Token de renovación', secret: true },
+  clientId: { label: 'ID de cliente de OAuth' },
+};
+const CONNECT_STEPS = {
+  instagram: [
+    { title: 'Pasá Instagram a cuenta Profesional y vinculala a una Página', body: ['La cuenta tiene que ser Profesional (Empresa o Creador) y estar vinculada a una Página de Facebook.', 'En Meta Business Suite entrá a Configuración, después Cuentas de Instagram, y conectá la cuenta. Si la cuenta es de otra persona, que te dé acceso como socio desde su Business.'], links: [{ label: 'Abrir Meta Business Suite', url: 'https://business.facebook.com/latest/settings/instagram_accounts' }] },
+    { title: 'Generá el token de la Página', body: ['En Configuración del negocio entrá a Usuarios, después Usuarios del sistema. Creá uno con rol Administrador (o usá el que ya tenés) y asignale la Página y la cuenta de Instagram.', 'Tocá «Generar token» con estos permisos. Ese token no vence.'], links: [SYSTEM_USERS], chips: META_PERMS, fields: ['pageAccessToken'] },
+    { title: 'Copiá el ID de la Página', body: ['Está en la Página, en Información, sección Transparencia. También en Business Suite, Configuración, Páginas.', 'El ID de Instagram se completa solo cuando probás la conexión.'], fields: ['pageId', 'instagramBusinessId'] },
+    { title: 'Probá la conexión', body: ['Guardá y probá. ACM le pregunta a Meta a qué cuenta entra y trae el usuario y los seguidores reales.'], test: true },
+  ],
+  facebook: [
+    { title: 'Tené acceso a la Página', body: ['La Página tiene que estar en tu Business de Meta, propia o compartida como socio.'], links: [{ label: 'Abrir Páginas del negocio', url: 'https://business.facebook.com/settings/pages' }] },
+    { title: 'Generá el token de la Página', body: ['En Usuarios del sistema asignale la Página al usuario y tocá «Generar token» con estos permisos. Ese token no vence.'], links: [SYSTEM_USERS], chips: META_PERMS.filter((p) => !p.startsWith('instagram')), fields: ['pageAccessToken'] },
+    { title: 'Copiá el ID de la Página', body: ['Está en la Página, en Información, sección Transparencia.'], fields: ['pageId'] },
+    { title: 'Probá la conexión', body: ['Guardá y probá. ACM trae el nombre de la Página y sus seguidores.'], test: true },
+  ],
+  tiktok: [
+    { title: 'Creá la app en TikTok for Developers', body: ['Entrá a developers.tiktok.com, creá una app y agregale los productos Login Kit y Content Posting API.', 'Pedí los permisos que siguen. Hasta que TikTok apruebe la app, lo que se publica sale como privado.'], links: [{ label: 'Abrir TikTok for Developers', url: 'https://developers.tiktok.com/apps/' }], chips: ['user.info.basic', 'user.info.stats', 'video.publish', 'video.upload'] },
+    { title: 'Copiá las claves de la app', body: ['En la app, en Credenciales, copiá el Client key y el Client secret.'], fields: ['clientKey', 'clientSecret'] },
+    { title: 'Autorizá la cuenta y pegá los tokens', body: ['Con la cuenta de TikTok abierta, autorizá la app (Login Kit). TikTok devuelve un token de acceso (dura 24 horas) y uno de renovación (dura un año).', 'Con los dos, ACM renueva el de acceso solo.'], fields: ['accessToken', 'refreshToken'] },
+    { title: 'Probá la conexión', body: ['Guardá y probá. ACM trae el usuario y los seguidores.'], note: 'TikTok no acepta pauta política: en esta red el alcance es solo orgánico.', test: true },
+  ],
+  youtube: [
+    { title: 'Creá el proyecto en Google Cloud', body: ['En console.cloud.google.com creá un proyecto y activá la API «YouTube Data API v3».'], links: [{ label: 'Abrir la API de YouTube', url: 'https://console.cloud.google.com/apis/library/youtube.googleapis.com' }] },
+    { title: 'Creá el cliente de OAuth', body: ['En Credenciales creá un «ID de cliente de OAuth» de tipo Aplicación web. Agregá https://developers.google.com/oauthplayground como URI de redireccionamiento.', 'Copiá el ID de cliente y el secreto.'], links: [{ label: 'Abrir Credenciales', url: 'https://console.cloud.google.com/apis/credentials' }], fields: ['clientId', 'clientSecret'] },
+    { title: 'Autorizá el canal y sacá el token de renovación', body: ['En OAuth Playground, en la rueda de configuración, marcá «Use your own OAuth credentials» y pegá el ID y el secreto.', 'Autorizá estos permisos con la cuenta de Google del canal y canjeá el código: copiá el «Refresh token».'], links: [{ label: 'Abrir OAuth Playground', url: 'https://developers.google.com/oauthplayground' }], chips: ['youtube.upload', 'youtube.readonly'], fields: ['refreshToken'] },
+    { title: 'Probá la conexión', body: ['Guardá y probá. ACM trae el canal y sus suscriptores.'], test: true },
+  ],
+};
+
+function connectPanel(acc) {
+  const steps = CONNECT_STEPS[acc.network];
+  let a = acc, active = 0, busy = '';
+  const values = {}, shown = new Set();
+  const host = document.createElement('div');
+  host.className = 'cp-host';
+  document.body.append(host);
+  const close = () => { host.remove(); document.removeEventListener('keydown', onKey); render(); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  const fieldDone = (k) => (a.fields[k]?.set || a.fields[k]?.value || values[k]);
+  const stepDone = (i) => steps[i].test ? a.status === 'conectada' : steps[i].fields ? steps[i].fields.filter((k) => k !== 'instagramBusinessId').every(fieldDone) : i < active || a.status === 'conectada';
+  const dirty = () => Object.values(values).some((v) => v !== undefined);
+
+  const draw = () => {
+    const s = steps[active];
+    const banner = busy === 'probar' ? '' : a.status === 'conectada' ? `<p class="banner ok">Conectada como <b>${esc(a.connected_as)}</b>.</p>` : a.status === 'error' && a.last_error ? `<p class="banner err"><b>La última prueba falló.</b> ${esc(a.last_error)}</p>` : '';
+    host.innerHTML = `<div class="cp-scrim" data-cp="close"></div>
+    <aside class="cp" role="dialog" aria-modal="true" aria-label="Conectar @${esc(a.handle)}">
+      <header class="cp-h">${netBadge(a.network)}<div class="t"><h2 class="h2">Conectar @${esc(a.handle)}</h2><p class="small muted">${NETS[a.network].name} · ${KINDS[a.kind] || ''}</p></div><button class="btn sm ghost" data-cp="close">Cerrar</button></header>
+      <div class="cp-body">${banner}
+        <div class="cp-cols">
+          <ol class="cp-steps">${steps.map((st, i) => `<li class="${i === active ? 'on' : ''} ${stepDone(i) && i !== active ? 'done' : ''}"><button data-cp="go" data-i="${i}"><span class="dot">${stepDone(i) && i !== active ? icon('check', 14) : i + 1}</span><span class="st">${esc(st.title)}</span></button></li>`).join('')}</ol>
+          <section class="cp-detail">
+            <p class="small muted">Paso ${active + 1} de ${steps.length}</p>
+            <h3>${esc(s.title)}</h3>
+            <div class="cp-content">
+              ${s.body.map((p) => `<p>${esc(p)}</p>`).join('')}
+              ${s.chips ? `<ul class="cp-chips">${s.chips.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
+              ${s.links ? `<div class="row">${s.links.map((l) => `<a class="btn sm" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)} ↗</a>`).join('')}</div>` : ''}
+              ${(s.fields || []).map((k) => { const f = FIELD_DEF[k], cur = a.fields[k] || {}; return `<label class="field">${esc(f.label)}${f.hint ? ` <span class="hint">(${esc(f.hint)})</span>` : ''}
+                <span class="row"><input class="input ${f.secret && !shown.has(k) ? 'masked' : ''}" data-k="${k}" autocomplete="off" spellcheck="false" value="${esc(values[k] ?? (f.secret ? '' : cur.value || ''))}" placeholder="${f.secret && cur.set ? 'Guardado · pegá uno nuevo para cambiarlo' : ''}">
+                ${f.secret ? `<button type="button" class="btn sm" data-cp="show" data-k="${k}">${shown.has(k) ? 'Ocultar' : 'Mostrar'}</button>` : ''}</span></label>`; }).join('')}
+              ${s.note ? `<p class="cp-note">${esc(s.note)}</p>` : ''}
+              ${s.test ? `<div class="row"><button class="btn primary" data-cp="test" ${busy ? 'disabled' : ''}>${busy === 'probar' ? '<span class="spin"></span> Probando…' : 'Probar conexión'}</button>${a.status === 'conectada' ? `<span class="res-ok">Conectada como ${esc(a.connected_as)} · ${fmt(a.followers)} seguidores</span>` : ''}</div>
+                ${a.status === 'error' && a.last_error ? `<p class="banner err" style="margin:0">${esc(a.last_error)}</p>` : ''}` : ''}
+            </div>
+            <div class="cp-nav"><button class="btn sm" data-cp="go" data-i="${active - 1}" ${active === 0 ? 'disabled' : ''}>Anterior</button><button class="btn sm primary" data-cp="go" data-i="${active + 1}" ${active === steps.length - 1 ? 'disabled' : ''}>Siguiente paso</button></div>
+          </section>
+        </div>
+      </div>
+      <footer class="cp-f"><button class="btn danger" data-cp="disconnect" ${busy || !(a.connected_as || Object.values(a.fields).some((f) => f.set || f.value)) ? 'disabled' : ''}>Desconectar</button><span class="spacer"></span>
+        <button class="btn" data-cp="save" ${busy || !dirty() ? 'disabled' : ''}>${busy === 'guardar' ? 'Guardando…' : 'Guardar'}</button>
+        <button class="btn primary" data-cp="test" ${busy ? 'disabled' : ''}>${busy === 'probar' ? 'Probando…' : 'Probar conexión'}</button></footer>
+    </aside>`;
+  };
+  const payload = () => Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
+  host.addEventListener('input', (e) => {
+    const k = e.target.dataset.k; if (!k) return;
+    values[k] = e.target.value;
+    const save = host.querySelector('[data-cp=save]'); if (save) save.disabled = false;
+  });
+  host.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-cp]'); if (!b || b.disabled) return;
+    const act = b.dataset.cp;
+    if (act === 'close') return close();
+    if (act === 'go') { active = Math.max(0, Math.min(steps.length - 1, Number(b.dataset.i))); return draw(); }
+    if (act === 'show') { const k = b.dataset.k; shown.has(k) ? shown.delete(k) : shown.add(k); return draw(); }
+    try {
+      if (act === 'save') { busy = 'guardar'; draw(); a = await api(`/api/accounts/${a.id}/connection`, { method: 'PUT', body: payload() }); for (const k in values) delete values[k]; toast('Datos guardados'); }
+      if (act === 'test') {
+        busy = 'probar'; active = steps.length - 1; draw();
+        a = await api(`/api/accounts/${a.id}/test`, { method: 'POST', body: payload() });
+        for (const k in values) delete values[k];
+        toast(a.status === 'conectada' ? `Conectada como ${a.connected_as}` : 'La prueba falló', a.status !== 'conectada');
+      }
+      if (act === 'disconnect') {
+        busy = 'x';
+        if (await confirmBox('Desconectar cuenta', 'Se borran los datos de conexión guardados. La cuenta y sus publicaciones quedan.', 'Desconectar')) { a = await api(`/api/accounts/${a.id}/connection`, { method: 'DELETE' }); active = 0; toast('Cuenta desconectada'); }
+      }
+    } catch (err) { fail(err); }
+    busy = ''; draw();
+  });
+  draw();
+}
+
 function distributeDialog(reel) {
   const A = state.accounts.filter((a) => a.status !== 'pausada');
   const start = new Date(); start.setDate(start.getDate() + (start.getHours() >= 18 ? 1 : 0)); start.setHours(19, 0, 0, 0);
@@ -403,16 +541,13 @@ function afterRender(r) {
   const pform = $('#pauta-form');
   if (pform) {
     let timer;
-    const read = () => ({ frequency: Number(pform.querySelector('[name=frequency]').value), match_pct: Number(pform.querySelector('[name=match_pct]').value), cpm: Number(pform.querySelector('[name=cpm]').value), iva: pform.querySelector('[name=iva]').checked ? 1 : 0 });
+    const read = () => ({ budget: Number(pform.querySelector('[name=budget]').value) || 0, start_date: pform.querySelector('[name=start_date]').value, end_date: pform.querySelector('[name=end_date]').value });
     const update = () => {
       const pa = read();
-      $('#v-frequency').textContent = pa.frequency; $('#v-match_pct').textContent = pa.match_pct + ' %'; $('#v-cpm').textContent = 'USD ' + pa.cpm;
-      $$('[data-act=preset]', pform).forEach((b) => b.setAttribute('aria-pressed', Number(b.dataset.f) === pa.frequency));
-      $('#pauta-out').innerHTML = pautaOut(state.project, pa);
-      clearTimeout(timer); timer = setTimeout(() => api(`/api/projects/${state.project.id}/pauta`, { method: 'PUT', body: pa }).then((x) => (state.project.pauta = x)).catch(fail), 400);
+      $('#pauta-out').innerHTML = pautaOut(state.project, pautaCalc(state.project, pa));
+      clearTimeout(timer); timer = setTimeout(() => api(`/api/projects/${state.project.id}/pauta`, { method: 'PUT', body: pa }).then((x) => (state.project.pauta = x)).catch(fail), 500);
     };
     pform.addEventListener('input', update);
-    pform.addEventListener('click', (e) => { const b = e.target.closest('[data-act=preset]'); if (b) { pform.querySelector('[name=frequency]').value = b.dataset.f; update(); } });
   }
 }
 
@@ -434,6 +569,8 @@ document.addEventListener('click', async (e) => {
       case 'new-project': newProjectDialog(); break;
       case 'new-account': accountDialog(); break;
       case 'edit-account': accountDialog(state.accounts.find((a) => a.id === id)); break;
+      case 'connect-account': connectPanel(state.accounts.find((a) => a.id === id)); break;
+      case 'pause-account': { const a = state.accounts.find((x) => x.id === id); await api(`/api/accounts/${id}`, { method: 'PUT', body: { status: a.status === 'pausada' ? 'activa' : 'pausada' } }); toast(a.status === 'pausada' ? 'Cuenta reanudada' : 'Cuenta pausada: no recibe publicaciones nuevas'); render(); break; }
       case 'del-account': if (await confirmBox('Borrar cuenta', 'Se quitan también sus publicaciones programadas.')) { await api(`/api/accounts/${id}`, { method: 'DELETE' }); render(); } break;
       case 'del-reel': if (await confirmBox('Borrar reel', 'Se borra el video y sus publicaciones programadas.')) { await api(`/api/reels/${id}`, { method: 'DELETE' }); render(); } break;
       case 'reel-approve': { const r = state.reels.find((x) => x.id === id); await api(`/api/reels/${id}`, { method: 'PUT', body: { status: r.status === 'aprobado' ? 'borrador' : 'aprobado' } }); render(); break; }
@@ -448,7 +585,6 @@ document.addEventListener('change', async (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const id = Number(el.closest('[data-id]')?.dataset.id);
   try {
-    if (el.dataset.act === 'acc-status') { await api(`/api/accounts/${id}`, { method: 'PUT', body: { status: el.value } }); toast('Estado actualizado'); }
     if (el.dataset.act === 'post-status') { await api(`/api/posts/${id}`, { method: 'PUT', body: { status: el.value } }); toast('Publicación actualizada'); render(); }
     if (el.dataset.act === 'reel-title' && el.value.trim()) { await api(`/api/reels/${id}`, { method: 'PUT', body: { title: el.value.trim() } }); toast('Título guardado'); }
   } catch (err) { fail(err); }

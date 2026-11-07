@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA = path.resolve(process.env.ACM_DATA || './data');
@@ -13,6 +14,7 @@ const PROD = process.env.NODE_ENV === 'production';
 const PASSWORD = process.env.ACM_PASSWORD || (PROD ? '' : 'admin');
 if (!PASSWORD) { console.error('Falta ACM_PASSWORD'); process.exit(1); }
 const SECRET = process.env.ACM_SECRET || crypto.createHash('sha256').update('acm:' + PASSWORD).digest('hex');
+const vault = makeVault(SECRET);
 
 fs.mkdirSync(UPLOADS, { recursive: true });
 
@@ -45,6 +47,13 @@ CREATE TABLE IF NOT EXISTS pauta (
   start_date TEXT DEFAULT '', networks TEXT DEFAULT 'meta');
 `);
 
+// columnas agregadas después de la primera versión
+const cols = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+if (!cols('pauta').includes('budget')) db.exec('ALTER TABLE pauta ADD COLUMN budget REAL DEFAULT 0');
+if (!cols('pauta').includes('end_date')) db.exec("ALTER TABLE pauta ADD COLUMN end_date TEXT DEFAULT ''");
+for (const [c, def] of [['creds', "TEXT DEFAULT ''"], ['connected_as', "TEXT DEFAULT ''"], ['last_error', "TEXT DEFAULT ''"], ['last_checked_at', "TEXT DEFAULT ''"]])
+  if (!cols('accounts').includes(c)) db.exec(`ALTER TABLE accounts ADD COLUMN ${c} ${def}`);
+
 const all = (sql, ...p) => db.prepare(sql).all(...p);
 const get = (sql, ...p) => db.prepare(sql).get(...p);
 const run = (sql, ...p) => db.prepare(sql).run(...p);
@@ -73,21 +82,28 @@ app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next
 app.set('trust proxy', 1);
 const attempts = new Map();
 const total = { n: 0, t: Date.now() };
-app.post('/api/login', async (req, res) => {
+// Los intentos se atienden de a uno (en fila), así la demora limita cuántos por segundo entran aunque vengan de muchas IPs.
+let loginQueue = Promise.resolve();
+app.post('/api/login', (req, res) => {
+  loginQueue = loginQueue.then(() => login(req, res)).catch(() => {});
+});
+async function login(req, res) {
   const now = Date.now();
   if (now - total.t > 15 * 60e3) { total.n = 0; total.t = now; attempts.clear(); }
   const ip = req.ip;
   const a = attempts.get(ip) || { n: 0 };
   if (a.n >= 10) return res.status(429).json({ error: 'Demasiados intentos. Probá en 15 minutos.' });
-  // El contador global no bloquea (no puede dejar afuera al dueño): solo frena cada intento cuando hay muchos fallos.
-  if (total.n > 20) await new Promise((r) => setTimeout(r, Math.min(5000, (total.n - 20) * 250)));
+  // se cuenta el intento antes de esperar; si la contraseña es correcta se descuenta
+  a.n++; total.n++; attempts.set(ip, a);
+  // el contador global no bloquea (no puede dejar afuera al dueño): solo frena, y como van en fila, frena a todos
+  await new Promise((r) => setTimeout(r, total.n > 20 ? Math.min(5000, (total.n - 20) * 250) : 300));
   const given = Buffer.from(String(req.body?.password || ''));
   const want = Buffer.from(PASSWORD);
-  if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) { a.n++; total.n++; attempts.set(ip, a); return res.status(401).json({ error: 'Contraseña incorrecta' }); }
-  attempts.delete(ip);
+  if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return res.status(401).json({ error: 'Contraseña incorrecta' });
+  attempts.delete(ip); total.n = Math.max(0, total.n - 1);
   res.set('Set-Cookie', `acm=${makeToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}${PROD ? '; Secure' : ''}`);
   res.json({ ok: true });
-});
+}
 app.post('/api/logout', (req, res) => { res.set('Set-Cookie', 'acm=; Path=/; HttpOnly; Max-Age=0'); res.json({ ok: true }); });
 app.get('/api/session', (req, res) => res.json({ ok: authed(req) }));
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -112,7 +128,13 @@ function update(table, id, data) {
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
 const P_FIELDS = ['name', 'role', 'org', 'election_date', 'padron', 'color', 'notes'];
-const A_FIELDS = ['network', 'handle', 'kind', 'status', 'followers', 'posts_per_day', 'notes'];
+const A_FIELDS = ['network', 'handle', 'kind', 'followers', 'posts_per_day', 'notes'];
+// la cuenta que ve la pantalla: sin los datos cifrados, con qué campos de conexión hay cargados
+function accountOut(a) {
+  if (!a) return a;
+  const { creds, ...rest } = a;
+  return { ...rest, fields: publicFields(a.network, vault.open(creds)) };
+}
 const NETWORKS = ['instagram', 'facebook', 'tiktok', 'youtube'];
 
 function projectSummary(p) {
@@ -134,7 +156,7 @@ app.post('/api/projects', upload.single('photo'), (req, res) => {
   const b = req.body || {};
   if (!String(b.name || '').trim()) return res.status(400).json({ error: 'Falta el nombre' });
   const r = run('INSERT INTO projects (name, role, org, election_date, padron, color, notes, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    b.name.trim(), b.role || '', b.org || '', b.election_date || '', Number(b.padron) || 0, b.color || '#3842f3', b.notes || '', req.file?.filename || '');
+    b.name.trim(), b.role || '', b.org || '', b.election_date || '', Number(b.padron) || 0, b.color || '#ff5a1f', b.notes || '', req.file?.filename || '');
   run('INSERT INTO pauta (project_id) VALUES (?)', r.lastInsertRowid);
   res.json(projectSummary(get('SELECT * FROM projects WHERE id = ?', r.lastInsertRowid)));
 });
@@ -162,19 +184,53 @@ app.delete('/api/projects/:id', (req, res) => {
 });
 
 // cuentas
-app.get('/api/projects/:id/accounts', (req, res) => res.json(all('SELECT * FROM accounts WHERE project_id = ? ORDER BY network, created_at', req.params.id)));
+app.get('/api/projects/:id/accounts', (req, res) => res.json(all('SELECT * FROM accounts WHERE project_id = ? ORDER BY network, created_at', req.params.id).map(accountOut)));
 app.post('/api/projects/:id/accounts', (req, res) => {
   const b = pick(req.body || {}, A_FIELDS);
   if (!NETWORKS.includes(b.network) || !String(b.handle || '').trim()) return res.status(400).json({ error: 'Falta la red o el usuario' });
   const r = run('INSERT INTO accounts (project_id, network, handle, kind, status, followers, posts_per_day, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    req.params.id, b.network, b.handle.trim().replace(/^@/, ''), b.kind || 'apoyo', b.status || 'pendiente', Number(b.followers) || 0, Number(b.posts_per_day) || 3, b.notes || '');
-  res.json(get('SELECT * FROM accounts WHERE id = ?', r.lastInsertRowid));
+    req.params.id, b.network, b.handle.trim().replace(/^@/, ''), b.kind || 'apoyo', 'pendiente', Number(b.followers) || 0, Number(b.posts_per_day) || 3, b.notes || '');
+  res.json(accountOut(get('SELECT * FROM accounts WHERE id = ?', r.lastInsertRowid)));
 });
 app.put('/api/accounts/:id', (req, res) => {
   const data = pick(req.body || {}, A_FIELDS);
+  delete data.network; // la red no cambia: sus datos de conexión son de esa red
   if (data.handle) data.handle = String(data.handle).trim().replace(/^@/, '');
-  update('accounts', req.params.id, data);
-  res.json(get('SELECT * FROM accounts WHERE id = ?', req.params.id));
+  // pausar y reanudar es lo único del estado que se toca a mano; "conectada" sale de probar la conexión
+  const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
+  if (!a) return res.status(404).json({ error: 'No existe' });
+  if (req.body?.status === 'pausada') data.status = 'pausada';
+  if (req.body?.status === 'activa' && a.status === 'pausada') data.status = a.connected_as ? 'conectada' : 'pendiente';
+  update('accounts', a.id, data);
+  res.json(accountOut(get('SELECT * FROM accounts WHERE id = ?', a.id)));
+});
+app.put('/api/accounts/:id/connection', (req, res) => {
+  const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
+  if (!a) return res.status(404).json({ error: 'No existe' });
+  const creds = mergeFields(a.network, vault.open(a.creds), req.body || {});
+  run('UPDATE accounts SET creds = ? WHERE id = ?', vault.seal(creds), a.id);
+  res.json(accountOut(get('SELECT * FROM accounts WHERE id = ?', a.id)));
+});
+app.post('/api/accounts/:id/test', async (req, res) => {
+  const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
+  if (!a) return res.status(404).json({ error: 'No existe' });
+  let creds = mergeFields(a.network, vault.open(a.creds), req.body || {});
+  const now = new Date().toISOString();
+  try {
+    const r = await testConnection(a.network, creds);
+    if (r.extra) creds = { ...creds, ...r.extra };
+    run(`UPDATE accounts SET creds = ?, connected_as = ?, followers = ?, last_error = '', last_checked_at = ?,
+         status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'conectada' END WHERE id = ?`,
+      vault.seal(creds), r.connectedAs || '', r.followers || a.followers, now, a.id);
+  } catch (e) {
+    run(`UPDATE accounts SET creds = ?, last_error = ?, last_checked_at = ?, status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'error' END WHERE id = ?`,
+      vault.seal(creds), e.message, now, a.id);
+  }
+  res.json(accountOut(get('SELECT * FROM accounts WHERE id = ?', a.id)));
+});
+app.delete('/api/accounts/:id/connection', (req, res) => {
+  run("UPDATE accounts SET creds = '', connected_as = '', last_error = '', status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'pendiente' END WHERE id = ?", req.params.id);
+  res.json(accountOut(get('SELECT * FROM accounts WHERE id = ?', req.params.id)));
 });
 app.delete('/api/accounts/:id', (req, res) => { run('DELETE FROM accounts WHERE id = ?', req.params.id); res.json({ ok: true }); });
 
@@ -225,7 +281,8 @@ app.delete('/api/posts/:id', (req, res) => { run('DELETE FROM posts WHERE id = ?
 
 // pauta
 app.put('/api/projects/:id/pauta', (req, res) => {
-  const d = pick(req.body || {}, ['match_pct', 'frequency', 'cpm', 'iva', 'start_date', 'networks']);
+  const d = pick(req.body || {}, ['budget', 'start_date', 'end_date']);
+  if ('budget' in d) d.budget = Math.max(0, Number(d.budget) || 0);
   if (!get('SELECT 1 FROM pauta WHERE project_id = ?', req.params.id)) run('INSERT INTO pauta (project_id) VALUES (?)', req.params.id);
   const keys = Object.keys(d);
   if (keys.length) run(`UPDATE pauta SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE project_id = ?`, ...keys.map((k) => d[k]), req.params.id);
