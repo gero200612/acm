@@ -219,14 +219,12 @@ function labCorridas() {
     <section class="card lab-list">
       <div class="card-head"><div class="seg">${kinds.map(([k, l]) => `<button data-act="lab-kind" data-k="${k}" aria-pressed="${L.kind === k}">${l}</button>`).join('')}</div>
         <span class="small muted">${R.length} corridas · ${R.filter((r) => r.status === 'error').length} con error</span></div>
-      <div class="table-wrap"><table class="list lab-t"><thead><tr><th>Cuándo</th><th>Qué</th><th>Proyecto</th><th>Estado</th><th class="r">Duró</th><th>Resultado</th></tr></thead><tbody>
+      <div class="table-wrap"><table class="list lab-t"><thead><tr><th>Cuándo</th><th>Qué</th><th>Estado</th><th class="r">Duró</th></tr></thead><tbody>
         ${R.map((r) => `<tr data-act="lab-open" data-rid="${r.id}" class="${L.sel === r.id ? 'sel' : ''}">
           <td class="nowrap small">${when(r.started_at)}</td>
-          <td><div class="handle" style="font-weight:500">${r.network && NETS[r.network] ? netBadge(r.network) : `<span class="net" style="background:var(--navy)">${icon('flask', 14)}</span>`}<div>${esc(r.title || RUN_KIND[r.kind])}<small>${RUN_KIND[r.kind] || r.kind} · ${r.steps} ${r.steps === 1 ? 'paso' : 'pasos'}</small></div></div></td>
-          <td class="small">${r.project ? `<span class="pdot" style="background:${esc(r.color)}"></span>${esc(r.project)}` : '—'}</td>
+          <td><div class="handle" style="font-weight:500">${r.network && NETS[r.network] ? netBadge(r.network) : `<span class="net" style="background:var(--navy)">${icon('flask', 14)}</span>`}<div class="lab-what">${esc(r.title || RUN_KIND[r.kind])}<small>${RUN_KIND[r.kind] || r.kind} · ${r.steps} ${r.steps === 1 ? 'paso' : 'pasos'}${r.project ? ` · <span class="pdot" style="background:${esc(r.color)}"></span>${esc(r.project)}` : ''}</small>${r.error || r.summary ? `<small class="${r.status === 'error' ? 'lab-err' : ''}">${esc(r.error || r.summary)}</small>` : ''}</div></div></td>
           <td><span class="chip s-run-${r.status}">${RUN_ST[r.status] || r.status}</span></td>
-          <td class="r num small">${ms(r.ms)}</td>
-          <td class="small lab-sum">${esc(r.error || r.summary || '')}</td></tr>`).join('') || `<tr><td colspan="6" class="muted small" style="padding:30px;text-align:center">Todavía no hay corridas. Aparecen cuando ACM publica, prueba una conexión o usa Meta Ads.</td></tr>`}
+          <td class="r num small">${ms(r.ms)}</td></tr>`).join('') || `<tr><td colspan="4" class="muted small" style="padding:30px;text-align:center">Todavía no hay corridas. Aparecen cuando ACM publica, prueba una conexión o usa Meta Ads.</td></tr>`}
       </tbody></table></div>
     </section>
     <section class="card lab-trace">${traceView(L.detail)}</section>

@@ -642,3 +642,14 @@ dialog.wide { width: min(640px, calc(100vw - 32px)); }
 .lab-sum { max-width: 220px; }
 .lab.bk { align-items: stretch; }
 .lab.bk .lab-hist { position: static; }
+
+.lab:not(.bk) { align-items: stretch; }
+.lab-list, .lab:not(.bk) .lab-trace { min-height: calc(100vh - 210px); }
+.lab-t .handle > div.lab-what { white-space: normal; min-width: 0; }
+.lab-what small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
+.lab-what .lab-err { color: var(--red); }
+.tr-h .small { white-space: nowrap; }
+.lab-t { table-layout: fixed; }
+.lab-t th:nth-child(1) { width: 120px; } .lab-t th:nth-child(3) { width: 96px; } .lab-t th:nth-child(4) { width: 70px; }
+.lab-t .handle { min-width: 0; } .lab-t .handle > div.lab-what { overflow: hidden; }
+.lab-what small { max-width: 100%; }
