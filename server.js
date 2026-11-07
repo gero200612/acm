@@ -104,7 +104,8 @@ const app = express();
 app.disable('x-powered-by');
 // la investigación se importa en un solo JSON grande (fichas + publicaciones de las cuentas)
 const jsonSmall = express.json({ limit: '1mb' }), jsonBig = express.json({ limit: '25mb' });
-app.use((req, res, next) => (/\/knowledge\/import$/.test(req.path) ? jsonBig : jsonSmall)(req, res, next));
+// la ruta de importar no pasa por acá: su cuerpo se lee recién después de comprobar la sesión (ver la ruta)
+app.use((req, res, next) => (/\/knowledge\/import$/.test(req.path) ? next() : jsonSmall(req, res, next)));
 app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next(); });
 
 // Delante hay un solo proxy (Traefik de Coolify): req.ip toma la IP que agrega él, no la que mande el cliente.
@@ -469,7 +470,7 @@ app.get('/api/projects/:id/knowledge', async (req, res) => {
   const r = await search(Number(req.params.id), req.query.q, { kind: String(req.query.kind || ''), handle: String(req.query.handle || ''), limit: Math.min(200, Number(req.query.limit) || 40) });
   res.json({ ...r, ...stats(Number(req.params.id)), kindNames: KINDS });
 });
-app.post('/api/projects/:id/knowledge/import', async (req, res) => {
+app.post('/api/projects/:id/knowledge/import', requireAuth, jsonBig, async (req, res) => {
   if (!need(req, res)) return;
   const b = req.body || {};
   const items = Array.isArray(b) ? b : Array.isArray(b.items) ? b.items : [];
