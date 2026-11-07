@@ -13,6 +13,7 @@
     "dev": "ACM_PASSWORD=admin node --watch server.js"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "multer": "^2.0.2"

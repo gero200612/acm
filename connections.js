@@ -120,7 +120,7 @@ export async function testConnection(network, creds) {
   catch (e) {
     // las redes a veces repiten el token en el error: nunca se muestra
     let msg = e.message || 'Algo falló.';
-    for (const [k, secret] of Object.entries(FIELDS[network])) if (secret && creds[k]) msg = msg.split(creds[k]).join('••••');
+    for (const [k, secret] of Object.entries(FIELDS[network])) if (secret && String(creds[k] || "").length > 6) msg = msg.split(creds[k]).join('••••');
     msg = msg.replace(/\bEAA[A-Za-z0-9_-]{4,}/g, '••••').replace(/\bact\.[A-Za-z0-9_.-]{8,}/g, '••••');
     throw new Error(msg);
   }

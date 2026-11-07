@@ -10,6 +10,7 @@ import { uploadAudience, createCampaign, testAds } from './ads.js';
 import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers } from './rules.js';
+import { embed } from './knowledge.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (cond, what) => { if (!cond) throw new Error(what); };
@@ -62,6 +63,13 @@ function cases(video) {
     ['Pauta', 'USD 3.000 en 33 días sobre el padrón de 65.000', async () => {
       const n = pautaNumbers({ budget: 3000, from: '2026-11-08', to: '2026-12-10', padron: 65000, contacts: 59584 });
       eq(n.days, 33, 'días'); eq(n.people, 35750, 'socios alcanzados'); eq(Math.round(n.freq), 12, 'veces por socio');
+    }],
+    ['Investigación', 'El modelo de vectores está y busca por significado', async () => {
+      const docs = ['Gaudio promete el sponsor más grande de la historia del club', 'La FIFA inhibió al club por la deuda con Bragantino', 'Nakis es prosecretario de la AFA y cercano a Tapia'];
+      const [q] = await embed(['quién tiene relación con la AFA'], 'query');
+      const D = await embed(docs);
+      const s = D.map((v) => v.reduce((a, x, i) => a + x * q[i], 0));
+      eq(s.indexOf(Math.max(...s)), 2, 'la ficha más parecida');
     }],
     ['Meta Ads', 'Sube el padrón como público en tandas', async () => {
       const rows = Array.from({ length: 25000 }, (_, i) => ({ em: 'e' + i, ph: '' }));

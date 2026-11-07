@@ -272,12 +272,12 @@ function projectHead(p) {
   return `<div class="who">${avatar(p, true)}<div style="min-width:0"><h1 class="page-title">${esc(p.name)}</h1><p class="lead">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Proyecto')}</p></div></div>
   <div class="row">${countdown(p)}${p.padron ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
 }
-const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['ajustes', 'Ajustes']];
+const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']];
 function projectView(tab) {
   const p = state.project;
   const counts = { cuentas: state.accounts.length, reels: state.reels.length, calendario: state.posts.filter((x) => x.status === 'programado').length };
   const tabs = `<nav class="tabs">${TABS.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${tab === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
-  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, pauta: pautaView, ajustes: ajustesView };
+  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, pauta: pautaView, investigacion: investigacionView, ajustes: ajustesView };
   return tabs + (views[tab] || resumenView)();
 }
 
@@ -578,6 +578,65 @@ function pautaTabla(p, c) {
   <p class="small muted" style="margin-top:12px">Es solo la plata que cobra Meta por mostrar los videos; la plataforma va aparte. TikTok no acepta propaganda política paga. Meta exige verificar al anunciante y mostrar quién paga.</p>`;
 }
 
+// ---------- investigación (fichas con búsqueda por significado) ----------
+const K = { q: '', kind: '', handle: '', data: null, pid: null };
+const CONF = { alta: 'Confianza alta', media: 'Confianza media', baja: 'Sin confirmar' };
+function investigacionView() {
+  return `<div class="kn">
+    <form class="card kn-search" id="kn-form">
+      <div class="kn-row"><input class="input" name="q" placeholder="Preguntá algo: ¿quién está cerca de la AFA? ¿qué propone cada uno sobre la deuda? ¿qué le funciona a Gaudio?" value="${esc(K.q)}" autocomplete="off">
+      <button class="btn primary" type="submit">Buscar</button></div>
+      <div class="kn-chips" id="kn-chips"></div>
+    </form>
+    <div class="kn-grid"><section id="kn-list" class="kn-list"><div class="card muted small">Cargando…</div></section>
+    <aside class="kn-side" id="kn-side"></aside></div>
+  </div>`;
+}
+async function knLoad() {
+  const pid = state.project.id;
+  if (K.pid !== pid) Object.assign(K, { q: '', kind: '', handle: '', pid });
+  const qs = new URLSearchParams({ q: K.q, kind: K.kind, handle: K.handle, limit: '60' });
+  const seq = (K.seq = (K.seq || 0) + 1); // solo pinta la última respuesta si se cruzan dos búsquedas
+  const meta = $('.kn-meta'); if (meta) meta.textContent = 'Buscando…';
+  let d; try { d = await api(`/api/projects/${pid}/knowledge?${qs}`); } catch (e) { return fail(e); }
+  if (seq !== K.seq) return;
+  K.data = d; knDraw();
+}
+function knDraw() {
+  const D = K.data, list = $('#kn-list'); if (!D || !list) return;
+  const names = D.kindNames || {};
+  const total = D.kinds.reduce((s, k) => s + k.n, 0);
+  $('#kn-chips').innerHTML = `<button type="button" data-act="kn-kind" data-k="" aria-pressed="${!K.kind}">Todo <b>${fmt(total)}</b></button>` +
+    D.kinds.sort((a, b) => b.n - a.n).map((k) => `<button type="button" data-act="kn-kind" data-k="${esc(k.kind)}" aria-pressed="${K.kind === k.kind}">${esc(names[k.kind] || k.kind)} <b>${fmt(k.n)}</b></button>`).join('') +
+    (K.handle ? `<button type="button" data-act="kn-handle" data-h="" aria-pressed="true">@${esc(K.handle)} ✕</button>` : '');
+  const mode = D.mode === 'significado' ? 'ordenado por significado' : D.mode === 'palabras' ? 'por palabras (el modelo todavía no cargó)' : 'lo más reciente';
+  list.innerHTML = !total ? `<div class="card empty"><h2 class="h2">Sin investigación todavía</h2><p>Importá un JSON con fichas (tipo, titulo, texto, fuente) o cuentas de Instagram.</p></div>`
+    : `<p class="small muted kn-meta">${fmt(D.items.length)} resultados · ${mode}${D.pending ? ` · ${fmt(D.pending)} fichas calculando su vector` : ''}</p>` +
+    (D.items.length ? D.items.map(knCard).join('') : '<div class="card muted">Nada parecido. Probá con otras palabras.</div>');
+  const A = D.accounts || [];
+  $('#kn-side').innerHTML = `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa.</p>
+    <div class="kn-acc">${A.map((a) => `<button data-act="kn-handle" data-h="${esc(a.handle)}" class="${K.handle === a.handle ? 'sel' : ''}"><b>@${esc(a.handle)}</b><span>${fmt(a.followers)} seg. · ${fmt(a.posts)} publ.</span><span>${fmt(a.avg_eng)} interacciones prom. · ${a.followers ? fmt(a.avg_eng / a.followers * 100, 1) : 0} %</span></button>`).join('') || '<p class="small muted">Ninguna todavía.</p>'}</div></div>
+    <div class="card"><h2 class="h2">Importar</h2><p class="small muted">JSON con <code>items</code> (fichas) y/o <code>instagram</code> (cuentas con sus publicaciones).</p>
+    <label class="btn">${icon('up')} Elegir archivo<input type="file" id="kn-file" accept=".json,application/json" hidden></label>
+    <p class="small muted" style="margin-top:10px">Búsqueda: ${D.model.ready ? 'modelo listo' : D.model.present ? 'el modelo carga con la primera búsqueda' : 'sin modelo, solo por palabras'} (${esc(D.model.model)})</p></div>`;
+  $('#kn-file').addEventListener('change', knImport);
+}
+function knCard(x) {
+  const d = x.data || {};
+  return `<article class="card kn-card">
+    <div class="kn-top"><span class="chip kn-k-${esc(x.kind)}">${esc((K.data.kindNames || {})[x.kind] || x.kind)}</span>${x.confidence ? `<span class="chip conf-${esc(x.confidence)}">${CONF[x.confidence] || esc(x.confidence)}</span>` : ''}${x.date ? `<span class="small muted">${esc(x.date)}</span>` : ''}<span class="spacer"></span>${x.score != null ? `<span class="small muted" title="Parecido con lo que buscaste">${Math.round(Math.min(1, x.score) * 100)} %</span>` : ''}<button class="icon-btn" data-act="kn-del" data-id="${x.id}" title="Borrar ficha">${icon('trash', 16)}</button></div>
+    <h3>${esc(x.title)}</h3>
+    <p class="kn-text">${esc(x.text)}</p>
+    ${x.kind === 'publicacion' ? `<p class="small muted">${fmt(d.likes)} me gusta · ${fmt(d.comments)} comentarios · ${fmt((d.rate || 0) * 100, 1)} % de sus seguidores</p>` : ''}
+    ${x.source ? (/^https?:/.test(x.source) ? `<a class="small" href="${esc(x.source)}" target="_blank" rel="noopener noreferrer">${esc(x.source.replace(/^https?:\/\/(www\.)?/, '').slice(0, 70))} ↗</a>` : `<span class="small muted">${esc(x.source)}</span>`) : ''}
+  </article>`;
+}
+async function knImport(e) {
+  const f = e.target.files[0]; if (!f) return;
+  let body; try { body = JSON.parse(await f.text()); } catch { return toast('El archivo no es un JSON válido', true); }
+  try { const r = await api(`/api/projects/${state.project.id}/knowledge/import`, { method: 'POST', body }); toast(`Se sumaron ${r.added} fichas y ${r.posts} publicaciones`); knLoad(); } catch (err) { fail(err); }
+}
+
 function ajustesView() {
   const p = state.project;
   return `<div class="grid g2" style="align-items:start">
@@ -807,6 +866,10 @@ function uploadReels(files) {
 
 // ---------- eventos ----------
 function afterRender(r) {
+  if (r.view === 'project' && r.tab === 'investigacion') {
+    knLoad();
+    $('#kn-form').addEventListener('submit', (e) => { e.preventDefault(); K.q = e.target.q.value.trim(); knLoad(); });
+  }
   const drop = $('#drop');
   if (drop) {
     $('#reel-input').addEventListener('change', (e) => uploadReels(e.target.files));
@@ -872,6 +935,9 @@ document.addEventListener('click', async (e) => {
         state.calMonth = act === 'cal-today' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : new Date(m.getFullYear(), m.getMonth() + (act === 'cal-next' ? 1 : -1), 1);
         render(); break; }
       case 'open-post': postDialog([Number(el.dataset.pid)]); break;
+      case 'kn-kind': K.kind = el.dataset.k; knLoad(); break;
+      case 'kn-handle': K.handle = K.handle === el.dataset.h ? '' : el.dataset.h; K.kind = K.handle ? 'publicacion' : ''; knLoad(); break;
+      case 'kn-del': if (await confirmBox('Borrar ficha', 'La ficha se borra de la investigación del proyecto.', 'Borrar')) { await api(`/api/knowledge/${el.dataset.id}`, { method: 'DELETE' }); knLoad(); } break;
       case 'ads-save': {
         const box = $('#ads-card'), body = {};
         $$('[data-ads]', box).forEach((i) => { const k = i.dataset.ads; if (i.type === 'checkbox') body[k] = i.checked; else if (i.value || k !== 'accessToken') body[k] = i.value; });

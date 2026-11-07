@@ -13,6 +13,7 @@ import { runBanco } from './banco.js';
 import { probe, review } from './mp4probe.js';
 import { postBlocked, pautaNumbers } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
+import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA = path.resolve(process.env.ACM_DATA || './data');
@@ -74,6 +75,7 @@ for (const [c, def] of [['ads_creds', "TEXT DEFAULT ''"], ['ads_name', "TEXT DEF
 for (const [c, def] of [['duration', 'REAL'], ['width', 'INTEGER'], ['height', 'INTEGER']])
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
 initTrace(db);
+initKnowledge(db);
 db.exec('CREATE TABLE IF NOT EXISTS padron (project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, em TEXT, ph TEXT)');
 db.exec('CREATE INDEX IF NOT EXISTS padron_project ON padron(project_id)');
 for (const [c, def] of [['creds', "TEXT DEFAULT ''"], ['connected_as', "TEXT DEFAULT ''"], ['last_error', "TEXT DEFAULT ''"], ['last_checked_at', "TEXT DEFAULT ''"]])
@@ -100,7 +102,9 @@ function requireAuth(req, res, next) { if (authed(req)) return next(); res.statu
 // ---------- app ----------
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '1mb' }));
+// la investigación se importa en un solo JSON grande (fichas + publicaciones de las cuentas)
+const jsonSmall = express.json({ limit: '1mb' }), jsonBig = express.json({ limit: '25mb' });
+app.use((req, res, next) => (/\/knowledge\/import$/.test(req.path) ? jsonBig : jsonSmall)(req, res, next));
 app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next(); });
 
 // Delante hay un solo proxy (Traefik de Coolify): req.ip toma la IP que agrega él, no la que mande el cliente.
@@ -458,6 +462,34 @@ app.get('/api/lab/reels', (req, res) => {
   res.json(R);
 });
 
+// investigación del proyecto (fichas con búsqueda por significado)
+const need = (req, res) => { const p = projectRow(req.params.id); if (!p) res.status(404).json({ error: 'No existe' }); return p; };
+app.get('/api/projects/:id/knowledge', async (req, res) => {
+  if (!need(req, res)) return;
+  const r = await search(Number(req.params.id), req.query.q, { kind: String(req.query.kind || ''), handle: String(req.query.handle || ''), limit: Math.min(200, Number(req.query.limit) || 40) });
+  res.json({ ...r, ...stats(Number(req.params.id)), kindNames: KINDS });
+});
+app.post('/api/projects/:id/knowledge/import', async (req, res) => {
+  if (!need(req, res)) return;
+  const b = req.body || {};
+  const items = Array.isArray(b) ? b : Array.isArray(b.items) ? b.items : [];
+  const ig = Array.isArray(b.instagram) ? b.instagram : b.username && Array.isArray(b.posts) ? [b] : [];
+  if (b.replace) run("DELETE FROM knowledge WHERE project_id = ? AND kind != 'publicacion'", req.params.id);
+  const added = addItems(Number(req.params.id), items);
+  let posts = 0; for (const d of ig) posts += addInstagram(Number(req.params.id), d);
+  if (!added && !posts) return res.status(400).json({ error: 'No vino ninguna ficha: el JSON tiene que traer items (tipo, titulo, texto) o instagram (cuentas con posts).' });
+  fillVectors(); // en segundo plano
+  res.json({ ok: true, added, posts });
+});
+app.post('/api/projects/:id/knowledge', (req, res) => {
+  if (!need(req, res)) return;
+  const n = addItems(Number(req.params.id), [req.body || {}]);
+  if (!n) return res.status(400).json({ error: 'Falta el título o el texto' });
+  fillVectors();
+  res.json({ ok: true });
+});
+app.delete('/api/knowledge/:id', (req, res) => { run('DELETE FROM knowledge WHERE id = ?', req.params.id); res.json({ ok: true }); });
+
 // pauta
 app.put('/api/projects/:id/pauta', (req, res) => {
   const d = pick(req.body || {}, ['budget', 'start_date', 'end_date']);
@@ -508,4 +540,5 @@ async function tick() {
 }
 if (process.env.ACM_SCHEDULER !== 'off') { setInterval(tick, 30000); setTimeout(tick, 3000); }
 
+setTimeout(fillVectors, 5000);
 app.listen(PORT, () => console.log(`ACM en http://localhost:${PORT} (datos en ${DATA})`));
