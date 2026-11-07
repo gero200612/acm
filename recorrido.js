@@ -2,6 +2,7 @@
 // contraseña al azar) y la usa por HTTP como lo haría una persona: login, proyecto, padrón, cuentas, reels, publicación,
 // Meta Ads, trazas e investigación. Nunca toca la base real ni las redes reales; al terminar la copia se borra.
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,9 +28,13 @@ export function fakeMp4(width, height, seconds) {
 export async function startSandbox(bases) {
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'acm-recorrido-'));
   const password = crypto.randomBytes(12).toString('hex');
+  // puerto libre elegido antes: la vuelta de «conectar con un clic» necesita la dirección pública de la copia
+  const free = await new Promise((r) => { const sv = net.createServer().listen(0, '127.0.0.1', () => { const p = sv.address().port; sv.close(() => r(p)); }); });
   const child = spawn(process.execPath, ['server.js'], {
     cwd: APP, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PORT: '0', ACM_DATA: data, ACM_PASSWORD: password, ACM_SECRET: crypto.randomBytes(32).toString('hex'), ACM_TICK_MS: '1000', ACM_FILL_MS: '50', ACM_SCHEDULER: 'on',
+    env: { ...process.env, PORT: String(free), ACM_PUBLIC_URL: `http://127.0.0.1:${free}`, ACM_DATA: data, NODE_ENV: 'test',
+      ACM_TIKTOK_CLIENT_KEY: 'tt-app', ACM_TIKTOK_CLIENT_SECRET: 'tt-secret', ACM_GOOGLE_CLIENT_ID: 'g-app', ACM_GOOGLE_CLIENT_SECRET: 'g-secret',
+      ACM_TIKTOK_AUTH_URL: bases.tiktokAuth, ACM_GOOGLE_AUTH_URL: bases.googleAuth, ACM_PASSWORD: password, ACM_SECRET: crypto.randomBytes(32).toString('hex'), ACM_TICK_MS: '1000', ACM_FILL_MS: '50', ACM_SCHEDULER: 'on',
       ACM_GRAPH_URL: bases.graph, ACM_RUPLOAD_URL: bases.rupload, ACM_TIKTOK_URL: bases.tiktok, ACM_GOOGLE_OAUTH_URL: bases.googleOauth, ACM_YOUTUBE_URL: bases.youtube, ACM_YT_UPLOAD_URL: bases.ytUpload },
   });
   let log = '';
@@ -51,8 +56,9 @@ export async function startSandbox(bases) {
     let j = null; try { j = await r.json(); } catch {}
     return { status: r.status, j };
   });
+  const raw = (url, withCookie = true) => als.exit(() => fetch(url.startsWith('http') ? url : base + url, { redirect: 'manual', headers: withCookie ? { cookie } : {}, signal: AbortSignal.timeout(20000) }));
   const stop = async () => { child.kill(); await sleep(300); fs.rmSync(data, { recursive: true, force: true }); };
-  return { api, password, stop, base };
+  return { api, raw, password, stop, base };
 }
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -184,6 +190,53 @@ export function recorridoCases(sb) {
       await api('POST', `/api/projects/${c.p}/knowledge/import`, { instagram: [{ username: 'cuenta.prueba', followers_count: 1200, posts: [{ caption: 'otra', like_count: 5, timestamp: '2026-11-01T10:00:00Z' }] }] });
       const h = (await api('GET', `/api/projects/${c.p}/knowledge?handle=cuenta.prueba`)).j;
       eq(h.items.map((x) => x.text), ['otra'], 'publicaciones de la cuenta');
+    }],
+    [G('conectar con un clic'), 'TikTok: autoriza, vuelve y queda conectada', async () => {
+      const o = (await api('GET', '/api/oauth')).j;
+      eq([o.tiktok, o.youtube], [true, true], 'apps cargadas');
+      const a = (await api('POST', `/api/projects/${c.p}/accounts`, { network: 'tiktok' })).j; c.ttq = a.id;
+      const url = (await api('POST', `/api/accounts/${a.id}/oauth`)).j?.url;
+      yes(/\/v2\/auth\/authorize\/\?.*client_key=tt-app/.test(url) && /video\.publish/.test(url), `link de autorizar: ${url}`);
+      const auth = await sb.box.raw(url, false);
+      const back = auth.headers.get('location'); yes(back?.includes('/oauth/tiktok/callback?code=TTCODE'), `TikTok no volvió a ACM: ${back}`);
+      const done = (await sb.box.raw(back)).headers.get('location') || '';
+      yes(done.includes('conexion=ok') && done.includes(`#/p/${c.p}/cuentas`), `vuelta: ${decodeURIComponent(done)}`);
+      const acc = (await api('GET', `/api/projects/${c.p}/accounts`)).j.find((x) => x.id === a.id);
+      eq([acc.status, acc.handle, acc.fields.accessToken.set, acc.fields.clientKey.value], ['conectada', 'mock.tt', true, ''], 'estado, usuario, token y app (la app no se guarda en la cuenta)');
+    }],
+    [G('conectar con un clic'), 'YouTube: pide acceso sin vencimiento y queda conectado', async () => {
+      const a = (await api('POST', `/api/projects/${c.p}/accounts`, { network: 'youtube' })).j; c.ytq = a.id;
+      const url = (await api('POST', `/api/accounts/${a.id}/oauth`)).j?.url;
+      yes(/access_type=offline/.test(url) && /prompt=consent/.test(url) && /youtube\.upload/.test(url), `link de autorizar: ${url}`);
+      const back = (await sb.box.raw(url, false)).headers.get('location');
+      const done = (await sb.box.raw(back)).headers.get('location') || '';
+      yes(done.includes('conexion=ok'), `vuelta: ${decodeURIComponent(done)}`);
+      const acc = (await api('GET', `/api/projects/${c.p}/accounts`)).j.find((x) => x.id === a.id);
+      eq([acc.status, acc.handle], ['conectada', 'canalmock'], 'estado y canal');
+    }],
+    [G('conectar con un clic'), 'Publica en las cuentas conectadas con un clic (renueva con la app del servidor)', async () => {
+      const now = (await api('GET', '/api/clock')).j.now;
+      await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel, account_id: c.ttq, scheduled_at: now }, { reel_id: c.reel, account_id: c.ytq, scheduled_at: now }]);
+      let P = []; for (let i = 0; i < 30; i++) { await sleep(1000); P = (await api('GET', `/api/projects/${c.p}/posts`)).j.filter((x) => [c.ttq, c.ytq].includes(x.account_id)); if (P.every((x) => !['programado', 'publicando'].includes(x.status))) break; }
+      for (const x of P) eq(x.status, 'publicado', `${x.network} (${x.error})`);
+    }],
+    [G('conectar con un clic'), 'Rechaza un pedido vencido, de otra cuenta, cancelado o sin sesión', async () => {
+      const bad = async (q, withCookie = true) => decodeURIComponent(((await sb.box.raw(`/oauth/tiktok/callback?${q}`, withCookie)).headers.get('location') || '').replace(/\+/g, ' '));
+      yes((await bad(`code=TTCODE&state=${c.ttq}.9999999999999.ab.firmafalsa`)).includes('conexion=error'), 'aceptó un pedido con firma falsa para la cuenta correcta');
+      const url = (await api('POST', `/api/accounts/${c.ytq}/oauth`)).j.url; // pedido de YouTube usado en la vuelta de TikTok
+      const st = new URL(url).searchParams.get('state');
+      yes((await bad(`code=TTCODE&state=${encodeURIComponent(st)}`)).includes('no es de esta cuenta'), 'aceptó el pedido de otra cuenta');
+      const st2 = new URL((await api('POST', `/api/accounts/${c.ttq}/oauth`)).j.url).searchParams.get('state');
+      yes((await bad(`error=access_denied&error_description=cancelado&state=${encodeURIComponent(st2)}`)).includes('No se autorizó'), 'no avisó que se canceló');
+      yes((await bad(`code=TTCODE&state=${encodeURIComponent(st2)}`, false)).includes('sesión'), 'aceptó la vuelta sin sesión de ACM');
+      const acc = (await api('GET', `/api/projects/${c.p}/accounts`)).j.find((x) => x.id === c.ttq);
+      eq(acc.status, 'conectada', 'la cuenta tendría que seguir conectada');
+    }],
+    [G('páginas públicas'), 'Qué es ACM, privacidad y términos se ven sin entrar', async () => {
+      for (const [u, want] of [['/acerca', 'Agentic Campaign Manager'], ['/privacidad', 'Limited Use'], ['/terminos', 'YouTube Terms of Service']]) {
+        const r = await sb.box.raw(u, false); const t = await r.text();
+        eq(r.status, 200, u); yes(t.includes(want), `${u} no dice «${want}»`);
+      }
     }],
     [G('proyecto'), 'Borrar el proyecto se lleva todo lo suyo', async () => {
       eq((await api('DELETE', `/api/projects/${c.p}`)).j?.ok, true, 'borrar');

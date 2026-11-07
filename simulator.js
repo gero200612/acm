@@ -26,13 +26,27 @@ export function startSimulator(port = 0) {
     if (p === '/rup/fb/V1') return Number(req.headers.file_size) === body.length ? send(res, 200, { success: true }) : send(res, 400, { error: { message: 'tamaño' } });
     // TikTok
     if (p === '/tt/v2/user/info/') return req.headers.authorization === 'Bearer TT_OK' ? send(res, 200, { data: { user: { username: 'mock.tt', follower_count: 50 } }, ...ok }) : send(res, 401, { error: { code: 'access_token_invalid', message: 'vencido' } });
-    if (p === '/tt/v2/oauth/token/') return send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2' });
+    if (p === '/tt/v2/oauth/token/') {
+      if (params.grant_type === 'authorization_code') return params.code === 'TTCODE' && params.client_key === 'tt-app' && params.redirect_uri ? send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2', open_id: 'OPEN1', scope: 'user.info.basic,user.info.profile,user.info.stats,video.publish,video.upload' }) : send(res, 400, { error: 'invalid_grant', error_description: 'código o app incorrectos' });
+      return send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2' });
+    }
+    // pantallas de autorizar (conectar con un clic): aprueban solas y vuelven con el código
+    if (p === '/ttauth/v2/auth/authorize/' || p === '/gauth/o/oauth2/v2/auth') {
+      const q = u.searchParams, back = new URL(q.get('redirect_uri'));
+      if (q.get('client_key') !== 'tt-app' && q.get('client_id') !== 'g-app') return send(res, 400, { error: { message: 'app desconocida' } });
+      back.searchParams.set('code', p.startsWith('/tt') ? 'TTCODE' : 'GCODE'); back.searchParams.set('state', q.get('state'));
+      log.push(`authorize ${p.startsWith('/tt') ? 'tiktok' : 'google'} scope=${q.get('scope')} offline=${q.get('access_type') || ''}`);
+      res.writeHead(302, { Location: back.toString() }); return res.end();
+    }
     if (p === '/tt/v2/post/publish/creator_info/query/') return send(res, 200, { data: { privacy_level_options: ['SELF_ONLY'] }, ...ok });
     if (p === '/tt/v2/post/publish/video/init/') { const j = JSON.parse(body); return send(res, 200, { data: { publish_id: 'P1', upload_url: `${B}/tt-up` }, ...ok, _j: j }); }
     if (p === '/tt-up') return send(res, 201, {});
     if (p === '/tt/v2/post/publish/status/fetch/') return send(res, 200, { data: { status: 'PUBLISH_COMPLETE' }, ...ok });
     // Google
-    if (p === '/goauth/token') return send(res, 200, { access_token: 'ya29.mock' });
+    if (p === '/goauth/token') {
+      if (params.grant_type === 'authorization_code') return params.code === 'GCODE' && params.client_id === 'g-app' ? send(res, 200, { access_token: 'ya29.mock', refresh_token: 'G_REFRESH', scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly' }) : send(res, 400, { error: 'invalid_grant', error_description: 'código o app incorrectos' });
+      return params.client_id && params.refresh_token ? send(res, 200, { access_token: 'ya29.mock' }) : send(res, 400, { error: 'invalid_request', error_description: 'falta la app o el token' });
+    }
     if (p === '/yt/youtube/v3/channels') return send(res, 200, { items: [{ snippet: { title: 'Canal Mock', customUrl: '@canalmock' }, statistics: { subscriberCount: '321' } }] });
     if (p === '/ytup/upload/youtube/v3/videos') return send(res, 200, {}, { Location: `${B}/ytup/put/1` });
     if (p === '/ytup/put/1') return send(res, 200, { id: 'Y1' });
@@ -51,7 +65,7 @@ export function startSimulator(port = 0) {
     B = `http://127.0.0.1:${server.address().port}`;
     resolve({
       url: B, log,
-      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, ytUpload: `${B}/ytup` },
+      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, ytUpload: `${B}/ytup`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth` },
       close: () => new Promise((r) => server.close(r)),
     });
   }));

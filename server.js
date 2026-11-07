@@ -13,6 +13,7 @@ import { runBanco } from './banco.js';
 import { probe, review } from './mp4probe.js';
 import { postBlocked, pautaNumbers } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
+import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -139,6 +140,24 @@ app.get('/api/session', (req, res) => res.json({ ok: authed(req) }));
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 app.use('/api', requireAuth);
+
+// vuelta de la pantalla de autorizar de TikTok o Google
+app.get('/oauth/:network/callback', async (req, res) => {
+  const back = (pid, q) => res.redirect(`/?${new URLSearchParams(q)}${pid ? `#/p/${pid}/cuentas` : ''}`);
+  if (!authed(req)) return back(null, { conexion: 'error', motivo: 'Se cerró la sesión de ACM: entrá y volvé a tocar Conectar.' });
+  const st = readState(SECRET, req.query.state);
+  const a = st && get('SELECT * FROM accounts WHERE id = ?', st.accountId);
+  if (!a || a.network !== req.params.network) return back(a?.project_id, { conexion: 'error', motivo: 'El pedido de conexión venció o no es de esta cuenta. Probá de nuevo.' });
+  // la persona dijo que no, o la red devolvió un error
+  if (req.query.error || !req.query.code) return back(a.project_id, { conexion: 'error', motivo: `No se autorizó: ${String(req.query.error_description || req.query.error || 'sin código').slice(0, 200)}` });
+  let got;
+  try { got = await traced({ kind: 'conexion', title: `Conectar ${a.network === 'tiktok' ? 'TikTok' : 'YouTube'} con un clic`, project_id: a.project_id, account_id: a.id, network: a.network }, async () => { const x = await exchange(a.network, String(req.query.code)); return { ...x, summary: 'Tokens recibidos' }; }); }
+  catch (e) { run("UPDATE accounts SET last_error = ?, status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'error' END WHERE id = ?", e.message, a.id); return back(a.project_id, { conexion: 'error', motivo: e.message }); }
+  const err = await testAccount(a, { ...vault.open(a.creds), ...got.creds });
+  if (err) return back(a.project_id, { conexion: 'error', motivo: err });
+  const missing = got.missing.length ? ` Faltó autorizar: ${got.missing.join(', ')}.` : '';
+  back(a.project_id, { conexion: 'ok', cuenta: get('SELECT connected_as FROM accounts WHERE id = ?', a.id).connected_as + missing });
+});
 app.use('/media', requireAuth, express.static(UPLOADS, { maxAge: '7d', immutable: true }));
 
 const upload = multer({
@@ -282,10 +301,8 @@ app.put('/api/accounts/:id/connection', (req, res) => {
   run('UPDATE accounts SET creds = ? WHERE id = ?', vault.seal(creds), a.id);
   res.json(accountOut(get('SELECT * FROM accounts WHERE id = ?', a.id)));
 });
-app.post('/api/accounts/:id/test', async (req, res) => {
-  const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
-  if (!a) return res.status(404).json({ error: 'No existe' });
-  let creds = mergeFields(a.network, vault.open(a.creds), req.body || {});
+// prueba la conexión con la red y deja la cuenta conectada (o con el error); la usan «Probar conexión» y la vuelta del clic
+async function testAccount(a, creds) {
   const now = new Date().toISOString();
   try {
     const r = await traced({ kind: 'conexion', title: `Probar conexión de ${({ instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' })[a.network]}`, project_id: a.project_id, account_id: a.id, network: a.network, secrets: Object.values(creds) },
@@ -294,11 +311,27 @@ app.post('/api/accounts/:id/test', async (req, res) => {
     run(`UPDATE accounts SET creds = ?, connected_as = ?, handle = ?, followers = ?, last_error = '', last_checked_at = ?,
          status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'conectada' END WHERE id = ?`,
       vault.seal(creds), r.connectedAs || '', String(r.connectedAs || '').replace(/^@/, ''), r.followers || a.followers, now, a.id);
+    return null;
   } catch (e) {
     run(`UPDATE accounts SET creds = ?, last_error = ?, last_checked_at = ?, status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'error' END WHERE id = ?`,
       vault.seal(creds), e.message, now, a.id);
+    return e.message;
   }
+}
+app.post('/api/accounts/:id/test', async (req, res) => {
+  const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
+  if (!a) return res.status(404).json({ error: 'No existe' });
+  await testAccount(a, mergeFields(a.network, vault.open(a.creds), req.body || {}));
   res.json(accountOut(get('SELECT * FROM accounts WHERE id = ?', a.id)));
+});
+
+// conectar con un clic (TikTok y YouTube): qué redes tienen app cargada, y el link a la pantalla de autorizar
+app.get('/api/oauth', (req, res) => res.json({ tiktok: oauthReady('tiktok'), youtube: oauthReady('youtube'), redirect: { tiktok: redirectUri('tiktok'), youtube: redirectUri('youtube') } }));
+app.post('/api/accounts/:id/oauth', (req, res) => {
+  const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
+  if (!a) return res.status(404).json({ error: 'No existe' });
+  if (!oauthReady(a.network)) return res.status(400).json({ error: `Falta cargar la app de ${a.network === 'tiktok' ? 'TikTok' : 'Google'} en el servidor: por ahora conectala a mano.` });
+  res.json({ url: authUrl(a.network, makeState(SECRET, a.id)) });
 });
 app.delete('/api/accounts/:id/connection', (req, res) => {
   run("UPDATE accounts SET creds = '', connected_as = '', last_error = '', status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'pendiente' END WHERE id = ?", req.params.id);
@@ -504,6 +537,9 @@ app.put('/api/projects/:id/pauta', (req, res) => {
 app.use('/api', (req, res) => res.status(404).json({ error: 'No existe' }));
 app.use((err, req, res, next) => { console.error(err); res.status(err.status || 500).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'El archivo pasa de 1 GB' : 'Error del servidor' }); });
 
+// páginas públicas (las piden TikTok y Google para aprobar las apps): qué es ACM, privacidad y términos
+for (const [route, file] of [['/acerca', 'acerca.html'], ['/privacidad', 'privacidad.html'], ['/terminos', 'terminos.html']])
+  app.get(route, (req, res) => res.sendFile(path.resolve('public/legal', file)));
 app.use(express.static(path.resolve('public'), { index: 'index.html', setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
 app.get('/{*splat}', (req, res) => res.sendFile(path.resolve('public/index.html')));
 

@@ -730,7 +730,7 @@ const CONNECT_STEPS = {
     { title: 'Probá la conexión', body: ['Guardá y probá. ACM trae el nombre de la Página y sus seguidores.'], test: true },
   ],
   tiktok: [
-    { title: 'Creá la app en TikTok for Developers', body: ['Entrá a developers.tiktok.com, creá una app y agregale los productos Login Kit y Content Posting API.', 'Pedí los permisos que siguen. Hasta que TikTok apruebe la app, lo que se publica sale como privado.'], links: [{ label: 'Abrir TikTok for Developers', url: 'https://developers.tiktok.com/apps/' }], chips: ['user.info.basic', 'user.info.stats', 'video.publish', 'video.upload'] },
+    { title: 'Creá la app en TikTok for Developers', body: ['Entrá a developers.tiktok.com, creá una app y agregale los productos Login Kit y Content Posting API.', 'Pedí los permisos que siguen. Hasta que TikTok apruebe la app, lo que se publica sale como privado.'], links: [{ label: 'Abrir TikTok for Developers', url: 'https://developers.tiktok.com/apps/' }], chips: ['user.info.basic', 'user.info.profile', 'user.info.stats', 'video.publish', 'video.upload'] },
     { title: 'Copiá las claves de la app', body: ['En la app, en Credenciales, copiá el Client key y el Client secret.'], fields: ['clientKey', 'clientSecret'] },
     { title: 'Autorizá la cuenta y pegá los tokens', body: ['Con la cuenta de TikTok abierta, autorizá la app (Login Kit). TikTok devuelve un token de acceso (dura 24 horas) y uno de renovación (dura un año).', 'Con los dos, ACM renueva el de acceso solo.'], fields: ['accessToken', 'refreshToken'] },
     { title: 'Probá la conexión', body: ['Guardá y probá. ACM trae el usuario y los seguidores.'], note: 'TikTok no acepta pauta política: en esta red el alcance es solo orgánico.', test: true },
@@ -756,6 +756,13 @@ function connectPanel(acc) {
   const fieldDone = (k) => (a.fields[k]?.set || a.fields[k]?.value || values[k]);
   const stepDone = (i) => steps[i].test ? a.status === 'conectada' : steps[i].fields ? steps[i].fields.filter((k) => k !== 'instagramBusinessId').every(fieldDone) : i < active || a.status === 'conectada';
   const dirty = () => Object.values(values).some((v) => v !== undefined);
+  // conectar con un clic: solo TikTok y YouTube, y solo si el servidor tiene la app cargada
+  const ONE = { tiktok: 'Conectar con TikTok', youtube: 'Conectar con Google' };
+  const quick = () => !ONE[a.network] || !state.oauth?.[a.network] ? '' : `<div class="cp-quick">
+    <div><b>${a.status === 'conectada' ? 'Volver a conectar' : 'La forma rápida'}</b><p class="small muted">Te lleva a ${a.network === 'tiktok' ? 'TikTok' : 'Google'}, autorizás con la cuenta${a.network === 'youtube' ? ' dueña del canal' : ''} y volvés acá conectado. No hace falta copiar nada.</p></div>
+    <button class="btn primary" data-cp="oauth" ${busy ? 'disabled' : ''}>${netBadge(a.network)} ${ONE[a.network]}</button></div>
+    <p class="small muted cp-or">o seguí los pasos para conectarla a mano</p>`;
+  if (state.oauth === undefined) api('/api/oauth').then((o) => { state.oauth = o; draw(); }).catch(() => { state.oauth = null; });
 
   const draw = () => {
     const s = steps[active];
@@ -764,6 +771,7 @@ function connectPanel(acc) {
     <aside class="cp" role="dialog" aria-modal="true" aria-label="Conectar ${esc(accName(a))}">
       <header class="cp-h">${netBadge(a.network)}<div class="t"><h2 class="h2">${a.connected_as ? esc(a.connected_as) : 'Conectar cuenta de ' + NETS[a.network].name}</h2><p class="small muted">${NETS[a.network].name}</p></div><button class="btn sm ghost" data-cp="close">Cerrar</button></header>
       <div class="cp-body">${banner}
+        ${quick()}
         <div class="cp-cols">
           <ol class="cp-steps">${steps.map((st, i) => `<li class="${i === active ? 'on' : ''} ${stepDone(i) && i !== active ? 'done' : ''}"><button data-cp="go" data-i="${i}"><span class="dot">${stepDone(i) && i !== active ? icon('check', 14) : i + 1}</span><span class="st">${esc(st.title)}</span></button></li>`).join('')}</ol>
           <section class="cp-detail">
@@ -802,6 +810,7 @@ function connectPanel(acc) {
     if (act === 'go') { active = Math.max(0, Math.min(steps.length - 1, Number(b.dataset.i))); return draw(); }
     if (act === 'show') { const k = b.dataset.k; shown.has(k) ? shown.delete(k) : shown.add(k); return draw(); }
     try {
+      if (act === 'oauth') { busy = 'oauth'; draw(); const r = await api(`/api/accounts/${a.id}/oauth`, { method: 'POST' }); location.href = r.url; return; }
       if (act === 'save') { busy = 'guardar'; draw(); a = await api(`/api/accounts/${a.id}/connection`, { method: 'PUT', body: payload() }); for (const k in values) delete values[k]; toast('Datos guardados'); }
       if (act === 'test') {
         busy = 'probar'; active = steps.length - 1; draw();
@@ -978,4 +987,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.
 
 setInterval(() => { if (state.authed && !document.querySelector('dialog, .cp-host') && state.posts.some((x) => x.status === 'publicando' || (x.status === 'programado' && pdate(x.scheduled_at) <= new Date()))) render(); }, 15000);
 window.addEventListener('hashchange', () => { $('.side')?.classList.remove('open'); render(); window.scrollTo(0, 0); });
+// vuelta de «Conectar con TikTok / Google»: el servidor manda ?conexion=ok|error en la dirección
+{ const q = new URLSearchParams(location.search); const c = q.get('conexion');
+  if (c) { history.replaceState(null, '', location.pathname + location.hash); setTimeout(() => toast(c === 'ok' ? `Cuenta conectada: ${q.get('cuenta') || ''}` : `No se pudo conectar. ${q.get('motivo') || ''}`, c !== 'ok'), 600); } }
 api('/api/session').then((s) => { state.authed = s.ok; render(); }).catch(() => render());

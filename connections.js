@@ -59,6 +59,22 @@ export const BASES = {
   googleOauth: process.env.ACM_GOOGLE_OAUTH_URL || 'https://oauth2.googleapis.com',
   youtube: process.env.ACM_YOUTUBE_URL || 'https://www.googleapis.com',
   ytUpload: process.env.ACM_YT_UPLOAD_URL || 'https://www.googleapis.com',
+  // pantallas donde la persona autoriza (conectar con un clic)
+  tiktokAuth: process.env.ACM_TIKTOK_AUTH_URL || 'https://www.tiktok.com',
+  googleAuth: process.env.ACM_GOOGLE_AUTH_URL || 'https://accounts.google.com',
+};
+
+// la app de desarrollador de cada red (variables). Las cuentas conectadas con un clic no guardan la app: renuevan con esta.
+export function appCreds(network) {
+  if (network === 'tiktok') return { key: process.env.ACM_TIKTOK_CLIENT_KEY || '', secret: process.env.ACM_TIKTOK_CLIENT_SECRET || '' };
+  if (network === 'youtube') return { key: process.env.ACM_GOOGLE_CLIENT_ID || '', secret: process.env.ACM_GOOGLE_CLIENT_SECRET || '' };
+  return { key: '', secret: '' };
+}
+const withApp = (network, c) => {
+  const a = appCreds(network);
+  if (network === 'tiktok') return { ...c, clientKey: c.clientKey || a.key, clientSecret: c.clientSecret || a.secret };
+  if (network === 'youtube') return { ...c, clientId: c.clientId || a.key, clientSecret: c.clientSecret || a.secret };
+  return c;
 };
 // dentro de una corrida del banco de pruebas las APIs apuntan al simulador; afuera, a las reales
 export const bases = () => als.getStore()?.bases || BASES;
@@ -130,12 +146,13 @@ export async function testConnection(network, creds) {
 const tiktokCache = new Map();
 export async function getTikTokToken(c, save = () => {}) {
   need(c, ['accessToken'], LABELS);
+  const app = withApp('tiktok', c);
   const ok = async (t) => { try { await getJson('TikTok', `${bases().tiktok}/v2/user/info/?fields=open_id`, { headers: { Authorization: `Bearer ${t}` } }); return true; } catch { return false; } };
   if (tiktokCache.get(c.accessToken) > Date.now() || await ok(c.accessToken)) { tiktokCache.set(c.accessToken, Date.now() + 30 * 60e3); return c.accessToken; }
-  if (!(c.clientKey && c.clientSecret && c.refreshToken)) throw new Error('El token de TikTok venció y faltan el Client key, el Client secret o el token de renovación para renovarlo.');
+  if (!(app.clientKey && app.clientSecret && c.refreshToken)) throw new Error('El token de TikTok venció y faltan el Client key, el Client secret o el token de renovación para renovarlo.');
   const t = await getJson('TikTok', `${bases().tiktok}/v2/oauth/token/`, {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_key: c.clientKey, client_secret: c.clientSecret, grant_type: 'refresh_token', refresh_token: c.refreshToken }),
+    body: new URLSearchParams({ client_key: app.clientKey, client_secret: app.clientSecret, grant_type: 'refresh_token', refresh_token: c.refreshToken }),
   });
   if (!t.access_token) throw new Error('TikTok no devolvió un token nuevo.');
   const fresh = { accessToken: t.access_token, refreshToken: t.refresh_token || c.refreshToken };
@@ -145,6 +162,7 @@ export async function getTikTokToken(c, save = () => {}) {
 
 // Google: con el token de renovación se pide uno de acceso (dura 1 h)
 export async function getGoogleToken(c) {
+  c = withApp('youtube', c);
   need(c, ['clientId', 'clientSecret', 'refreshToken'], LABELS);
   const t = await getJson('Google', `${bases().googleOauth}/token`, {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
