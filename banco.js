@@ -7,6 +7,7 @@ import { traced, step } from './trace.js';
 import { testConnection } from './connections.js';
 import { publish } from './publisher.js';
 import { uploadAudience, createCampaign, testAds } from './ads.js';
+import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers } from './rules.js';
 
@@ -44,6 +45,19 @@ function cases(video) {
       const r = await readPadron(Buffer.from(csv), 'padron.csv');
       eq([r.total, r.phones, r.emails, r.contacts], [3, 1, 2, 2], 'socios, teléfonos, mails, contactables');
       yes(r.hashes.every(([em, ph]) => (!em || em.length === 64) && (!ph || ph.length === 64)), 'no son huellas SHA-256');
+    }],
+    ['Padrón', 'Lee Excel con mails con formato, links y números', async () => {
+      const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Padrón');
+      ws.addRow(['Socio', 'DNI', 'Celular', 'E-mail']);
+      ws.addRow([1, 30111222, 1167890123, { text: 'ana@x.com', hyperlink: 'mailto:ana@x.com' }]);
+      ws.addRow([2, 30111223, '11 15 2222-3333', { richText: [{ text: 'beto' }, { font: { bold: true }, text: '@y.com' }] }]);
+      ws.addRow([3, 30111224, null, { formula: 'LOWER("CARO@Z.COM")', result: 'caro@z.com' }]);
+      const r = await readPadron(Buffer.from(await wb.xlsx.writeBuffer()), 'padron.xlsx');
+      eq([r.total, r.phones, r.emails, r.contacts], [3, 2, 3, 3], 'socios, teléfonos, mails, contactables');
+    }],
+    ['Padrón', 'Lee un CSV de Excel en Latin-1 sin romper los encabezados', async () => {
+      const r = await readPadron(Buffer.from('Nº;Móvil;Dirección de correo\n1;1167890123;a@x.com\n2;;b@y.com\n3;;c@y.com\n4;;d@y.com\n', 'latin1'), 'padron.csv');
+      eq([r.total, r.phones, r.emails], [4, 1, 4], 'socios, teléfonos, mails');
     }],
     ['Pauta', 'USD 3.000 en 33 días sobre el padrón de 65.000', async () => {
       const n = pautaNumbers({ budget: 3000, from: '2026-11-08', to: '2026-12-10', padron: 65000, contacts: 59584 });

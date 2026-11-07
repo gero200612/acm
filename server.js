@@ -327,6 +327,8 @@ app.delete('/api/reels/:id', (req, res) => {
 });
 
 // publicaciones
+// el programador compara fechas como texto en hora argentina: todas van como "AAAA-MM-DD HH:MM" (sin T ni segundos)
+const schedAt = (v) => { const m = String(v || '').trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/); return m ? `${m[1]} ${m[2]}` : ''; };
 app.get('/api/projects/:id/posts', (req, res) => res.json(all(`
   SELECT p.*, r.title AS reel_title, r.file AS reel_file, a.network, a.handle
   FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
@@ -338,7 +340,11 @@ app.post('/api/projects/:id/posts', (req, res) => {
   try {
     for (const it of items) {
       if (!it?.reel_id || !it?.account_id || !it?.scheduled_at) throw new Error('Faltan datos de la publicación');
-      ins.run(req.params.id, it.reel_id, it.account_id, it.scheduled_at);
+      const at = schedAt(it.scheduled_at);
+      if (!at) throw new Error('Fecha inválida: tiene que ser AAAA-MM-DD HH:MM');
+      if (!get('SELECT 1 FROM reels WHERE id = ? AND project_id = ?', it.reel_id, req.params.id) || !get('SELECT 1 FROM accounts WHERE id = ? AND project_id = ?', it.account_id, req.params.id))
+        throw new Error('El reel o la cuenta no son de este proyecto');
+      ins.run(req.params.id, it.reel_id, it.account_id, at);
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); return res.status(400).json({ error: e.message }); }
@@ -349,6 +355,7 @@ app.put('/api/posts/:id', (req, res) => {
   if (!p) return res.status(404).json({ error: 'No existe' });
   if (p.status === 'publicando') return res.status(409).json({ error: 'Se está publicando en este momento' });
   const d = pick(req.body || {}, ['scheduled_at', 'status']);
+  if ('scheduled_at' in d && !(d.scheduled_at = schedAt(d.scheduled_at))) return res.status(400).json({ error: 'Fecha inválida: tiene que ser AAAA-MM-DD HH:MM' });
   if (d.status && !['programado', 'publicado', 'fallido'].includes(d.status)) return res.status(400).json({ error: 'Estado inválido' });
   if (d.status === 'programado') d.error = '';
   update('posts', p.id, d);

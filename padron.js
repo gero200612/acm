@@ -31,12 +31,21 @@ async function parseXlsx(buf) {
     const vals = [];
     r.eachCell({ includeEmpty: true }, (c, n) => {
       let v = c.value;
-      if (v && typeof v === 'object') v = v.text ?? v.result ?? (v.hyperlink ? String(v.hyperlink).replace(/^mailto:/, '') : '') ?? '';
+      // texto con formato (richText), links (text/hyperlink) y fórmulas (result)
+      if (v instanceof Date) v = '';
+      else if (v && typeof v === 'object') v = v.richText ? v.richText.map((t) => t.text).join('') : v.text ?? v.result ?? (v.hyperlink ? String(v.hyperlink).replace(/^mailto:/, '') : '');
+      if (v && typeof v === 'object') v = v.richText ? v.richText.map((t) => t.text).join('') : ''; // link con texto enriquecido
       vals[n - 1] = v == null ? '' : String(v);
     });
     rows.push(vals);
   });
   return rows;
+}
+
+// Excel en Windows guarda el CSV en Latin-1: si no es UTF-8 válido, se lee así para no romper los acentos
+function decodeText(buf) {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^\ufeff/, ''); }
+  catch { return new TextDecoder('latin1').decode(buf); }
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
@@ -73,7 +82,7 @@ export async function readPadron(buf, name) {
   const ext = String(name || '').toLowerCase().split('.').pop();
   let rows;
   if (ext === 'xlsx') rows = await parseXlsx(buf);
-  else if (ext === 'csv' || ext === 'txt') rows = parseCsv(buf.toString('utf8').replace(/^﻿/, ''));
+  else if (ext === 'csv' || ext === 'txt') rows = parseCsv(decodeText(buf));
   else throw new Error('Subí el padrón en Excel (.xlsx) o CSV. Si es .xls, guardalo como .xlsx.');
   rows = rows.filter((r) => r.some((c) => String(c || '').trim()));
   const { body, email, phone } = pickColumns(rows);
