@@ -10,7 +10,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "ACM_PASSWORD=admin node --watch server.js"
+    "dev": "ACM_PASSWORD=admin node --watch server.js",
+    "banco": "node tools/banco.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

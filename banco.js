@@ -11,6 +11,7 @@ import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers } from './rules.js';
 import { embed } from './knowledge.js';
+import { startSandbox, recorridoCases } from './recorrido.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (cond, what) => { if (!cond) throw new Error(what); };
@@ -90,9 +91,12 @@ export async function runBanco() {
   const video = path.join(os.tmpdir(), `acm-banco-${process.pid}.mp4`);
   fs.writeFileSync(video, Buffer.alloc(256 * 1024, 7));
   let ok = 0, total = 0;
+  // la copia aislada de ACM para el recorrido completo (si no arranca, esos casos fallan con el motivo)
+  const sb = {};
+  try { sb.box = await startSandbox(sim.bases); } catch (e) { sb.error = e.message; }
   try {
     await traced({ kind: 'banco', title: 'Banco de pruebas', bases: sim.bases }, async () => {
-      for (const [group, name, fn] of cases(video)) {
+      for (const [group, name, fn] of [...cases(video), ...recorridoCases(sb)]) {
         total++;
         const t0 = Date.now();
         try { await fn(); ok++; step('caso', `${group} · ${name}`, 'ok', Date.now() - t0); }
@@ -102,6 +106,6 @@ export async function runBanco() {
       return `Pasaron los ${total} casos`;
     });
   } catch {}
-  finally { await sim.close(); fs.rmSync(video, { force: true }); }
+  finally { await sb.box?.stop(); await sim.close(); fs.rmSync(video, { force: true }); }
   return { ok, total };
 }

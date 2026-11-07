@@ -239,7 +239,7 @@ function labBanco() {
     <div class="lab-main">
       <section class="bk-hero">
         <div><span class="lbl">Último banco</span><b>${d ? `${ok}/${casos.length}` : '—'}</b><span class="sub">${d ? `${when(d.run.started_at)} · ${ms(d.run.ms)}` : 'todavía no se corrió'}</span></div>
-        <div class="bk-txt"><p>Corre los casos contra un <b>simulador de Meta, TikTok y Google</b> que vive dentro de ACM: conectar y publicar en las cuatro redes, que los errores no muestren tokens, el padrón, la pauta, Meta Ads y las reglas del programador. No toca ninguna cuenta real.</p>
+        <div class="bk-txt"><p>Corre los casos contra un <b>simulador de Meta, TikTok y Google</b> que vive dentro de ACM: conectar y publicar en las cuatro redes, que los errores no muestren tokens, el padrón, la pauta, Meta Ads y las reglas del programador. Después hace el <b>recorrido completo</b> sobre una copia aislada de ACM: de entrar con la contraseña a publicar, pautar e investigar. No toca ninguna cuenta real ni la base de los proyectos.</p>
           <button class="btn accent" data-act="lab-banco" ${L.running ? 'disabled' : ''}>${L.running ? '<span class="spin"></span> Corriendo…' : 'Correr el banco de pruebas'}</button></div>
       </section>
       <div class="bk-groups">${groups.map((g) => `<section class="card"><div class="card-head"><h2 class="h2">${esc(g)}</h2><span class="small muted">${casos.filter((c) => c.label.startsWith(g + ' · ') && c.status === 'ok').length}/${casos.filter((c) => c.label.startsWith(g + ' · ')).length}</span></div>

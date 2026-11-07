@@ -539,7 +539,9 @@ async function tick() {
   } catch (e) { console.error('programador:', e); }
   finally { busy = false; }
 }
-if (process.env.ACM_SCHEDULER !== 'off') { setInterval(tick, 30000); setTimeout(tick, 3000); }
+// ACM_TICK_MS: la copia aislada del banco de pruebas lo baja para no esperar 30 s
+if (process.env.ACM_SCHEDULER !== 'off') { setInterval(tick, Number(process.env.ACM_TICK_MS) || 30000); setTimeout(tick, 3000); }
 
-setTimeout(fillVectors, 5000);
-app.listen(PORT, () => console.log(`ACM en http://localhost:${PORT} (datos en ${DATA})`));
+// al arrancar completa vectores pendientes (la copia del banco lo hace enseguida para reproducir el orden de producción: primero este, después las importaciones)
+setTimeout(fillVectors, Number(process.env.ACM_FILL_MS) || 5000);
+const srv = app.listen(PORT, () => console.log(`ACM en http://localhost:${srv.address().port} (datos en ${DATA})`));
