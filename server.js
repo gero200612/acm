@@ -69,15 +69,19 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next(); });
 
+// Delante hay un solo proxy (Traefik de Coolify): req.ip toma la IP que agrega él, no la que mande el cliente.
+app.set('trust proxy', 1);
 const attempts = new Map();
+const total = { n: 0, t: Date.now() };
 app.post('/api/login', (req, res) => {
-  const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
-  const a = attempts.get(ip) || { n: 0, t: Date.now() };
-  if (Date.now() - a.t > 15 * 60e3) { a.n = 0; a.t = Date.now(); }
-  if (a.n >= 10) return res.status(429).json({ error: 'Demasiados intentos. Probá en 15 minutos.' });
+  const now = Date.now();
+  if (now - total.t > 15 * 60e3) { total.n = 0; total.t = now; attempts.clear(); }
+  const ip = req.ip;
+  const a = attempts.get(ip) || { n: 0 };
+  if (a.n >= 10 || total.n >= 50) return res.status(429).json({ error: 'Demasiados intentos. Probá en 15 minutos.' });
   const given = Buffer.from(String(req.body?.password || ''));
   const want = Buffer.from(PASSWORD);
-  if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) { a.n++; attempts.set(ip, a); return res.status(401).json({ error: 'Contraseña incorrecta' }); }
+  if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) { a.n++; total.n++; attempts.set(ip, a); return res.status(401).json({ error: 'Contraseña incorrecta' }); }
   attempts.delete(ip);
   res.set('Set-Cookie', `acm=${makeToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}${PROD ? '; Secure' : ''}`);
   res.json({ ok: true });
