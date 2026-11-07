@@ -35,4 +35,5 @@ Para probar sin cuentas reales: `tools/simulador.mjs` (instrucciones arriba del 
 ## Estado
 
 - Hecho: proyectos, cuentas conectadas por la vía oficial (tokens cifrados), padrón (solo huellas SHA-256), reels, reparto, calendario, publicación automática, calculadora de pauta.
-- Falta: probar la publicación contra cuentas reales; crear el público personalizado y la campaña de Meta Ads con el padrón.
+- Meta Ads: el padrón sube como público personalizado (solo huellas, tandas de 10.000) y la campaña de alcance se crea EN PAUSA con tope de frecuencia semanal y un anuncio por reel publicado en Instagram.
+- Falta: probar todo contra cuentas reales (está probado contra `tools/simulador.mjs`).

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readPadron } from './padron.js';
 import { publish } from './publisher.js';
+import { testAds, uploadAudience, createCampaign } from './ads.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -63,6 +64,9 @@ for (const [c, def] of [['external_id', "TEXT DEFAULT ''"], ['external_url', "TE
   if (!cols('posts').includes(c)) db.exec(`ALTER TABLE posts ADD COLUMN ${c} ${def}`);
 // si el servidor se reinició a mitad de una subida, esas vuelven a la fila
 db.exec("UPDATE posts SET status = 'programado' WHERE status = 'publicando'");
+for (const [c, def] of [['ads_creds', "TEXT DEFAULT ''"], ['ads_name', "TEXT DEFAULT ''"], ['ads_currency', "TEXT DEFAULT ''"], ['ads_rate', 'REAL DEFAULT 0'], ['ads_political', 'INTEGER DEFAULT 1'],
+  ['ads_audience_id', "TEXT DEFAULT ''"], ['ads_audience_count', 'INTEGER DEFAULT 0'], ['ads_campaign_id', "TEXT DEFAULT ''"], ['ads_ads', 'INTEGER DEFAULT 0'], ['ads_error', "TEXT DEFAULT ''"], ['ads_at', "TEXT DEFAULT ''"]])
+  if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
 db.exec('CREATE TABLE IF NOT EXISTS padron (project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, em TEXT, ph TEXT)');
 db.exec('CREATE INDEX IF NOT EXISTS padron_project ON padron(project_id)');
 for (const [c, def] of [['creds', "TEXT DEFAULT ''"], ['connected_as', "TEXT DEFAULT ''"], ['last_error', "TEXT DEFAULT ''"], ['last_checked_at', "TEXT DEFAULT ''"]])
@@ -151,10 +155,13 @@ function accountOut(a) {
 }
 const NETWORKS = ['instagram', 'facebook', 'tiktok', 'youtube'];
 
-function projectSummary(p) {
+function projectSummary(full) {
+  const { ads_creds, ...p } = full;
+  const ac = vault.open(ads_creds);
   const c = (sql) => get(sql, p.id).n;
   return {
     ...p,
+    ads: { adAccountId: ac.adAccountId || '', token: !!ac.accessToken },
     accounts: c('SELECT count(*) n FROM accounts WHERE project_id = ?'),
     accounts_live: c("SELECT count(*) n FROM accounts WHERE project_id = ? AND status = 'conectada'"),
     reels: c('SELECT count(*) n FROM reels WHERE project_id = ?'),
@@ -182,8 +189,8 @@ app.get('/api/projects', (req, res) => res.json(all('SELECT * FROM projects ORDE
 app.post('/api/projects', upload.single('photo'), (req, res) => {
   const b = req.body || {};
   if (!String(b.name || '').trim()) return res.status(400).json({ error: 'Falta el nombre' });
-  const r = run('INSERT INTO projects (name, role, org, election_date, padron, color, notes, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    b.name.trim(), b.role || '', b.org || '', b.election_date || '', Number(b.padron) || 0, b.color || '#ff5a1f', b.notes || '', req.file?.filename || '');
+  const r = run('INSERT INTO projects (name, role, org, election_date, propaganda_until, padron, color, notes, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    b.name.trim(), b.role || '', b.org || '', b.election_date || '', b.propaganda_until || '', Number(b.padron) || 0, b.color || '#ff5a1f', b.notes || '', req.file?.filename || '');
   run('INSERT INTO pauta (project_id) VALUES (?)', r.lastInsertRowid);
   res.json(projectSummary(get('SELECT * FROM projects WHERE id = ?', r.lastInsertRowid)));
 });
@@ -350,6 +357,60 @@ app.post('/api/posts/:id/now', (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/clock', (req, res) => res.json({ now: localNow(), tz: TZ }));
+
+// Meta Ads del proyecto
+const projectRow = (id) => get('SELECT * FROM projects WHERE id = ?', id);
+const sendProject = (res, id) => res.json(projectSummary(projectRow(id)));
+app.put('/api/projects/:id/ads', (req, res) => {
+  const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
+  const c = vault.open(p.ads_creds), b = req.body || {};
+  if (b.adAccountId !== undefined) c.adAccountId = String(b.adAccountId).trim().replace(/^act_/, '');
+  if (b.accessToken) c.accessToken = String(b.accessToken).trim();
+  run('UPDATE projects SET ads_creds = ?, ads_rate = ?, ads_political = ? WHERE id = ?', vault.seal(c), Number(b.rate ?? p.ads_rate) || 0, b.political === undefined ? p.ads_political : (b.political ? 1 : 0), p.id);
+  sendProject(res, p.id);
+});
+const adsFail = (res, id, e) => { run('UPDATE projects SET ads_error = ? WHERE id = ?', e.message, id); res.status(400).json({ error: e.message }); };
+app.post('/api/projects/:id/ads/test', async (req, res) => {
+  const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
+  try { const r = await testAds(vault.open(p.ads_creds)); run("UPDATE projects SET ads_name = ?, ads_currency = ?, ads_error = '' WHERE id = ?", r.name, r.currency, p.id); sendProject(res, p.id); }
+  catch (e) { adsFail(res, p.id, e); }
+});
+app.post('/api/projects/:id/ads/audience', async (req, res) => {
+  const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
+  const rows = all('SELECT em, ph FROM padron WHERE project_id = ?', p.id);
+  if (!rows.length) return res.status(400).json({ error: 'Primero subí el padrón con teléfonos o mails en Ajustes.' });
+  try {
+    const r = await uploadAudience(vault.open(p.ads_creds), `ACM · ${p.name} · padrón`, rows, p.ads_audience_id);
+    run("UPDATE projects SET ads_audience_id = ?, ads_audience_count = ?, ads_error = '', ads_at = ? WHERE id = ?", r.id, r.received || rows.length, localNow(), p.id);
+    sendProject(res, p.id);
+  } catch (e) { adsFail(res, p.id, e); }
+});
+app.post('/api/projects/:id/ads/campaign', async (req, res) => {
+  const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
+  const pa = get('SELECT * FROM pauta WHERE project_id = ?', p.id) || {};
+  if (!p.ads_audience_id) return res.status(400).json({ error: 'Primero subí el padrón como público.' });
+  if (!pa.budget) return res.status(400).json({ error: 'Cargá la inversión en la pestaña Pauta.' });
+  const usdNet = pa.budget / 1.21; // Meta factura el IVA aparte
+  const cur = p.ads_currency || 'USD';
+  if (cur !== 'USD' && !p.ads_rate) return res.status(400).json({ error: `La cuenta publicitaria está en ${cur}: cargá la cotización del dólar.` });
+  const today = localNow().slice(0, 10);
+  const from = pa.start_date && pa.start_date > today ? pa.start_date : today;
+  const to = [pa.end_date, p.propaganda_until, p.election_date].filter(Boolean).sort()[0];
+  if (!to || to < from) return res.status(400).json({ error: 'Revisá las fechas de la pauta.' });
+  const days = Math.round((new Date(to) - new Date(from)) / 864e5) + 1;
+  const people = Math.round((p.padron_contacts || p.padron) * 0.6);
+  const perWeek = people ? (usdNet / 6 * 1000 / people) / (days / 7) : 1;
+  const ig = all("SELECT creds FROM accounts WHERE project_id = ? AND network = 'instagram' AND status = 'conectada'", p.id).map((a) => vault.open(a.creds))[0] || {};
+  const media = all(`SELECT DISTINCT po.external_id AS id, r.title FROM posts po JOIN reels r ON r.id = po.reel_id JOIN accounts a ON a.id = po.account_id
+    WHERE po.project_id = ? AND a.network = 'instagram' AND po.status = 'publicado' AND po.external_id != '' GROUP BY po.reel_id`, p.id);
+  try {
+    const c = { ...vault.open(p.ads_creds), pageId: ig.pageId, instagramId: ig.instagramBusinessId };
+    const startNow = from === today ? new Date(Date.now() + 15 * 6e4).toISOString() : `${from}T00:00:00-03:00`;
+    const r = await createCampaign(c, { name: `ACM · ${p.name}`, budget: cur === 'USD' ? usdNet : usdNet * p.ads_rate, start: startNow, end: `${to}T23:59:00-03:00`, perWeek, audienceId: p.ads_audience_id, political: !!p.ads_political, media: ig.pageId ? media : [] });
+    run("UPDATE projects SET ads_campaign_id = ?, ads_ads = ?, ads_error = '', ads_at = ? WHERE id = ?", r.campaignId, r.ads.length, localNow(), p.id);
+    sendProject(res, p.id);
+  } catch (e) { adsFail(res, p.id, e); }
+});
 
 // pauta
 app.put('/api/projects/:id/pauta', (req, res) => {

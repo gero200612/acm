@@ -34,6 +34,14 @@ http.createServer((req, res) => {
     if (p === '/yt/youtube/v3/channels') return send(res, 200, { items: [{ snippet: { title: 'Canal Mock', customUrl: '@canalmock' }, statistics: { subscriberCount: '321' } }] });
     if (p === '/ytup/upload/youtube/v3/videos') return send(res, 200, {}, { Location: `${B}/ytup/put/1` });
     if (p === '/ytup/put/1') return send(res, 200, { id: 'Y1' });
+    // Meta Ads
+    if (p === '/graph/act_999' && req.method === 'GET') return send(res, 200, { name: 'Cuenta Mock', currency: 'ARS', account_status: 1 });
+    if (p === '/graph/act_999/customaudiences') return send(res, 200, { id: 'AUD1' });
+    if (p === '/graph/AUD1/usersreplace') { const j = JSON.parse(body); return send(res, 200, { num_received: j.payload.data.length, session_id: j.session.session_id }); }
+    if (p === '/graph/act_999/campaigns') return params.status === 'PAUSED' ? send(res, 200, { id: 'CAMP1' }) : send(res, 400, { error: { message: 'no en pausa' } });
+    if (p === '/graph/act_999/adsets') { log.push('adset ' + JSON.stringify({ b: params.lifetime_budget, s: params.start_time, e: params.end_time, f: params.frequency_control_specs, t: params.targeting })); return send(res, 200, { id: 'SET1' }); }
+    if (p === '/graph/act_999/adcreatives') return params.source_instagram_media_id ? send(res, 200, { id: 'CR1' }) : send(res, 400, { error: { message: 'sin media' } });
+    if (p === '/graph/act_999/ads') return send(res, 200, { id: 'AD1' });
     send(res, 404, { error: { message: 'mock: no conozco ' + p } });
   });
 }).listen(3999, () => console.log('mock en 3999'));

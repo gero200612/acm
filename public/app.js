@@ -400,7 +400,35 @@ function pautaView() {
     </aside>
     <div class="pz-main" id="pauta-out">${pautaOut(p, c)}</div>
   </div>
-  <section class="card" id="pauta-tabla">${pautaTabla(p, c)}</section>`;
+  <section class="card" id="pauta-tabla">${pautaTabla(p, c)}</section>
+  ${adsCard(p)}`;
+}
+function adsCard(p) {
+  const a = p.ads || {};
+  const ok = !!p.ads_name;
+  const mgr = a.adAccountId ? `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${encodeURIComponent(a.adAccountId)}${p.ads_campaign_id ? '&selected_campaign_ids=' + encodeURIComponent(p.ads_campaign_id) : ''}` : '';
+  const step = (n, done, title, body) => `<div class="ads-step ${done ? 'done' : ''}"><span class="dot">${done ? icon('check', 14) : n}</span><div><b>${title}</b>${body}</div></div>`;
+  return `<section class="card ads" id="ads-card">
+    <div class="card-head"><div class="row" style="gap:10px"><span class="net facebook">${NETS.facebook.svg}</span><div><h2 class="h2">Meta Ads</h2><p class="small muted">La pauta sale de ACM: el padrón como público y la campaña creada en pausa para que la revises.</p></div></div>
+      ${ok ? `<span class="chip s-conectada">${esc(p.ads_name)} · ${esc(p.ads_currency)}</span>` : ''}</div>
+    ${p.ads_error ? `<p class="banner err">${esc(p.ads_error)}</p>` : ''}
+    <div class="ads-grid">
+      ${step(1, ok, 'Conectá la cuenta publicitaria', `
+        <p class="small muted">En Configuración del negocio, Cuentas publicitarias, copiá el ID (act_…). Asignala al usuario del sistema y generá un token con <code>ads_management</code> y <code>ads_read</code>.</p>
+        <div class="two"><label class="field">ID de la cuenta publicitaria<input class="input" data-ads="adAccountId" value="${esc(a.adAccountId)}" placeholder="act_1234567890"></label>
+        <label class="field">Token<input class="input masked" data-ads="accessToken" autocomplete="off" placeholder="${a.token ? 'Guardado · pegá uno nuevo para cambiarlo' : 'EAA…'}"></label></div>
+        ${ok && p.ads_currency !== 'USD' ? `<label class="field">Cotización del dólar (${esc(p.ads_currency)} por USD)<input class="input" type="number" min="0" data-ads="rate" value="${p.ads_rate || ''}" placeholder="1200"></label>` : ''}
+        <label class="check"><input type="checkbox" data-ads="political" ${p.ads_political ? 'checked' : ''}> Anuncios sobre elecciones o política (Meta pide verificar al anunciante y el «Pagado por»)</label>
+        <div class="row"><button class="btn primary sm" data-act="ads-save">Guardar y probar</button><a class="btn sm" href="https://business.facebook.com/settings/ad-accounts" target="_blank" rel="noopener noreferrer">Abrir Cuentas publicitarias ↗</a></div>`)}
+      ${step(2, !!p.ads_audience_id, 'Subí el padrón como público', `
+        <p class="small muted">${p.ads_audience_id ? `Público creado con ${fmt(p.ads_audience_count)} contactos el ${fmtDay(p.ads_at)}. Meta tarda unas horas en cruzarlo con sus usuarios.` : `Se mandan las huellas de ${fmt(p.padron_contacts)} teléfonos y mails; Meta las cruza con sus usuarios. Ni nombres ni DNI.`}</p>
+        <button class="btn sm ${p.ads_audience_id ? '' : 'primary'}" data-act="ads-audience" ${ok && p.padron_contacts ? '' : 'disabled'}>${p.ads_audience_id ? 'Volver a subir' : 'Subir padrón a Meta'}</button>`)}
+      ${step(3, !!p.ads_campaign_id, 'Creá la campaña en pausa', `
+        <p class="small muted">${p.ads_campaign_id ? `Campaña creada con ${p.ads_ads} ${p.ads_ads === 1 ? 'anuncio' : 'anuncios'}. Revisala en el Administrador de anuncios y prendela desde ahí.` : 'Alcance sobre el público del padrón, con el monto y las fechas de arriba (sin IVA, que Meta factura aparte), tope de vistas por semana y un anuncio por cada reel ya publicado en Instagram.'}</p>
+        <div class="row"><button class="btn sm ${p.ads_campaign_id ? '' : 'accent'}" data-act="ads-campaign" ${p.ads_audience_id && p.pauta?.budget ? '' : 'disabled'}>${p.ads_campaign_id ? 'Crear otra' : 'Crear campaña en pausa'}</button>
+        ${mgr ? `<a class="btn sm" href="${esc(mgr)}" target="_blank" rel="noopener noreferrer">Abrir el Administrador de anuncios ↗</a>` : ''}</div>`)}
+    </div>
+  </section>`;
 }
 function pautaDatos(p, c) {
   return `<dl class="pz-dl">
@@ -754,6 +782,15 @@ document.addEventListener('click', async (e) => {
         state.calMonth = act === 'cal-today' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : new Date(m.getFullYear(), m.getMonth() + (act === 'cal-next' ? 1 : -1), 1);
         render(); break; }
       case 'open-post': postDialog([Number(el.dataset.pid)]); break;
+      case 'ads-save': {
+        const box = $('#ads-card'), body = {};
+        $$('[data-ads]', box).forEach((i) => { const k = i.dataset.ads; if (i.type === 'checkbox') body[k] = i.checked; else if (i.value || k !== 'accessToken') body[k] = i.value; });
+        el.disabled = true; el.textContent = 'Probando…';
+        await api(`/api/projects/${state.project.id}/ads`, { method: 'PUT', body });
+        try { await api(`/api/projects/${state.project.id}/ads/test`, { method: 'POST' }); toast('Cuenta publicitaria conectada'); } catch (err) { fail(err); }
+        render(); break; }
+      case 'ads-audience': el.disabled = true; el.textContent = 'Subiendo…'; try { await api(`/api/projects/${state.project.id}/ads/audience`, { method: 'POST' }); toast('Padrón subido a Meta'); } catch (err) { fail(err); } render(); break;
+      case 'ads-campaign': el.disabled = true; el.textContent = 'Creando…'; try { await api(`/api/projects/${state.project.id}/ads/campaign`, { method: 'POST' }); toast('Campaña creada en pausa'); } catch (err) { fail(err); } render(); break;
       case 'post-now': { el.disabled = true; el.textContent = 'Publicando…'; await api(`/api/posts/${id}/now`, { method: 'POST' }); toast('Se está publicando: en un rato cambia el estado'); el.closest('dialog')?.close(); break; }
       case 'open-day': postDialog(state.posts.filter((x) => ymd(pdate(x.scheduled_at)) === el.dataset.day).map((x) => x.id)); break;
       case 'del-padron': if (await confirmBox('Quitar padrón', 'Se borran las huellas de teléfonos y mails. El número de socios queda.', 'Quitar')) { await api(`/api/projects/${state.project.id}/padron`, { method: 'DELETE' }); toast('Padrón quitado'); render(); } break;
