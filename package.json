@@ -1,0 +1,11 @@
+{
+  "name": "acm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ACM — Agentic Campaign Manager",
+  "type": "module",
+  "main": "server.js",
+  "engines": { "node": ">=24" },
+  "scripts": { "start": "node server.js", "dev": "ACM_PASSWORD=admin node --watch server.js" },
+  "dependencies": { "express": "^5.1.0", "multer": "^2.0.2" }
+}

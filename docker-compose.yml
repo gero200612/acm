@@ -1,0 +1,11 @@
+services:
+  acm:
+    build: .
+    restart: unless-stopped
+    environment:
+      - ACM_PASSWORD=${ACM_PASSWORD}
+      - ACM_SECRET=${ACM_SECRET}
+    volumes:
+      - acm-data:/data
+volumes:
+  acm-data:
