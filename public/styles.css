@@ -119,10 +119,12 @@ a { color: var(--blue-2); }
 
 .net { width: 28px; height: 28px; border-radius: 8px; display: inline-grid; place-items: center; color: #fff; flex: none; }
 .net svg { width: 16px; height: 16px; }
-.net.instagram { background: radial-gradient(circle at 30% 107%, #fdf497 0%, #fd5949 45%, #d6249f 60%, #285aeb 90%); }
-.net.facebook { background: #1877f2; }
-.net.tiktok { background: #111; }
-.net.youtube { background: #ff0000; }
+.net { aspect-ratio: 1; }
+.net.instagram { background: radial-gradient(circle at 30% 107%, #fdf497 0%, #fdf497 5%, #fd5949 45%, #d6249f 60%, #285aeb 90%); }
+.net.tiktok { background: #000; }
+/* Facebook y YouTube: el logo oficial ya es la forma (círculo azul, rectángulo rojo), sin baldosa detrás */
+.net.facebook, .net.youtube { background: transparent; }
+.net.facebook svg, .net.youtube svg { width: 100% !important; height: 100% !important; }
 
 .empty { text-align: center; padding: 48px 20px; color: var(--muted); }
 .empty .h2 { color: var(--ink); margin-bottom: 6px; }
@@ -537,11 +539,11 @@ dialog.wide { width: min(640px, calc(100vw - 32px)); }
 /* cuentas en dos columnas */
 .ac { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: stretch; }
 .ac-side { display: flex; flex-direction: column; gap: 16px; }
-.ac-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ac-add { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .ac-add button { min-width: 0; }
-.ac-add button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-add button .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ac-add button { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-weight: 600; font-size: 14px; }
-.ac-add button span { flex: 1; text-align: left; }
+.ac-add button .n { flex: 1; min-width: 0; text-align: left; } /* solo el nombre se estira: el ícono queda cuadrado */
 .ac-add button svg:last-child { color: var(--muted); }
 .ac-add button:hover { border-color: var(--blue); }
 .ac-nets { display: flex; flex-direction: column; gap: 10px; }
