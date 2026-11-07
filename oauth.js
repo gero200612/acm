@@ -40,7 +40,7 @@ export function authUrl(network, state) {
   }
   if (network === 'youtube') {
     // offline + consent: Google solo entrega el token de renovación así
-    const q = new URLSearchParams({ client_id: a.key, redirect_uri: redirectUri('youtube'), response_type: 'code', scope: SCOPES.youtube.join(' '), access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state });
+    const q = new URLSearchParams({ client_id: a.key, redirect_uri: redirectUri('youtube'), response_type: 'code', scope: SCOPES.youtube.join(' '), access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state, hl: process.env.ACM_GOOGLE_HL || 'en' }); // en inglés: lo piden los revisores de Google
     return `${bases().googleAuth}/o/oauth2/v2/auth?${q}`;
   }
   throw new Error('Esta red no se conecta con un clic.');

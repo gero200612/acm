@@ -207,7 +207,7 @@ export function recorridoCases(sb) {
     [G('conectar con un clic'), 'YouTube: pide acceso sin vencimiento y queda conectado', async () => {
       const a = (await api('POST', `/api/projects/${c.p}/accounts`, { network: 'youtube' })).j; c.ytq = a.id;
       const url = (await api('POST', `/api/accounts/${a.id}/oauth`)).j?.url;
-      yes(/access_type=offline/.test(url) && /prompt=consent/.test(url) && /youtube\.upload/.test(url), `link de autorizar: ${url}`);
+      yes(/access_type=offline/.test(url) && /prompt=consent/.test(url) && /youtube\.upload/.test(url) && /hl=en/.test(url), `link de autorizar: ${url}`);
       const back = (await sb.box.raw(url, false)).headers.get('location');
       const done = (await sb.box.raw(back)).headers.get('location') || '';
       yes(done.includes('conexion=ok'), `vuelta: ${decodeURIComponent(done)}`);
