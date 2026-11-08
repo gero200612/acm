@@ -12,7 +12,7 @@ async function call(who, url, opt = {}, timeout = 60000) {
   let body = null; try { body = text ? JSON.parse(text) : {}; } catch { body = null; }
   if (res.ok && (!body || !body.error || body.error.code === 'ok')) return { body: body || {}, res };
   const msg = body?.error?.error_user_msg || body?.error?.message || body?.error_description || body?.error?.code || `error ${res.status}`;
-  throw new Error(`${who} respondió: ${msg}`);
+  const err = new Error(`${who} respondió: ${msg}`); err.code = body?.error?.code || ''; throw err;
 }
 const form = (o) => new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== '')));
 
@@ -66,43 +66,77 @@ async function youtube(c, file, caption, log, title) {
 }
 
 // --- TikTok (Content Posting API, subida directa del archivo) ---
-async function tiktok(c, file, caption, log, _title, save) {
+// Las reglas de TikTok para publicar directo: la persona elige la privacidad (sin una elegida de antemano), decide si
+// permite comentarios, dúos y stitch (apagados de entrada) y declara si es contenido comercial. Eso viaja en cada publicación.
+const PRIVACY = ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'];
+export function tiktokOptions(o = {}) {
+  return {
+    privacy: PRIVACY.includes(o.privacy) ? o.privacy : '',
+    allowComment: !!o.allowComment, allowDuet: !!o.allowDuet, allowStitch: !!o.allowStitch,
+    brandOrganic: !!o.brandOrganic, brandContent: !!o.brandContent,
+  };
+}
+async function tiktokAuth(c, save) {
   const token = await getTikTokToken(c, save);
-  const auth = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' };
+  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' };
+}
+// lo que TikTok dice de la cuenta antes de publicar: nombre, foto, privacidades posibles y qué interacciones tiene apagadas
+export async function tiktokCreator(c, save = () => {}) {
+  const { body } = await call('TikTok', `${bases().tiktok}/v2/post/publish/creator_info/query/`, { method: 'POST', headers: await tiktokAuth(c, save), body: '{}' });
+  const d = body.data || {};
+  return { nickname: d.creator_nickname || '', username: d.creator_username || '', avatar: d.creator_avatar_url || '', privacyOptions: d.privacy_level_options || [],
+    commentDisabled: !!d.comment_disabled, duetDisabled: !!d.duet_disabled, stitchDisabled: !!d.stitch_disabled, maxDuration: d.max_video_post_duration_sec || 0 };
+}
+async function tiktok(c, file, caption, log, _title, save, opts = {}) {
+  const auth = await tiktokAuth(c, save);
+  const o = tiktokOptions(opts);
+  if (!o.privacy) throw new Error('Falta elegir quién puede ver el video en TikTok: abrí la publicación y elegí la privacidad.');
+  if (o.brandContent && o.privacy === 'SELF_ONLY') throw new Error('TikTok no deja que el contenido de marca sea privado: elegí otra privacidad.');
   const { body: ci } = await call('TikTok', `${bases().tiktok}/v2/post/publish/creator_info/query/`, { method: 'POST', headers: auth, body: '{}' });
-  const opts = ci.data?.privacy_level_options || [];
-  const privacy = opts.includes('PUBLIC_TO_EVERYONE') ? 'PUBLIC_TO_EVERYONE' : opts[0] || 'SELF_ONLY';
+  const opciones = ci.data?.privacy_level_options || [];
+  if (opciones.length && !opciones.includes(o.privacy)) throw new Error(`Esta cuenta de TikTok no permite esa privacidad (puede: ${opciones.join(', ')}).`);
   const size = fs.statSync(file).size;
   // TikTok: un solo pedazo hasta 64 MB; si no, pedazos de 10 MB y el último se lleva el resto
   const chunk = size <= 64 * 1024 * 1024 ? size : 10 * 1024 * 1024;
   const count = Math.max(1, Math.floor(size / chunk));
-  const { body: init } = await call('TikTok', `${bases().tiktok}/v2/post/publish/video/init/`, {
+  const init = async (privacy) => (await call('TikTok', `${bases().tiktok}/v2/post/publish/video/init/`, {
     method: 'POST', headers: auth,
-    body: JSON.stringify({ post_info: { title: caption.slice(0, 2200), privacy_level: privacy, disable_comment: false, disable_duet: false, disable_stitch: false }, source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunk, total_chunk_count: count } }),
-  });
+    body: JSON.stringify({ post_info: { title: caption.slice(0, 2200), privacy_level: privacy,
+      disable_comment: !o.allowComment || !!ci.data?.comment_disabled, disable_duet: !o.allowDuet || !!ci.data?.duet_disabled, disable_stitch: !o.allowStitch || !!ci.data?.stitch_disabled,
+      brand_content_toggle: o.brandContent, brand_organic_toggle: o.brandOrganic },
+      source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunk, total_chunk_count: count } }),
+  })).body;
+  let privacy = o.privacy, aviso = '', ini;
+  try { ini = await init(privacy); }
+  catch (e) {
+    // mientras TikTok no aprueba la app, solo deja publicar en privado
+    if (!/unaudited_client_can_only_post_to_private_accounts|can only post to private/i.test(e.message + (e.code || '')) || privacy === 'SELF_ONLY') throw e;
+    privacy = 'SELF_ONLY'; aviso = 'publicado como privado: la app de TikTok todavía no está aprobada';
+    ini = await init(privacy);
+  }
   const buf = fs.readFileSync(file);
   for (let i = 0; i < count; i++) {
     const a = i * chunk, b = i === count - 1 ? size : a + chunk;
-    await call('TikTok', init.data.upload_url, { method: 'PUT', headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(b - a), 'Content-Range': `bytes ${a}-${b - 1}/${size}` }, body: buf.subarray(a, b) }, 600000);
+    await call('TikTok', ini.data.upload_url, { method: 'PUT', headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(b - a), 'Content-Range': `bytes ${a}-${b - 1}/${size}` }, body: buf.subarray(a, b) }, 600000);
   }
   log('video subido');
-  const id = init.data.publish_id;
+  const id = ini.data.publish_id;
   for (let i = 0; i < 36; i++) { // hasta 3 minutos
     const { body: st } = await call('TikTok', `${bases().tiktok}/v2/post/publish/status/fetch/`, { method: 'POST', headers: auth, body: JSON.stringify({ publish_id: id }) });
     const s = st.data?.status;
-    if (s === 'PUBLISH_COMPLETE') return { id, url: '', note: privacy === 'SELF_ONLY' ? 'publicado como privado (la app de TikTok todavía no está aprobada)' : '' };
+    if (s === 'PUBLISH_COMPLETE') return { id, url: '', note: aviso || (privacy === 'SELF_ONLY' ? 'publicado como privado (así lo elegiste)' : '') };
     if (s === 'FAILED') throw new Error(`TikTok no lo publicó: ${st.data?.fail_reason || 'sin motivo'}`);
     await sleep(5000);
   }
-  return { id, url: '', note: 'TikTok lo sigue procesando' };
+  return { id, url: '', note: aviso || 'TikTok lo sigue procesando' };
 }
 
 const PUBLISHERS = { instagram, facebook, youtube, tiktok };
 
-export async function publish(network, creds, file, caption, title, save, log = () => {}) {
+export async function publish(network, creds, file, caption, title, save, log = () => {}, opts = {}) {
   const fn = PUBLISHERS[network];
   if (!fn) throw new Error('Red desconocida.');
-  try { return await fn(creds, file, caption, log, title, save); }
+  try { return await fn(creds, file, caption, log, title, save, opts); }
   catch (e) {
     let msg = e.message || 'Algo falló.';
     for (const v of Object.values(creds)) if (typeof v === 'string' && v.length > 12) msg = msg.split(v).join('••••');

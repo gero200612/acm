@@ -133,7 +133,7 @@ export function recorridoCases(sb) {
       await api('DELETE', `/api/projects/${o.id}`);
     }],
     [G('publicación'), 'Publica en las 4 redes y falla la cuenta con error', async () => {
-      const items = Object.values(c.acc).map((id) => ({ reel_id: c.reel, account_id: id, scheduled_at: c.now }));
+      const items = Object.values(c.acc).map((id) => ({ reel_id: c.reel, account_id: id, scheduled_at: c.now, ...(id === c.acc.tiktok ? { options: { privacy: 'SELF_ONLY' } } : {}) }));
       items.push({ reel_id: c.reel, account_id: c.bad, scheduled_at: c.now });
       items.push({ reel_id: c.reel, account_id: c.acc.instagram, scheduled_at: '2026-12-11T10:00' }); // con T, como el navegador
       eq((await api('POST', `/api/projects/${c.p}/posts`, items)).j?.created, 6, 'programadas');
@@ -216,7 +216,7 @@ export function recorridoCases(sb) {
     }],
     [G('conectar con un clic'), 'Publica en las cuentas conectadas con un clic (renueva con la app del servidor)', async () => {
       const now = (await api('GET', '/api/clock')).j.now;
-      await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel, account_id: c.ttq, scheduled_at: now }, { reel_id: c.reel, account_id: c.ytq, scheduled_at: now }]);
+      await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel, account_id: c.ttq, scheduled_at: now, options: { privacy: 'PUBLIC_TO_EVERYONE' } }, { reel_id: c.reel, account_id: c.ytq, scheduled_at: now }]);
       let P = []; for (let i = 0; i < 30; i++) { await sleep(1000); P = (await api('GET', `/api/projects/${c.p}/posts`)).j.filter((x) => [c.ttq, c.ytq].includes(x.account_id)); if (P.every((x) => !['programado', 'publicando'].includes(x.status))) break; }
       for (const x of P) eq(x.status, 'publicado', `${x.network} (${x.error})`);
     }],
@@ -231,6 +231,13 @@ export function recorridoCases(sb) {
       yes((await bad(`code=TTCODE&state=${encodeURIComponent(st2)}`, false)).includes('sesión'), 'aceptó la vuelta sin sesión de ACM');
       const acc = (await api('GET', `/api/projects/${c.p}/accounts`)).j.find((x) => x.id === c.ttq);
       eq(acc.status, 'conectada', 'la cuenta tendría que seguir conectada');
+    }],
+    [G('conectar con un clic'), 'TikTok: muestra la cuenta y sus opciones antes de publicar', async () => {
+      const r = (await api('GET', `/api/accounts/${c.ttq}/tiktok`)).j;
+      eq([r.nickname, r.username, r.duetDisabled], ['Cuenta Mock', 'mock.tt', true], 'nombre, usuario y dúos apagados por la cuenta');
+      yes(r.privacyOptions.includes('SELF_ONLY'), 'faltan las privacidades');
+      const P = (await api('GET', `/api/projects/${c.p}/posts`)).j.find((x) => x.account_id === c.ttq);
+      yes(/privado/.test(P.note), `la publicación pública tendría que haber salido privada y avisar: ${P.note}`);
     }],
     [G('páginas públicas'), 'Qué es ACM, privacidad y términos se ven sin entrar', async () => {
       for (const [u, want] of [['/acerca', 'Agentic Campaign Manager'], ['/privacidad', 'Limited Use'], ['/terminos', 'YouTube Terms of Service']]) {

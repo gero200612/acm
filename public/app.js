@@ -465,6 +465,7 @@ function postDialog(ids) {
         ${x.error ? `<p class="banner err" style="margin:0">${esc(x.error)}</p>` : ''}
         ${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}
         ${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">Ver en ${NETS[x.network].name} ↗</a>` : ''}
+        ${x.network === 'tiktok' && (x.status === 'programado' || x.status === 'fallido') ? `<div class="tt-opts" data-acc="${x.account_id}"><p class="small muted">Cargando la cuenta de TikTok…</p></div>` : ''}
         <div class="row">
           ${x.status === 'programado' ? `<button class="btn sm accent" data-act="post-now">Publicar ahora</button>` : ''}
           ${x.status === 'fallido' ? `<button class="btn sm accent" data-act="post-now">Reintentar</button>` : ''}
@@ -474,6 +475,54 @@ function postDialog(ids) {
     </div>`).join(''));
   d.classList.add('wide');
   d.addEventListener('close', () => render());
+  // TikTok: antes de publicar se muestra la cuenta y se eligen privacidad e interacciones (reglas de TikTok)
+  $$('.tt-opts', d).forEach(async (box) => {
+    const x = state.posts.find((p) => p.id === Number(box.closest('.pd').dataset.id));
+    let o = {}; try { o = x.options ? JSON.parse(x.options) : {}; } catch {}
+    try { const c = await api(`/api/accounts/${box.dataset.acc}/tiktok`); box.innerHTML = ttForm(c, o); ttWire(box); }
+    catch (e) { box.innerHTML = `<p class="banner err" style="margin:0">${esc(e.message)}</p>`; }
+  });
+}
+
+// formulario de publicación en TikTok: cuenta, privacidad (sin elegir), interacciones (apagadas), contenido comercial y declaración
+const TT_PRIV = { PUBLIC_TO_EVERYONE: 'Todos', MUTUAL_FOLLOW_FRIENDS: 'Amigos (se siguen mutuamente)', FOLLOWER_OF_CREATOR: 'Seguidores', SELF_ONLY: 'Solo yo' };
+function ttForm(c, o = {}) {
+  const opts = c ? c.privacyOptions : Object.keys(TT_PRIV);
+  const chk = (k, label, off) => `<label class="tt-chk ${off ? 'off' : ''}"><input type="checkbox" data-tt="${k}" ${o[k] && !off ? 'checked' : ''} ${off ? 'disabled' : ''}> ${label}${off ? ' <span class="small muted">(la cuenta lo tiene desactivado)</span>' : ''}</label>`;
+  return `<div class="tt-box">
+    ${c ? `<div class="tt-who">${c.avatar ? `<img src="${esc(c.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<div><b>${esc(c.nickname)}</b><span class="small muted">@${esc(c.username)} · se publica en esta cuenta de TikTok</span></div></div>` : ''}
+    <label class="field">¿Quién puede ver este video?<select class="select" data-tt="privacy" required>
+      <option value="" ${o.privacy ? '' : 'selected'} disabled>Elegí la privacidad</option>
+      ${opts.map((v) => `<option value="${v}" ${o.privacy === v ? 'selected' : ''}>${TT_PRIV[v] || v}</option>`).join('')}</select></label>
+    <div class="tt-row">${chk('allowComment', 'Permitir comentarios', c?.commentDisabled)}${chk('allowDuet', 'Permitir dúos', c?.duetDisabled)}${chk('allowStitch', 'Permitir stitch', c?.stitchDisabled)}</div>
+    <label class="tt-chk"><input type="checkbox" data-tt="commercial" ${o.brandOrganic || o.brandContent ? 'checked' : ''}> Es contenido comercial (promociona una marca, producto o servicio)</label>
+    <div class="tt-brand" ${o.brandOrganic || o.brandContent ? '' : 'hidden'}>
+      <label class="tt-chk"><input type="checkbox" data-tt="brandOrganic" ${o.brandOrganic ? 'checked' : ''}> Tu marca: se etiqueta como «Contenido promocional»</label>
+      <label class="tt-chk"><input type="checkbox" data-tt="brandContent" ${o.brandContent ? 'checked' : ''}> Contenido de marca de un tercero: se etiqueta como «Colaboración pagada»</label>
+    </div>
+    <p class="small muted tt-decl"></p>
+  </div>`;
+}
+function ttWire(box) {
+  const decl = () => {
+    const bc = $('[data-tt=brandContent]', box)?.checked;
+    $('.tt-decl', box).innerHTML = `Al publicar, aceptás ${bc ? 'la <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener noreferrer">Política de contenido de marca</a> y ' : ''}la <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener noreferrer">Confirmación de uso de música</a> de TikTok.`;
+    $('.tt-brand', box).hidden = !$('[data-tt=commercial]', box).checked;
+    const priv = $('[data-tt=privacy]', box), selfOnly = [...priv.options].find((op) => op.value === 'SELF_ONLY');
+    if (selfOnly) selfOnly.disabled = !!bc; // TikTok no permite contenido de marca en privado
+  };
+  box.addEventListener('change', decl); decl();
+}
+// lee el formulario; devuelve null y avisa si falta algo
+function ttRead(box) {
+  if (!box) return {};
+  const v = (k) => $(`[data-tt=${k}]`, box);
+  if (!v('privacy')) { toast('No se pudo cargar la cuenta de TikTok: revisá la conexión', true); return null; }
+  const o = { privacy: v('privacy').value, allowComment: v('allowComment').checked, allowDuet: v('allowDuet').checked, allowStitch: v('allowStitch').checked,
+    brandOrganic: v('commercial').checked && v('brandOrganic').checked, brandContent: v('commercial').checked && v('brandContent').checked };
+  if (!o.privacy) { toast('Elegí quién puede ver el video en TikTok', true); v('privacy').focus(); return null; }
+  if (v('commercial').checked && !o.brandOrganic && !o.brandContent) { toast('Indicá si el contenido comercial es de tu marca o de un tercero', true); return null; }
+  return o;
 }
 
 function pautaView() {
@@ -836,6 +885,7 @@ function distributeDialog(reel) {
     <p class="muted small">«${esc(reel.title)}» sale en cada cuenta elegida, con horarios separados para que no publiquen lo mismo a la vez.</p>
     <div class="row"><b class="small">Cuentas</b><span class="spacer"></span><button type="button" class="btn sm ghost" data-all>Todas</button><button type="button" class="btn sm ghost" data-none>Ninguna</button></div>
     <div class="acc-pick">${A.map((a) => `<label><input type="checkbox" name="acc" value="${a.id}" ${a.status === 'conectada' ? 'checked' : ''}>${netBadge(a.network)}${esc(accName(a))}<span class="spacer"></span><span class="small muted">${ACC_STATUS[a.status]}</span></label>`).join('') || '<p class="small muted">No hay cuentas activas.</p>'}</div>
+    ${A.some((a) => a.network === 'tiktok') ? `<div class="tt-dist" hidden><b class="small">TikTok</b>${ttForm(null)}</div>` : ''}
     ${A.some((a) => a.status !== 'conectada') ? '<p class="hint" style="margin-top:-6px">Las cuentas sin conectar no vienen tildadas: si las elegís, conectalas antes de la hora o esa publicación falla.</p>' : ''}
     <label class="field">Texto de la publicación<textarea class="textarea" name="caption" rows="3" placeholder="El texto que acompaña al reel, con sus #hashtags">${esc(reel.caption || '')}</textarea><span class="hint">Se guarda en el reel y sale igual en todas las cuentas</span></label>
     <div class="two"><label class="field">Primera publicación<input class="input" type="datetime-local" name="start" value="${localInput(start)}" ${state.project.propaganda_until ? `max="${state.project.propaganda_until}T23:59"` : ''} required></label>
@@ -843,17 +893,23 @@ function distributeDialog(reel) {
     <div class="row"><span class="spacer"></span><button class="btn" type="button" data-close>Cancelar</button><button class="btn accent" type="submit">Programar</button></div>
   </form>`);
   const f = d.querySelector('form');
-  d.querySelector('[data-all]').onclick = () => $$('[name=acc]', f).forEach((c) => (c.checked = true));
-  d.querySelector('[data-none]').onclick = () => $$('[name=acc]', f).forEach((c) => (c.checked = false));
+  const ttBox = d.querySelector('.tt-dist');
+  const ttIds = new Set(A.filter((a) => a.network === 'tiktok').map((a) => a.id));
+  const ttShow = () => { if (ttBox) ttBox.hidden = !$$('[name=acc]:checked', f).some((c) => ttIds.has(Number(c.value))); };
+  if (ttBox) { ttWire(ttBox); f.addEventListener('change', ttShow); ttShow(); }
+  d.querySelector('[data-all]').onclick = () => { $$('[name=acc]', f).forEach((c) => (c.checked = true)); ttShow?.(); };
+  d.querySelector('[data-none]').onclick = () => { $$('[name=acc]', f).forEach((c) => (c.checked = false)); ttShow?.(); };
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const ids = $$('[name=acc]:checked', f).map((c) => Number(c.value));
     if (!ids.length) return toast('Elegí al menos una cuenta', true);
+    const ttOpts = ids.some((i) => ttIds.has(i)) ? ttRead(ttBox) : undefined;
+    if (ttOpts === null) return;
     // mezcla el orden para que las cuentas no salgan siempre en la misma secuencia
     for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
     const t0 = new Date(f.start.value), gap = Number(f.gap.value);
     const lim = state.project.propaganda_until;
-    const items = ids.map((id, i) => { const t = new Date(t0.getTime() + i * gap * 6e4); return { reel_id: reel.id, account_id: id, scheduled_at: localInput(t).replace('T', ' ') }; });
+    const items = ids.map((id, i) => { const t = new Date(t0.getTime() + i * gap * 6e4); return { reel_id: reel.id, account_id: id, scheduled_at: localInput(t).replace('T', ' '), ...(ttIds.has(id) ? { options: ttOpts } : {}) }; });
     if (lim && items.some((x) => x.scheduled_at.slice(0, 10) > lim)) return toast(`Algunas publicaciones caen después del ${fmtShort(lim)}, la fecha máxima de propaganda. Empezá antes o separalas menos.`, true);
     try { if (f.caption.value !== (reel.caption || '')) await api(`/api/reels/${reel.id}`, { method: 'PUT', body: { caption: f.caption.value } });
       await api(`/api/projects/${state.project.id}/posts`, { method: 'POST', body: items }); d.close(); toast(`Programado en ${items.length} ${items.length === 1 ? 'cuenta' : 'cuentas'}`); render(); } catch (err) { fail(err); }
@@ -961,7 +1017,7 @@ document.addEventListener('click', async (e) => {
       case 'lab-open': state.lab.sel = Number(el.dataset.rid); render(); break;
       case 'lab-banco-sel': state.lab.bancoSel = Number(el.dataset.rid); render(); break;
       case 'lab-banco': { state.lab.running = true; render(); try { const r = await api('/api/lab/banco', { method: 'POST' }); state.lab.bancoSel = r.run?.id; toast(r.ok === r.total ? `Pasaron los ${r.total} casos` : `Pasaron ${r.ok} de ${r.total}`, r.ok !== r.total); } catch (err) { fail(err); } state.lab.running = false; render(); break; }
-      case 'post-now': { el.disabled = true; el.textContent = 'Publicando…'; await api(`/api/posts/${id}/now`, { method: 'POST' }); toast('Se está publicando: en un rato cambia el estado'); el.closest('dialog')?.close(); break; }
+      case 'post-now': { const box = el.closest('.pd')?.querySelector('.tt-opts'); const options = box ? ttRead(box) : undefined; if (options === null) break; el.disabled = true; el.textContent = 'Publicando…'; await api(`/api/posts/${id}/now`, { method: 'POST', body: options ? { options } : {} }); toast('Se está publicando: en un rato cambia el estado'); el.closest('dialog')?.close(); break; }
       case 'open-day': postDialog(state.posts.filter((x) => ymd(pdate(x.scheduled_at)) === el.dataset.day).map((x) => x.id)); break;
       case 'del-padron': if (await confirmBox('Quitar padrón', 'Se borran las huellas de teléfonos y mails. El número de socios queda.', 'Quitar')) { await api(`/api/projects/${state.project.id}/padron`, { method: 'DELETE' }); toast('Padrón quitado'); render(); } break;
       case 'connect-account': connectPanel(state.accounts.find((a) => a.id === id)); break;

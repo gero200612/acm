@@ -693,3 +693,16 @@ dialog.wide { width: min(640px, calc(100vw - 32px)); }
 .cp-quick .btn .net { width: 22px; height: 22px; }
 .cp-or { text-align: center; margin: 6px 0 10px; }
 @media (max-width: 560px) { .cp-quick { flex-direction: column; align-items: stretch; } }
+
+/* TikTok: cuenta y opciones antes de publicar */
+.tt-box { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--surface); }
+.tt-who { display: flex; align-items: center; gap: 10px; }
+.tt-who img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex: none; }
+.tt-who div { display: flex; flex-direction: column; }
+.tt-row { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.tt-chk { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.tt-chk.off { color: var(--muted); }
+.tt-brand { display: flex; flex-direction: column; gap: 6px; padding-left: 24px; }
+.tt-decl { margin: 0; }
+.tt-decl a { color: var(--blue); }
+.tt-dist { display: flex; flex-direction: column; gap: 8px; }

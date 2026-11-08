@@ -38,8 +38,13 @@ export function startSimulator(port = 0) {
       log.push(`authorize ${p.startsWith('/tt') ? 'tiktok' : 'google'} scope=${q.get('scope')} offline=${q.get('access_type') || ''}`);
       res.writeHead(302, { Location: back.toString() }); return res.end();
     }
-    if (p === '/tt/v2/post/publish/creator_info/query/') return send(res, 200, { data: { privacy_level_options: ['SELF_ONLY'] }, ...ok });
-    if (p === '/tt/v2/post/publish/video/init/') { const j = JSON.parse(body); return send(res, 200, { data: { publish_id: 'P1', upload_url: `${B}/tt-up` }, ...ok, _j: j }); }
+    if (p === '/tt/v2/post/publish/creator_info/query/') return send(res, 200, { data: { creator_nickname: 'Cuenta Mock', creator_username: 'mock.tt', creator_avatar_url: 'https://example.com/a.png', privacy_level_options: ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'], comment_disabled: false, duet_disabled: true, stitch_disabled: false, max_video_post_duration_sec: 600 }, ...ok });
+    if (p === '/tt/v2/post/publish/video/init/') {
+      const j = JSON.parse(body); log.push('ttinit ' + JSON.stringify(j.post_info));
+      // como el Sandbox real: una app sin auditar solo publica en privado
+      if (j.post_info?.privacy_level !== 'SELF_ONLY') return send(res, 403, { error: { code: 'unaudited_client_can_only_post_to_private_accounts', message: 'Please review our integration guidelines' } });
+      return send(res, 200, { data: { publish_id: 'P1', upload_url: `${B}/tt-up` }, ...ok });
+    }
     if (p === '/tt-up') return send(res, 201, {});
     if (p === '/tt/v2/post/publish/status/fetch/') return send(res, 200, { data: { status: 'PUBLISH_COMPLETE' }, ...ok });
     // Google

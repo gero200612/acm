@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readPadron } from './padron.js';
-import { publish } from './publisher.js';
+import { publish, tiktokOptions, tiktokCreator } from './publisher.js';
 import { testAds, uploadAudience, createCampaign } from './ads.js';
 import { initTrace, traced } from './trace.js';
 import { runBanco } from './banco.js';
@@ -66,7 +66,7 @@ if (!cols('pauta').includes('budget')) db.exec('ALTER TABLE pauta ADD COLUMN bud
 if (!cols('pauta').includes('end_date')) db.exec("ALTER TABLE pauta ADD COLUMN end_date TEXT DEFAULT ''");
 for (const [c, def] of [['propaganda_until', "TEXT DEFAULT ''"], ['padron_contacts', 'INTEGER DEFAULT 0'], ['padron_phones', 'INTEGER DEFAULT 0'], ['padron_emails', 'INTEGER DEFAULT 0'], ['padron_file', "TEXT DEFAULT ''"], ['padron_at', "TEXT DEFAULT ''"]])
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
-for (const [c, def] of [['external_id', "TEXT DEFAULT ''"], ['external_url', "TEXT DEFAULT ''"], ['error', "TEXT DEFAULT ''"], ['note', "TEXT DEFAULT ''"], ['published_at', "TEXT DEFAULT ''"], ['attempts', 'INTEGER DEFAULT 0']])
+for (const [c, def] of [['options', "TEXT DEFAULT ''"], ['external_id', "TEXT DEFAULT ''"], ['external_url', "TEXT DEFAULT ''"], ['error', "TEXT DEFAULT ''"], ['note', "TEXT DEFAULT ''"], ['published_at', "TEXT DEFAULT ''"], ['attempts', 'INTEGER DEFAULT 0']])
   if (!cols('posts').includes(c)) db.exec(`ALTER TABLE posts ADD COLUMN ${c} ${def}`);
 // si el servidor se reinició a mitad de una subida, esas vuelven a la fila
 db.exec("UPDATE posts SET status = 'programado' WHERE status = 'publicando'");
@@ -373,7 +373,7 @@ app.get('/api/projects/:id/posts', (req, res) => res.json(all(`
   WHERE p.project_id = ? ORDER BY p.scheduled_at`, req.params.id)));
 app.post('/api/projects/:id/posts', (req, res) => {
   const items = Array.isArray(req.body) ? req.body : [req.body];
-  const ins = db.prepare('INSERT INTO posts (project_id, reel_id, account_id, scheduled_at) VALUES (?, ?, ?, ?)');
+  const ins = db.prepare('INSERT INTO posts (project_id, reel_id, account_id, scheduled_at, options) VALUES (?, ?, ?, ?, ?)');
   db.exec('BEGIN');
   try {
     for (const it of items) {
@@ -382,7 +382,7 @@ app.post('/api/projects/:id/posts', (req, res) => {
       if (!at) throw new Error('Fecha inválida: tiene que ser AAAA-MM-DD HH:MM');
       if (!get('SELECT 1 FROM reels WHERE id = ? AND project_id = ?', it.reel_id, req.params.id) || !get('SELECT 1 FROM accounts WHERE id = ? AND project_id = ?', it.account_id, req.params.id))
         throw new Error('El reel o la cuenta no son de este proyecto');
-      ins.run(req.params.id, it.reel_id, it.account_id, at);
+      ins.run(req.params.id, it.reel_id, it.account_id, at, it.options ? JSON.stringify(tiktokOptions(it.options)) : '');
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); return res.status(400).json({ error: e.message }); }
@@ -393,6 +393,7 @@ app.put('/api/posts/:id', (req, res) => {
   if (!p) return res.status(404).json({ error: 'No existe' });
   if (p.status === 'publicando') return res.status(409).json({ error: 'Se está publicando en este momento' });
   const d = pick(req.body || {}, ['scheduled_at', 'status']);
+  if (req.body?.options) d.options = JSON.stringify(tiktokOptions(req.body.options));
   if ('scheduled_at' in d && !(d.scheduled_at = schedAt(d.scheduled_at))) return res.status(400).json({ error: 'Fecha inválida: tiene que ser AAAA-MM-DD HH:MM' });
   if (d.status && !['programado', 'publicado', 'fallido'].includes(d.status)) return res.status(400).json({ error: 'Estado inválido' });
   if (d.status === 'programado') d.error = '';
@@ -406,9 +407,18 @@ app.post('/api/posts/:id/now', (req, res) => {
   if (!p) return res.status(404).json({ error: 'No existe' });
   if (p.status === 'publicando') return res.status(409).json({ error: 'Ya se está publicando' });
   if (p.status === 'publicado') return res.status(409).json({ error: 'Ya está publicada' });
+  if (req.body?.options) run('UPDATE posts SET options = ? WHERE id = ?', JSON.stringify(tiktokOptions(req.body.options)), p.id);
   run("UPDATE posts SET status = 'programado', scheduled_at = ?, error = '' WHERE id = ?", localNow(), p.id);
   setImmediate(tick);
   res.json({ ok: true });
+});
+// TikTok pide mostrar la cuenta y sus opciones antes de publicar (creator_info)
+app.get('/api/accounts/:id/tiktok', async (req, res) => {
+  const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
+  if (!a || a.network !== 'tiktok') return res.status(404).json({ error: 'No es una cuenta de TikTok' });
+  const creds = vault.open(a.creds);
+  const save = (fresh) => run('UPDATE accounts SET creds = ? WHERE id = ?', vault.seal({ ...vault.open(get('SELECT creds FROM accounts WHERE id = ?', a.id).creds), ...fresh }), a.id);
+  try { res.json(await tiktokCreator(creds, save)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/clock', (req, res) => res.json({ now: localNow(), tz: TZ }));
 
@@ -564,7 +574,8 @@ async function tick() {
       const save = (fresh) => run('UPDATE accounts SET creds = ? WHERE id = ?', vault.seal({ ...vault.open(get('SELECT creds FROM accounts WHERE id = ?', p.acc_id).creds), ...fresh }), p.acc_id);
       try {
         const r = await traced({ kind: 'publicacion', title: `${p.title} en ${({ instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' })[p.network]}`, project_id: p.project_id, account_id: p.acc_id, post_id: p.id, network: p.network, secrets: Object.values(creds) },
-          async () => { const x = await publish(p.network, creds, path.join(UPLOADS, path.basename(p.file)), (p.caption || p.title || '').trim(), p.title, save, (m) => console.log(`[publicar ${p.id}] ${m}`)); return { ...x, summary: x.url || x.note || 'Publicado' }; });
+          async () => { let opts = {}; try { opts = p.options ? JSON.parse(p.options) : {}; } catch {}
+            const x = await publish(p.network, creds, path.join(UPLOADS, path.basename(p.file)), (p.caption || p.title || '').trim(), p.title, save, (m) => console.log(`[publicar ${p.id}] ${m}`), opts); return { ...x, summary: x.url || x.note || 'Publicado' }; });
         run("UPDATE posts SET status = 'publicado', external_id = ?, external_url = ?, note = ?, error = '', published_at = ? WHERE id = ?", String(r.id || ''), r.url || '', r.note || '', localNow(), p.id);
         console.log(`[publicar ${p.id}] publicado en ${p.network}`);
       } catch (e) {

@@ -16,7 +16,7 @@ import { startSandbox, recorridoCases } from './recorrido.js';
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (cond, what) => { if (!cond) throw new Error(what); };
 
-function cases(video) {
+function cases(video, sim) {
   const IG = { pageId: 'PAGE1', pageAccessToken: 'EAAprueba1234567', instagramBusinessId: 'IG1' };
   return [
     ['Conexiones', 'Instagram: trae el usuario y los seguidores', async () => { const r = await testConnection('instagram', { pageId: 'PAGE1', pageAccessToken: IG.pageAccessToken }); eq(r.connectedAs, '@mock.ig', 'usuario'); eq(r.extra.instagramBusinessId, 'IG1', 'ID de Instagram'); }],
@@ -30,7 +30,16 @@ function cases(video) {
     }],
     ['Publicación', 'Instagram: sube el video y publica el Reel', async () => { const r = await publish('instagram', IG, video, 'Prueba', 'Prueba'); eq(r.id, 'M1', 'publicación'); yes(r.url.includes('instagram.com'), 'sin link'); }],
     ['Publicación', 'Facebook: publica el Reel de la Página', async () => { const r = await publish('facebook', IG, video, 'Prueba', 'Prueba'); eq(r.id, 'V1', 'video'); }],
-    ['Publicación', 'TikTok: sube y avisa si sale privado', async () => { const r = await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba'); eq(r.id, 'P1', 'publicación'); yes(/privado/.test(r.note), 'no avisó que sale privado'); }],
+    ['Publicación', 'TikTok: sin app aprobada pasa a privado y avisa', async () => { const r = await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba', () => {}, () => {}, { privacy: 'PUBLIC_TO_EVERYONE', allowComment: true }); eq(r.id, 'P1', 'publicación'); yes(/privado/.test(r.note), 'no avisó que sale privado'); }],
+    ['Publicación', 'TikTok: sin privacidad elegida no publica (regla de TikTok)', async () => {
+      let msg = ''; try { await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba'); } catch (e) { msg = e.message; }
+      yes(/privacidad/.test(msg), `tendría que pedir la privacidad: ${msg}`);
+    }],
+    ['Publicación', 'TikTok: comentarios, dúos y stitch apagados salvo que se pidan', async () => {
+      await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba', () => {}, () => {}, { privacy: 'SELF_ONLY', allowComment: true });
+      const last = JSON.parse(sim.log.filter((l) => l.startsWith('ttinit ')).pop().slice(7));
+      eq([last.disable_comment, last.disable_duet, last.disable_stitch], [false, true, true], 'comentarios, dúos, stitch apagados');
+    }],
     ['Publicación', 'YouTube: sube el Short', async () => { const r = await publish('youtube', { clientId: 'c', clientSecret: 's', refreshToken: 'r' }, video, 'Prueba', 'Prueba'); eq(r.id, 'Y1', 'video'); }],
     ['Reglas', 'No publica con la cuenta pausada, desconectada ni fuera de fecha', async () => {
       eq(postBlocked({ scheduled_at: '2026-12-01 10:00', propaganda_until: '2026-12-10', acc_status: 'conectada' }), null, 'cuenta conectada en fecha');
@@ -96,7 +105,7 @@ export async function runBanco() {
   try { sb.box = await startSandbox(sim.bases); } catch (e) { sb.error = e.message; }
   try {
     await traced({ kind: 'banco', title: 'Banco de pruebas', bases: sim.bases }, async () => {
-      for (const [group, name, fn] of [...cases(video), ...recorridoCases(sb)]) {
+      for (const [group, name, fn] of [...cases(video, sim), ...recorridoCases(sb)]) {
         total++;
         const t0 = Date.now();
         try { await fn(); ok++; step('caso', `${group} · ${name}`, 'ok', Date.now() - t0); }
