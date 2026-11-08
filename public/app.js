@@ -692,10 +692,16 @@ function campanasView() {
       <p class="small muted">${c.start_date || c.end_date ? `${c.start_date ? fmtShort(c.start_date) : 'hoy'} → ${c.end_date ? fmtShort(c.end_date) : 'fin de campaña'}` : 'Sin fechas: usa las de la pauta'}${c.notes ? ' · ' + esc(c.notes) : ''}</p>
       <div class="cg-money"><div><b>${cusd(c.budget)}</b><span>presupuesto</span></div><div><b>${cusd(c.spent || 0)}</b><span>gastado${c.spent_at ? ' al ' + fmtShort(c.spent_at) : ''}</span></div><div><b>${fmtK(c.impressions || 0)}</b><span>impresiones</span></div><div><b>${fmtK(c.reach || 0)}</b><span>personas</span></div></div>
       <div class="cg-spend"><i style="width:${g}%"></i></div>
-      <div class="cg-tags"><span class="small muted">Cuentas</span>${c.accounts.length ? c.accounts.map((id) => accById[id] ? `<span class="chip nodot">${netBadge(accById[id].network)} ${esc(accName(accById[id]))}</span>` : '').join('') : '<span class="small">todas las de Instagram</span>'}</div>
-      <div class="cg-tags"><span class="small muted">Reels</span>${c.reels.length ? c.reels.map((id) => reelById[id] ? `<a class="chip nodot" href="#/p/${p.id}/reel/${id}">${esc(reelById[id].title)}</a>` : '').join('') : '<span class="small">todos los publicados</span>'}</div>
+      <div class="cg-who">
+        <div><span class="lbl">Cuentas</span>${(() => { const A = c.accounts.map((id) => accById[id]).filter(Boolean); return A.length
+          ? `<span class="cg-icons" title="${esc(A.map(accName).join(' · '))}">${A.map((a) => netBadge(a.network)).join('')}</span><span class="small">${A.length === 1 ? esc(accName(A[0])) : `${A.length} cuentas`}</span>`
+          : '<span class="small">Todas las de Instagram</span>'; })()}</div>
+        <div><span class="lbl">Reels</span>${(() => { const R = c.reels.map((id) => reelById[id]).filter(Boolean); return R.length
+          ? `<span class="cg-thumbs">${R.slice(0, 4).map((r) => `<a href="#/p/${p.id}/reel/${r.id}" title="${esc(r.title)}"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video></a>`).join('')}</span><span class="small">${R.length === 1 ? esc(R[0].title) : `${R.length} reels`}</span>`
+          : '<span class="small">Todos los publicados</span>'; })()}</div>
+      </div>
       ${c.error ? `<p class="banner err">${esc(c.error)}</p>` : ''}
-      ${c.meta_campaign_id ? '' : `<div class="row"><button class="btn sm accent" data-act="camp-meta">Crear en Meta (en pausa)</button></div>`}
+      ${c.meta_campaign_id ? '' : `<div class="row cg-foot"><button class="btn sm accent" data-act="camp-meta">Crear en Meta (en pausa)</button></div>`}
     </article>`;
   };
   return `<div class="cg">
