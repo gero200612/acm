@@ -116,6 +116,9 @@ export function recorridoCases(sb) {
       const r = await api('POST', `/api/projects/${c.p}/reels`, form({ files: [[new Blob([fakeMp4(1080, 1920, 8)], { type: 'video/mp4' }), 'vertical.mp4'], [new Blob([fakeMp4(1920, 1080, 2)], { type: 'video/mp4' }), 'horizontal.mp4']] }), true);
       eq(r.j?.length, 2, 'reels subidos');
       const v = r.j.find((x) => x.original_name === 'vertical.mp4'); c.reel = v.id;
+      // dos ediciones más del mismo crudo: un reel distinto por cada cuenta extra de la misma red
+      const e = await api('POST', `/api/projects/${c.p}/reels`, form({ files: [[new Blob([fakeMp4(1080, 1920, 8)], { type: 'video/mp4' }), 'edicion-2.mp4'], [new Blob([fakeMp4(1080, 1920, 9)], { type: 'video/mp4' }), 'edicion-3.mp4']] }), true);
+      [c.reel2, c.reel3] = e.j.map((x) => x.id);
       eq([v.width, v.height, v.duration], [1080, 1920, 8], 'medidas del vertical');
     }],
     [G('reels'), 'La revisión técnica rechaza el horizontal corto y aprueba el vertical', async () => {
@@ -134,8 +137,8 @@ export function recorridoCases(sb) {
     }],
     [G('publicación'), 'Publica en las 4 redes y falla la cuenta con error', async () => {
       const items = Object.values(c.acc).map((id) => ({ reel_id: c.reel, account_id: id, scheduled_at: c.now, ...(id === c.acc.tiktok ? { options: { privacy: 'SELF_ONLY' } } : {}) }));
-      items.push({ reel_id: c.reel, account_id: c.bad, scheduled_at: c.now });
-      items.push({ reel_id: c.reel, account_id: c.acc.instagram, scheduled_at: '2026-12-11T10:00' }); // con T, como el navegador
+      items.push({ reel_id: c.reel2, account_id: c.bad, scheduled_at: c.now });
+      items.push({ reel_id: c.reel2, account_id: c.acc.instagram, scheduled_at: '2026-12-11T10:00' }); // con T, como el navegador
       eq((await api('POST', `/api/projects/${c.p}/posts`, items)).j?.created, 6, 'programadas');
       let P = [];
       for (let i = 0; i < 40; i++) { await sleep(1000); P = (await api('GET', `/api/projects/${c.p}/posts`)).j; if (P.filter((x) => x.scheduled_at <= c.now).every((x) => !['programado', 'publicando'].includes(x.status))) break; }
@@ -143,6 +146,24 @@ export function recorridoCases(sb) {
       c.future = P.find((x) => x.scheduled_at === '2026-12-11 10:00');
       yes(c.future, 'la fecha con T no se guardó como AAAA-MM-DD HH:MM');
       eq(c.future.status, 'programado', 'la de después de la fecha máxima');
+    }],
+    [G('publicación'), 'Un mismo reel va a una sola cuenta por red', async () => {
+      const r = await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel, account_id: c.bad, scheduled_at: c.now }]);
+      yes(r.status === 400 && /ya está en .* de Facebook/.test(r.j?.error), `otra cuenta de Facebook con el mismo reel: ${r.j?.error}`);
+      const t = await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel3, account_id: c.acc.facebook, scheduled_at: '2026-12-11 11:00' }, { reel_id: c.reel3, account_id: c.bad, scheduled_at: '2026-12-11 12:00' }]);
+      eq(t.status, 400, 'dos cuentas de la misma red en el mismo pedido');
+      eq((await api('GET', `/api/projects/${c.p}/posts`)).j.filter((x) => x.reel_id === c.reel3).length, 0, 'el pedido rechazado dejó publicaciones a medias');
+    }],
+    [G('reels'), 'Un crudo no se publica; sus ediciones sí, con descripción y hashtags', async () => {
+      const up = await api('POST', `/api/projects/${c.p}/reels`, form({ kind: 'crudo', files: [[new Blob([fakeMp4(1080, 1920, 30)], { type: 'video/mp4' }), 'crudo.mp4']] }), true);
+      const crudo = up.j[0]; eq(crudo.kind, 'crudo', 'se subió como crudo');
+      const p = await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: crudo.id, account_id: c.acc.instagram, scheduled_at: '2026-12-11 10:00' }]);
+      yes(p.status === 400 && /es un crudo/.test(p.j?.error), `publicar un crudo: ${p.j?.error}`);
+      const e = await api('PUT', `/api/reels/${c.reel3}`, { caption: 'Votá a la Azul #ListaAzul', hashtags: 'ListaAzul, #socios  elecciones', source_id: crudo.id });
+      eq([e.status, e.j?.hashtags, e.j?.source_id], [200, '#ListaAzul #socios #elecciones', crudo.id], 'hashtags ordenados y edición del crudo');
+      eq((await api('PUT', `/api/reels/${c.reel3}`, { source_id: c.reel })).status, 400, 'edición de algo que no es un crudo');
+      eq((await api('PUT', `/api/reels/${c.reel}`, { kind: 'crudo' })).status, 400, 'pasar a crudo un reel ya publicado');
+      eq((await api('PUT', `/api/reels/${c.reel3}`, { title: ' ' })).status, 400, 'sin título');
     }],
     [G('publicación'), '«Publicar ahora» la sube en el momento', async () => {
       eq((await api('POST', `/api/posts/${c.future.id}/now`)).status, 200, 'publicar ahora');
@@ -216,7 +237,7 @@ export function recorridoCases(sb) {
     }],
     [G('conectar con un clic'), 'Publica en las cuentas conectadas con un clic (renueva con la app del servidor)', async () => {
       const now = (await api('GET', '/api/clock')).j.now;
-      await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel, account_id: c.ttq, scheduled_at: now, options: { privacy: 'PUBLIC_TO_EVERYONE' } }, { reel_id: c.reel, account_id: c.ytq, scheduled_at: now }]);
+      await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel3, account_id: c.ttq, scheduled_at: now, options: { privacy: 'PUBLIC_TO_EVERYONE' } }, { reel_id: c.reel3, account_id: c.ytq, scheduled_at: now }]);
       let P = []; for (let i = 0; i < 30; i++) { await sleep(1000); P = (await api('GET', `/api/projects/${c.p}/posts`)).j.filter((x) => [c.ttq, c.ytq].includes(x.account_id)); if (P.every((x) => !['programado', 'publicando'].includes(x.status))) break; }
       for (const x of P) eq(x.status, 'publicado', `${x.network} (${x.error})`);
     }],
@@ -286,7 +307,7 @@ export function recorridoCases(sb) {
     }],
     [G('demo'), 'Un proyecto de demostración no publica ni pauta nada', async () => {
       eq((await api('PUT', `/api/projects/${c.p}`, { demo: '1' })).j?.demo, 1, 'modo demo prendido');
-      await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel, account_id: c.acc.instagram, scheduled_at: c.now }]);
+      await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel3, account_id: c.acc.instagram, scheduled_at: c.now }]);
       const x = (await api('GET', `/api/projects/${c.p}/posts`)).j.filter((y) => y.status === 'programado').at(-1);
       await sleep(2500);
       eq((await api('GET', `/api/projects/${c.p}/posts`)).j.find((y) => y.id === x.id).status, 'programado', 'el programador la publicó igual');

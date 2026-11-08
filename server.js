@@ -76,7 +76,7 @@ for (const [c, def] of [['ads_creds', "TEXT DEFAULT ''"], ['ads_name', "TEXT DEF
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
 // proyecto de demostración: se ve completo pero no publica ni pauta nada
 if (!cols('projects').includes('demo')) db.exec('ALTER TABLE projects ADD COLUMN demo INTEGER DEFAULT 0');
-for (const [c, def] of [['duration', 'REAL'], ['width', 'INTEGER'], ['height', 'INTEGER']])
+for (const [c, def] of [['duration', 'REAL'], ['width', 'INTEGER'], ['height', 'INTEGER'], ['kind', "TEXT DEFAULT 'listo'"], ['hashtags', "TEXT DEFAULT ''"], ['source_id', 'INTEGER']])
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
 initTrace(db);
 initKnowledge(db);
@@ -186,6 +186,7 @@ function update(table, id, data) {
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
 const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo'];
+const NET_NAME = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' };
 const DEMO_MSG = 'Es un proyecto de demostración: no publica ni pauta nada. Se apaga en Ajustes.';
 const isDemo = (projectId) => !!get('SELECT demo FROM projects WHERE id = ?', projectId)?.demo;
 // corta la ruta si el proyecto (por :id o por la fila que se pasa) es de demostración
@@ -362,15 +363,33 @@ app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
   const out = files.map((f) => {
     const title = (req.body?.title && files.length === 1) ? req.body.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
     const m = probe(f.path) || {};
-    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null);
+    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, req.body?.kind === 'crudo' ? 'crudo' : 'listo');
     return get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid);
   });
   res.json(out);
 });
+// «#uno dos,#tres» → «#uno #dos #tres» (sin repetidos)
+const tags = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((t) => t.replace(/^#+/, '').trim()).filter(Boolean).map((t) => '#' + t))].join(' ');
+// el texto que sale en la red: descripción + hashtags (los que no estén ya escritos en la descripción)
+const postText = (r) => { const cap = (r.caption || '').trim(); const extra = tags(r.hashtags).split(' ').filter((t) => t && !cap.toLowerCase().includes(t.toLowerCase())).join(' '); return [cap || r.title || '', extra].filter(Boolean).join('\n\n').trim(); };
 app.put('/api/reels/:id', (req, res) => {
-  update('reels', req.params.id, pick(req.body || {}, ['title', 'caption', 'status']));
-  res.json(get('SELECT * FROM reels WHERE id = ?', req.params.id));
+  const r = get('SELECT * FROM reels WHERE id = ?', req.params.id); if (!r) return res.status(404).json({ error: 'No existe' });
+  const d = pick(req.body || {}, ['title', 'caption', 'hashtags', 'status', 'kind', 'source_id']);
+  if ('title' in d && !String(d.title).trim()) return res.status(400).json({ error: 'El reel necesita un título' });
+  if ('hashtags' in d) d.hashtags = tags(d.hashtags);
+  if ('kind' in d) {
+    d.kind = d.kind === 'crudo' ? 'crudo' : 'listo';
+    if (d.kind === 'crudo' && get('SELECT 1 FROM posts WHERE reel_id = ?', r.id)) return res.status(400).json({ error: 'Ya tiene publicaciones: no puede pasar a crudo. Quitalas primero.' });
+    if (d.kind === 'crudo') d.source_id = null;
+  }
+  if ('source_id' in d && d.source_id) {
+    d.source_id = Number(d.source_id);
+    const src = get('SELECT kind FROM reels WHERE id = ? AND project_id = ?', d.source_id, r.project_id);
+    if (!src || src.kind !== 'crudo' || d.source_id === r.id) return res.status(400).json({ error: 'Elegí un crudo de este proyecto' });
+  } else if ('source_id' in d) d.source_id = null;
+  update('reels', r.id, d);
+  res.json(get('SELECT * FROM reels WHERE id = ?', r.id));
 });
 app.delete('/api/reels/:id', (req, res) => {
   const r = get('SELECT * FROM reels WHERE id = ?', req.params.id);
@@ -396,6 +415,12 @@ app.post('/api/projects/:id/posts', (req, res) => {
       if (!at) throw new Error('Fecha inválida: tiene que ser AAAA-MM-DD HH:MM');
       if (!get('SELECT 1 FROM reels WHERE id = ? AND project_id = ?', it.reel_id, req.params.id) || !get('SELECT 1 FROM accounts WHERE id = ? AND project_id = ?', it.account_id, req.params.id))
         throw new Error('El reel o la cuenta no son de este proyecto');
+      const reel = get('SELECT title, kind FROM reels WHERE id = ?', it.reel_id);
+      if (reel.kind === 'crudo') throw new Error(`«${reel.title}» es un crudo: subí una edición lista para publicarla.`);
+      // el mismo video en dos cuentas de la misma red hace que la red bloquee las cuentas: una sola por red
+      const net = get('SELECT network FROM accounts WHERE id = ?', it.account_id).network;
+      const ya = get('SELECT a.handle, a.connected_as FROM posts p JOIN accounts a ON a.id = p.account_id WHERE p.reel_id = ? AND a.network = ?', it.reel_id, net);
+      if (ya) throw new Error(`«${reel.title}» ya está en ${ya.connected_as || '@' + ya.handle} de ${NET_NAME[net]}. El mismo reel en dos cuentas de la misma red hace que la red las bloquee: subí otra edición del crudo.`);
       ins.run(req.params.id, it.reel_id, it.account_id, at, it.options ? JSON.stringify(tiktokOptions(it.options)) : '');
     }
     db.exec('COMMIT');
@@ -690,7 +715,7 @@ async function tick() {
   try {
     for (;;) {
       const now = localNow();
-      const p = get(`SELECT p.*, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.title, r.caption, pr.propaganda_until
+      const p = get(`SELECT p.*, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.title, r.caption, r.hashtags, pr.propaganda_until
         FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id JOIN projects pr ON pr.id = p.project_id
         WHERE p.status = 'programado' AND pr.demo = 0 AND p.scheduled_at <= ? ORDER BY p.scheduled_at LIMIT 1`, now);
       if (!p) break;
@@ -704,7 +729,7 @@ async function tick() {
       try {
         const r = await traced({ kind: 'publicacion', title: `${p.title} en ${({ instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' })[p.network]}`, project_id: p.project_id, account_id: p.acc_id, post_id: p.id, network: p.network, secrets: Object.values(creds) },
           async () => { let opts = {}; try { opts = p.options ? JSON.parse(p.options) : {}; } catch {}
-            const x = await publish(p.network, creds, path.join(UPLOADS, path.basename(p.file)), (p.caption || p.title || '').trim(), p.title, save, (m) => console.log(`[publicar ${p.id}] ${m}`), opts); return { ...x, summary: x.url || x.note || 'Publicado' }; });
+            const x = await publish(p.network, creds, path.join(UPLOADS, path.basename(p.file)), postText(p), p.title, save, (m) => console.log(`[publicar ${p.id}] ${m}`), opts); return { ...x, summary: x.url || x.note || 'Publicado' }; });
         run("UPDATE posts SET status = 'publicado', external_id = ?, external_url = ?, note = ?, error = '', published_at = ? WHERE id = ?", String(r.id || ''), r.url || '', r.note || '', localNow(), p.id);
         console.log(`[publicar ${p.id}] publicado en ${p.network}`);
       } catch (e) {

@@ -62,21 +62,29 @@ try {
     ['13-voto', 'Así se vota', 'Traé tu carnet y el DNI.'],
     ['14-cierre', 'Nos vemos el domingo', 'Cierre de campaña en la sede.'],
   ];
-  const reel = REELS.map(([f, title, caption], i) => {
-    const file = `demo-${f}.mp4`;
+  const add = (f, file, title, caption, hashtags, kind, status, created) => {
     fs.copyFileSync(path.join(SRC, `${f}.mp4`), path.join(UPLOADS, file));
     const size = fs.statSync(path.join(UPLOADS, file)).size;
-    return Number(run(`INSERT INTO reels (project_id, title, caption, file, original_name, size, status, width, height, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 720, 1280, 6, ?)`,
-      pid, title, caption + ' #ListaAzul', file, file, size, i < 12 ? 'aprobado' : 'borrador', day(-14 + i, 12) + ':00').lastInsertRowid);
-  });
+    return Number(run(`INSERT INTO reels (project_id, title, caption, hashtags, file, original_name, size, status, kind, width, height, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 720, 1280, 6, ?)`,
+      pid, title, caption, hashtags, file, file, size, status, kind, created).lastInsertRowid);
+  };
+  // crudos: el material sin editar del que salen varias ediciones (cada edición puede ir a otra cuenta de la misma red)
+  const CRUDOS = [['05-transparencia', 'Crudo · entrevista al candidato'], ['08-sede', 'Crudo · recorrida por la sede'], ['09-seguridad', 'Crudo · cancha llena']];
+  const crudo = CRUDOS.map(([f, title], i) => add(f, `demo-crudo-${i + 1}.mp4`, title, 'Material sin editar.', '', 'crudo', 'borrador', day(-16 + i, 10) + ':00'));
+  const TAGS = ['#ListaAzul #Elecciones2026 #Socios', '#ListaAzul #VotáAzul', '#ListaAzul #ClubAtléticoEjemplo #Socios'];
+  const reel = REELS.map(([f, title, caption], i) => add(f, `demo-${f}.mp4`, title, caption, TAGS[i % 3], 'listo', i < 12 ? 'aprobado' : 'borrador', day(-14 + i, 12) + ':00'));
+  // ediciones: de qué crudo sale cada reel
+  for (const [i, c] of [[0, 0], [4, 0], [3, 0], [7, 1], [2, 1], [8, 2], [6, 2]]) run('UPDATE reels SET source_id = ? WHERE id = ?', crudo[c], reel[i]);
 
   // publicaciones: los primeros 10 reels ya salieron (escalonados en los últimos días), los siguientes están programados
   const ins = db.prepare('INSERT INTO posts (project_id, reel_id, account_id, scheduled_at, status, published_at, error) VALUES (?, ?, ?, ?, ?, ?, ?)');
-  const pickAcc = (i) => acc.filter((_, k) => (k + i) % 3 !== 0 || k === 0); // 6 o 7 cuentas por reel, siempre la oficial
+  // una sola cuenta por red para cada reel (el mismo video en dos cuentas de una red las hace bloquear): van rotando
+  const BY = (n) => acc.filter((_, k) => ACC[k][0] === n);
+  const pickAcc = (i) => ['instagram', 'tiktok', 'facebook', 'youtube'].map((n) => { const L = BY(n); return L[i % L.length]; });
   for (let i = 0; i < 10; i++) {
     pickAcc(i).forEach((a, k) => {
       const at = day(-11 + i, 18 + (k % 4), (k * 17) % 60);
-      const fallo = (i === 3 && k === 5) || (i === 7 && k === 2);
+      const fallo = (i === 3 && k === 2) || (i === 7 && k === 1);
       ins.run(pid, reel[i], a, at, fallo ? 'fallido' : 'publicado', fallo ? '' : at, fallo ? 'La red pidió volver a iniciar sesión en la cuenta: reconectala y tocá Reintentar.' : '');
     });
   }

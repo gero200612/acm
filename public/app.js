@@ -387,34 +387,41 @@ function cuentasView() {
 }
 
 function reelsView() {
-  const R = state.reels;
+  const ALL = state.reels, F = state.reelFilter || 'todos';
+  const R = F === 'todos' ? ALL : ALL.filter((r) => (r.kind || 'listo') === F);
   const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
-  const sinRepartir = R.filter((r) => !r.posts).length;
+  const sinRepartir = ALL.filter((r) => r.kind !== 'crudo' && !r.posts).length;
+  const kind = state.upKind || 'listo';
   const side = `<aside class="rl-side">
-    <label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los reels acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos</p></label>
+    <div class="seg" role="radiogroup" aria-label="Qué estás subiendo">
+      <button type="button" data-act="up-kind" data-k="listo" aria-pressed="${kind === 'listo'}"><b>Listo</b><span>editado, para publicar</span></button>
+      <button type="button" data-act="up-kind" data-k="crudo" aria-pressed="${kind === 'crudo'}"><b>Crudo</b><span>sin editar, para editar</span></button>
+    </div>
+    <label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los ${kind === 'crudo' ? 'crudos' : 'reels listos'} acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos</p></label>
     ${up}
     <div class="rl-stats">
-      <div><b>${R.length}</b><span>reels</span></div>
-      <div><b>${R.filter((r) => r.status === 'aprobado').length}</b><span>aprobados</span></div>
+      <div><b>${ALL.filter((r) => r.kind !== 'crudo').length}</b><span>listos</span></div>
+      <div><b>${ALL.filter((r) => r.kind === 'crudo').length}</b><span>crudos</span></div>
       <div><b>${sinRepartir}</b><span>sin repartir</span></div>
-      <div><b>${R.reduce((a, r) => a + r.posts, 0)}</b><span>publicaciones</span></div>
+      <div><b>${ALL.reduce((a, r) => a + r.posts, 0)}</b><span>publicaciones</span></div>
     </div>
-    <p class="note">${state.accounts.length ? `Con <b>Repartir</b> cada reel sale en las cuentas que elijas, con horarios separados para que no publiquen lo mismo a la vez.` : 'Cargá cuentas para poder repartir los reels.'}</p>
+    <p class="note">${state.accounts.length ? `Con <b>Repartir</b> cada reel listo sale en una cuenta por red: el mismo video en dos cuentas de la misma red hace que la red las bloquee. Para más cuentas, subí otra edición del crudo.` : 'Cargá cuentas para poder repartir los reels.'}</p>
   </aside>`;
+  const filt = `<div class="kn-chips rl-filter">${[['todos', 'Todos', ALL.length], ['listo', 'Listos', ALL.filter((r) => r.kind !== 'crudo').length], ['crudo', 'Crudos', ALL.filter((r) => r.kind === 'crudo').length]].map(([k, l, n]) => `<button type="button" data-act="reel-filter" data-k="${k}" aria-pressed="${F === k}">${l} <b>${n}</b></button>`).join('')}</div>`;
   const grid = R.length ? `<div class="reels">${R.map((r) => `<article class="reel" data-id="${r.id}">
     <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video><span class="reel-ver">Ver dónde está</span></a>
     <div class="body">
       <input class="title" value="${esc(r.title)}" data-act="reel-title" aria-label="Título">
-      <div class="meta"><span class="chip s-${r.status}">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'}</span><span>${mb(r.size)}</span></div>
-      ${reelNets(r.id)}
+      <div class="meta">${r.kind === 'crudo' ? '<span class="chip s-crudo">Crudo</span>' : `<span class="chip s-${r.status}">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'}</span>`}<span>${mb(r.size)}</span></div>
+      ${r.kind === 'crudo' ? `<a class="reel-nets none" href="#/p/${state.project.id}/reel/${r.id}">${(() => { const n = state.reels.filter((x) => x.source_id === r.id).length; return n ? `${n} ${n === 1 ? 'edición' : 'ediciones'}` : 'Sin ediciones todavía'; })()}</a>` : reelNets(r.id)}
       <div class="row" style="gap:6px">
-        <button class="btn sm accent" data-act="distribute" ${state.accounts.length ? '' : 'disabled'}>Repartir</button>
-        <button class="btn sm" data-act="reel-approve">${r.status === 'aprobado' ? 'A borrador' : 'Aprobar'}</button>
+        ${r.kind === 'crudo' ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${r.id}">Ver crudo</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length ? '' : 'disabled'}>Repartir</button>
+        <button class="btn sm" data-act="reel-approve">${r.status === 'aprobado' ? 'A borrador' : 'Aprobar'}</button>`}
         <span class="spacer"></span><button class="icon-btn danger" data-act="del-reel" title="Borrar">${icon('trash', 16)}</button>
       </div>
     </div></article>`).join('')}</div>`
     : `<div class="card empty rl-empty"><h2 class="h2">Todavía no hay reels</h2><p>Arrastrá los videos ya editados a la izquierda.</p></div>`;
-  return `<div class="rl">${side}<div class="rl-main">${grid}</div></div>`;
+  return `<div class="rl">${side}<div class="rl-main">${ALL.length ? filt : ''}${grid}</div></div>`;
 }
 
 function calendarioView() {
@@ -645,8 +652,8 @@ function reelDetailView() {
   const p = state.project, r = state.reels.find((x) => x.id === state.sub);
   if (!r) return `<div class="card empty"><h2 class="h2">Ese reel ya no está</h2><a class="btn" href="#/p/${p.id}/reels">Volver a Reels</a></div>`;
   const P = state.posts.filter((x) => x.reel_id === r.id).sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
-  const usadas = new Set(P.map((x) => x.account_id));
-  const libres = state.accounts.filter((a) => !usadas.has(a.id));
+  const redes = new Set(P.map((x) => x.network));
+  const libres = state.accounts.filter((a) => !redes.has(a.network));
   const n = (st) => P.filter((x) => x.status === st).length;
   const rows = P.map((x) => `<tr data-id="${x.id}">
       <td><span class="row" style="gap:8px">${netBadge(x.network)}<span><b>${esc((() => { const a = state.accounts.find((y) => y.id === x.account_id); return a ? accName(a) : x.handle ? '@' + x.handle : NETS[x.network].name; })())}</b><br><span class="small muted">${NETS[x.network].name}</span></span></span></td>
@@ -659,18 +666,48 @@ function reelDetailView() {
       <a class="small" href="#/p/${p.id}/reels">← Todos los reels</a>
       <video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>
       <h2 class="h2">${esc(r.title)}</h2>
-      <p class="small muted">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'} · ${mb(r.size)} · subido el ${fmtDate(r.created_at)}</p>
-      ${r.caption ? `<p class="small">${esc(r.caption)}</p>` : ''}
-      <div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length ? '' : 'disabled'}>Repartir en más cuentas</button></div>
+      <p class="small muted">${r.kind === 'crudo' ? 'Crudo' : r.status === 'aprobado' ? 'Aprobado' : 'Borrador'} · ${mb(r.size)} · subido el ${fmtDate(r.created_at)}</p>
+      ${r.kind === 'crudo' ? '' : `<div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length && libres.length ? '' : 'disabled'}>${libres.length ? 'Repartir en más cuentas' : 'Ya está en todas las redes'}</button></div>`}
     </aside>
     <div class="stack">
-      <div class="rd-stats card"><div><b>${P.length}</b><span>cuentas</span></div><div><b>${n('publicado')}</b><span>publicadas</span></div><div><b>${n('programado') + n('publicando')}</b><span>programadas</span></div><div><b>${n('fallido')}</b><span>con error</span></div></div>
+      ${reelForm(r)}
+      ${r.kind === 'crudo' ? crudoInfo(r) : `<div class="rd-stats card"><div><b>${P.length}</b><span>cuentas</span></div><div><b>${n('publicado')}</b><span>publicadas</span></div><div><b>${n('programado') + n('publicando')}</b><span>programadas</span></div><div><b>${n('fallido')}</b><span>con error</span></div></div>
       <section class="card"><div class="card-head"><h2 class="h2">Dónde está este reel</h2></div>
         ${P.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Cuenta</th><th>Estado</th><th>Cuándo</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no está en ninguna cuenta. Tocá <b>Repartir</b>.</p>'}
       </section>
-      ${libres.length ? `<section class="card"><h2 class="h2">Cuentas donde no está</h2><div class="rd-free">${libres.map((a) => `<span class="chip nodot">${netBadge(a.network)} ${esc(accName(a))}</span>`).join('')}</div></section>` : ''}
+      ${libres.length ? `<section class="card"><h2 class="h2">Donde todavía puede salir</h2><p class="small muted">Una cuenta por red. Las redes donde ya está quedan cerradas para este video.</p><div class="rd-free">${libres.map((a) => `<span class="chip nodot">${netBadge(a.network)} ${esc(accName(a))}</span>`).join('')}</div></section>` : ''}`}
     </div>
   </div>`;
+}
+
+// texto del reel: título, descripción, hashtags, si es listo o crudo y de qué crudo sale
+function reelForm(r) {
+  const crudos = state.reels.filter((x) => x.kind === 'crudo' && x.id !== r.id);
+  const pub = state.posts.some((x) => x.reel_id === r.id);
+  return `<section class="card"><form class="form rf" id="reel-form" data-id="${r.id}">
+    <div class="card-head"><h2 class="h2">Texto del reel</h2><span class="small muted" id="rf-state"></span></div>
+    <label class="field">Título<input class="input" name="title" required maxlength="120" value="${esc(r.title)}"></label>
+    <label class="field">Descripción<textarea class="textarea" name="caption" rows="5" maxlength="2200" placeholder="Lo que acompaña al video en la publicación">${esc(r.caption)}</textarea></label>
+    <label class="field">Hashtags<input class="input" name="hashtags" value="${esc(r.hashtags)}" placeholder="#ListaAzul #Socios #Elecciones2026"><span class="hint">Separados por espacio. Se agregan al final de la descripción.</span></label>
+    <div class="two"><label class="field">Tipo<select class="select" name="kind" ${pub ? 'disabled title="Ya tiene publicaciones"' : ''}><option value="listo" ${r.kind !== 'crudo' ? 'selected' : ''}>Listo para publicar</option><option value="crudo" ${r.kind === 'crudo' ? 'selected' : ''}>Crudo (para editar)</option></select></label>
+    ${r.kind === 'crudo' ? '' : `<label class="field">Edición de<select class="select" name="source_id"><option value="">Ningún crudo</option>${crudos.map((c) => `<option value="${c.id}" ${r.source_id === c.id ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}</select></label>`}</div>
+    ${r.kind === 'crudo' ? '' : `<div class="rf-prev"><span class="small muted">Así sale en las redes</span><p id="rf-prev"></p></div>`}
+    <div class="row"><span class="spacer"></span><button class="btn primary" type="submit">Guardar</button></div>
+  </form></section>`;
+}
+function crudoInfo(r) {
+  const E = state.reels.filter((x) => x.source_id === r.id);
+  return `<section class="card"><h2 class="h2">Ediciones de este crudo</h2>
+    <p class="small muted">Un crudo no se publica. Cada edición distinta es un reel aparte que puede ir a otra cuenta de la misma red.</p>
+    ${E.length ? `<div class="rd-eds">${E.map((e) => `<a href="#/p/${state.project.id}/reel/${e.id}"><video src="/media/${esc(e.file)}#t=0.5" preload="metadata" muted playsinline></video><b>${esc(e.title)}</b><span class="small muted">${state.posts.filter((x) => x.reel_id === e.id).length} publicaciones</span></a>`).join('')}</div>`
+      : '<p class="muted">Todavía no hay ediciones. Subí el reel editado como <b>Listo</b> y en su página elegí «Edición de» este crudo.</p>'}
+  </section>`;
+}
+const tagsOf = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((t) => t.replace(/^#+/, '').trim()).filter(Boolean).map((t) => '#' + t))].join(' ');
+function reelPreview(f) {
+  const out = $('#rf-prev'); if (!out) return;
+  const cap = f.caption.value.trim(), extra = tagsOf(f.hashtags.value).split(' ').filter((t) => t && !cap.toLowerCase().includes(t.toLowerCase())).join(' ');
+  out.innerHTML = esc([cap || f.title.value, extra].filter(Boolean).join('\n\n')).replace(/\n/g, '<br>').replace(/(#[\wáéíóúñü]+)/gi, '<span class="htag">$1</span>');
 }
 
 // ---------- campañas: el presupuesto grande repartido en campañas chicas ----------
@@ -1017,14 +1054,18 @@ function connectPanel(acc) {
 
 function distributeDialog(reel) {
   const A = state.accounts.filter((a) => a.status !== 'pausada');
+  // redes donde el reel ya está: quedan cerradas (el mismo video en dos cuentas de una red las hace bloquear)
+  const ya = Object.fromEntries(state.posts.filter((x) => x.reel_id === reel.id).map((x) => [x.network, state.accounts.find((a) => a.id === x.account_id)]));
+  const first = {}; A.forEach((a) => { if (!ya[a.network] && a.status === 'conectada' && !first[a.network]) first[a.network] = a.id; });
   const start = new Date(); start.setDate(start.getDate() + (start.getHours() >= 18 ? 1 : 0)); start.setHours(19, 0, 0, 0);
   const d = openDialog('Repartir reel', `<form class="form" id="dist-form">
-    <p class="muted small">«${esc(reel.title)}» sale en cada cuenta elegida, con horarios separados para que no publiquen lo mismo a la vez.</p>
-    <div class="row"><b class="small">Cuentas</b><span class="spacer"></span><button type="button" class="btn sm ghost" data-all>Todas</button><button type="button" class="btn sm ghost" data-none>Ninguna</button></div>
-    <div class="acc-pick">${A.map((a) => `<label><input type="checkbox" name="acc" value="${a.id}" ${a.status === 'conectada' ? 'checked' : ''}>${netBadge(a.network)}${esc(accName(a))}<span class="spacer"></span><span class="small muted">${ACC_STATUS[a.status]}</span></label>`).join('') || '<p class="small muted">No hay cuentas activas.</p>'}</div>
+    <p class="muted small">«${esc(reel.title)}» sale en <b>una cuenta por red</b>, con horarios separados. El mismo video en dos cuentas de la misma red hace que la red las bloquee: para más cuentas, subí otra edición del crudo.</p>
+    <div class="row"><b class="small">Cuentas</b><span class="spacer"></span><button type="button" class="btn sm ghost" data-none>Ninguna</button></div>
+    <div class="acc-pick">${A.map((a) => ya[a.network] ? `<label class="off"><input type="checkbox" disabled>${netBadge(a.network)}${esc(accName(a))}<span class="spacer"></span><span class="small muted">${ya[a.network].id === a.id ? 'ya está acá' : `ya está en ${esc(accName(ya[a.network]))}`}</span></label>`
+      : `<label><input type="checkbox" name="acc" value="${a.id}" data-net="${a.network}" ${first[a.network] === a.id ? 'checked' : ''}>${netBadge(a.network)}${esc(accName(a))}<span class="spacer"></span><span class="small muted">${ACC_STATUS[a.status]}</span></label>`).join('') || '<p class="small muted">No hay cuentas activas.</p>'}</div>
     ${A.some((a) => a.network === 'tiktok') ? `<div class="tt-dist" hidden><b class="small">TikTok</b>${ttForm(null)}</div>` : ''}
     ${A.some((a) => a.status !== 'conectada') ? '<p class="hint" style="margin-top:-6px">Las cuentas sin conectar no vienen tildadas: si las elegís, conectalas antes de la hora o esa publicación falla.</p>' : ''}
-    <label class="field">Texto de la publicación<textarea class="textarea" name="caption" rows="3" placeholder="El texto que acompaña al reel, con sus #hashtags">${esc(reel.caption || '')}</textarea><span class="hint">Se guarda en el reel y sale igual en todas las cuentas</span></label>
+    <label class="field">Texto de la publicación<textarea class="textarea" name="caption" rows="3" placeholder="El texto que acompaña al reel, con sus #hashtags">${esc(reel.caption || '')}</textarea><span class="hint">Se guarda en el reel y sale igual en todas las cuentas${reel.hashtags ? `, con ${esc(reel.hashtags)} al final` : ''}</span></label>
     <div class="two"><label class="field">Primera publicación<input class="input" type="datetime-local" name="start" value="${localInput(start)}" ${state.project.propaganda_until ? `max="${state.project.propaganda_until}T23:59"` : ''} required></label>
     <label class="field">Separación entre cuentas<select class="select" name="gap"><option value="20">20 minutos</option><option value="45" selected>45 minutos</option><option value="90">1 h 30</option><option value="180">3 horas</option><option value="1440">1 día</option></select></label></div>
     <div class="row"><span class="spacer"></span><button class="btn" type="button" data-close>Cancelar</button><button class="btn accent" type="submit">Programar</button></div>
@@ -1034,7 +1075,8 @@ function distributeDialog(reel) {
   const ttIds = new Set(A.filter((a) => a.network === 'tiktok').map((a) => a.id));
   const ttShow = () => { if (ttBox) ttBox.hidden = !$$('[name=acc]:checked', f).some((c) => ttIds.has(Number(c.value))); };
   if (ttBox) { ttWire(ttBox); f.addEventListener('change', ttShow); ttShow(); }
-  d.querySelector('[data-all]').onclick = () => { $$('[name=acc]', f).forEach((c) => (c.checked = true)); ttShow?.(); };
+  // al tildar una cuenta se destilda la otra de la misma red
+  f.addEventListener('change', (e) => { const c = e.target; if (c.name === 'acc' && c.checked) $$(`[name=acc][data-net="${c.dataset.net}"]`, f).forEach((o) => { if (o !== c) o.checked = false; }); });
   d.querySelector('[data-none]').onclick = () => { $$('[name=acc]', f).forEach((c) => (c.checked = false)); ttShow?.(); };
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1057,12 +1099,12 @@ function distributeDialog(reel) {
 function uploadReels(files) {
   files = [...files].filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name));
   if (!files.length) return toast('Elegí archivos de video', true);
-  const fd = new FormData(); files.forEach((f) => fd.append('files', f));
+  const fd = new FormData(); fd.append('kind', state.upKind || 'listo'); files.forEach((f) => fd.append('files', f));
   state.uploads = files; render();
   const x = new XMLHttpRequest();
   x.open('POST', `/api/projects/${state.project.id}/reels`);
   x.upload.onprogress = (e) => { const b = $('#up-bar'); if (b && e.lengthComputable) b.style.width = (e.loaded / e.total * 100) + '%'; };
-  x.onload = () => { state.uploads = []; if (x.status < 300) toast(`${files.length} ${files.length === 1 ? 'reel subido' : 'reels subidos'}`); else { try { fail(new Error(JSON.parse(x.responseText).error)); } catch { fail(new Error('No se pudo subir')); } } render(); };
+  x.onload = () => { state.uploads = []; if (x.status < 300) toast(`${files.length} ${state.upKind === 'crudo' ? (files.length === 1 ? 'crudo subido' : 'crudos subidos') : (files.length === 1 ? 'reel listo subido' : 'reels listos subidos')}`); else { try { fail(new Error(JSON.parse(x.responseText).error)); } catch { fail(new Error('No se pudo subir')); } } render(); };
   x.onerror = () => { state.uploads = []; fail(new Error('Se cortó la subida')); render(); };
   x.send(fd);
 }
@@ -1074,6 +1116,17 @@ function afterRender(r) {
     if (ASK.pid !== state.project.id) Object.assign(ASK, { pid: state.project.id, turns: [] });
     askDraw(); $('#ask-form')?.addEventListener('submit', askSend);
     $('#kn-form').addEventListener('submit', (e) => { e.preventDefault(); K.q = e.target.q.value.trim(); knLoad(); });
+  }
+  const rf = $('#reel-form');
+  if (rf) {
+    reelPreview(rf); rf.addEventListener('input', () => { reelPreview(rf); $('#rf-state').textContent = 'Sin guardar'; });
+    rf.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = { title: rf.title.value.trim(), caption: rf.caption.value, hashtags: rf.hashtags.value };
+      if (!rf.kind.disabled) body.kind = rf.kind.value;
+      if (rf.source_id) body.source_id = rf.source_id.value || null;
+      try { await api(`/api/reels/${rf.dataset.id}`, { method: 'PUT', body }); toast('Reel guardado'); render(); } catch (err) { fail(err); }
+    });
   }
   const ct = $('#cg-total');
   if (ct) { ct.addEventListener('change', () => { (async () => { try { state.project.pauta = await api(`/api/projects/${state.project.id}/pauta`, { method: 'PUT', body: { ...(state.project.pauta || {}), budget: Number(ct.value) || 0 } }); render(); } catch (e) { fail(e); } })(); }); }
@@ -1143,6 +1196,8 @@ document.addEventListener('click', async (e) => {
         render(); break; }
       case 'open-post': postDialog([Number(el.dataset.pid)]); break;
       case 'camp-new': campDialog(); break;
+      case 'up-kind': state.upKind = el.dataset.k; render(); break;
+      case 'reel-filter': state.reelFilter = el.dataset.k; render(); break;
       case 'camp-edit': campDialog(state.camps.campaigns.find((c) => c.id === id)); break;
       case 'camp-del': if (await confirmBox('Borrar campaña', 'Se borra de ACM. Si ya estaba creada en Meta, allá queda en pausa.')) { await api(`/api/campaigns/${id}`, { method: 'DELETE' }); render(); } break;
       case 'camp-meta': el.disabled = true; el.textContent = 'Creando…'; try { await api(`/api/campaigns/${id}/meta`, { method: 'POST' }); toast('Campaña creada en Meta, en pausa'); } catch (err) { fail(err); } render(); break;
