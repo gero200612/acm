@@ -93,6 +93,7 @@ async function render() {
   const r = route();
   try {
     await loadProjects();
+    if (state.storage == null) state.storage = await api('/api/storage').catch(() => ({ r2: false }));
     if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
     else state.overview = await api('/api/overview');
@@ -397,7 +398,7 @@ function reelsView() {
       <button type="button" data-act="up-kind" data-k="listo" aria-pressed="${kind === 'listo'}"><b>Listo</b><span>editado, para publicar</span></button>
       <button type="button" data-act="up-kind" data-k="crudo" aria-pressed="${kind === 'crudo'}"><b>Crudo</b><span>sin editar, para editar</span></button>
     </div>
-    <label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los ${kind === 'crudo' ? 'crudos' : 'reels listos'} acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos</p></label>
+    <label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los ${kind === 'crudo' ? 'crudos' : 'reels listos'} acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
     ${up}
     <div class="rl-stats">
       <div><b>${ALL.filter((r) => r.kind !== 'crudo').length}</b><span>listos</span></div>
@@ -409,13 +410,13 @@ function reelsView() {
   </aside>`;
   const filt = `<div class="kn-chips rl-filter">${[['todos', 'Todos', ALL.length], ['listo', 'Listos', ALL.filter((r) => r.kind !== 'crudo').length], ['crudo', 'Crudos', ALL.filter((r) => r.kind === 'crudo').length]].map(([k, l, n]) => `<button type="button" data-act="reel-filter" data-k="${k}" aria-pressed="${F === k}">${l} <b>${n}</b></button>`).join('')}</div>`;
   const grid = R.length ? `<div class="reels">${R.map((r) => `<article class="reel" data-id="${r.id}">
-    <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video><span class="reel-ver">Ver dónde está</span></a>
+    <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está">${r.archived_at ? `<div class="gone">Video borrado<span>se publicó hace más de ${state.storage?.retentionDays ?? 7} días</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video>`}<span class="reel-ver">Ver dónde está</span></a>
     <div class="body">
       <input class="title" value="${esc(r.title)}" data-act="reel-title" aria-label="Título">
       <div class="meta">${r.kind === 'crudo' ? '<span class="chip s-crudo">Crudo</span>' : `<span class="chip s-${r.status}">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'}</span>`}<span>${mb(r.size)}</span></div>
       ${r.kind === 'crudo' ? `<a class="reel-nets none" href="#/p/${state.project.id}/reel/${r.id}">${(() => { const n = state.reels.filter((x) => x.source_id === r.id).length; return n ? `${n} ${n === 1 ? 'edición' : 'ediciones'}` : 'Sin ediciones todavía'; })()}</a>` : reelNets(r.id)}
       <div class="row" style="gap:6px">
-        ${r.kind === 'crudo' ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${r.id}">Ver crudo</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length ? '' : 'disabled'}>Repartir</button>
+        ${r.kind === 'crudo' ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${r.id}">Ver crudo</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length && !r.archived_at ? '' : 'disabled'}>Repartir</button>
         <button class="btn sm" data-act="reel-approve">${r.status === 'aprobado' ? 'A borrador' : 'Aprobar'}</button>`}
         <span class="spacer"></span><button class="icon-btn danger" data-act="del-reel" title="Borrar">${icon('trash', 16)}</button>
       </div>
@@ -664,10 +665,10 @@ function reelDetailView() {
   return `<div class="rd">
     <aside class="card rd-side">
       <a class="small" href="#/p/${p.id}/reels">← Todos los reels</a>
-      <video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>
+      ${r.archived_at ? `<div class="gone tall">Video borrado del almacenamiento<span>Quedan el texto y las publicaciones. Para volver a usarlo, subilo de nuevo.</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>`}
       <h2 class="h2">${esc(r.title)}</h2>
       <p class="small muted">${r.kind === 'crudo' ? 'Crudo' : r.status === 'aprobado' ? 'Aprobado' : 'Borrador'} · ${mb(r.size)} · subido el ${fmtDate(r.created_at)}</p>
-      ${r.kind === 'crudo' ? '' : `<div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length && libres.length ? '' : 'disabled'}>${libres.length ? 'Repartir en más cuentas' : 'Ya está en todas las redes'}</button></div>`}
+      ${r.kind === 'crudo' || r.archived_at ? '' : `<div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length && libres.length ? '' : 'disabled'}>${libres.length ? 'Repartir en más cuentas' : 'Ya está en todas las redes'}</button></div>`}
     </aside>
     <div class="stack">
       ${reelForm(r)}
@@ -1096,9 +1097,32 @@ function distributeDialog(reel) {
 }
 
 // ---------- subida de reels ----------
+// duración y medidas que lee el navegador: con R2 el servidor no ve el archivo
+const videoMeta = (f) => new Promise((ok) => { const v = document.createElement('video'); const u = URL.createObjectURL(f); const end = (m) => { URL.revokeObjectURL(u); ok(m); };
+  v.preload = 'metadata'; v.onloadedmetadata = () => end({ duration: v.duration, width: v.videoWidth, height: v.videoHeight }); v.onerror = () => end({}); setTimeout(() => end({}), 8000); v.src = u; });
+async function uploadToR2(files) {
+  const kind = state.upKind || 'listo', pid = state.project.id;
+  state.uploads = files; render();
+  try {
+    const links = await api(`/api/projects/${pid}/reels/uploads`, { method: 'POST', body: { files: files.map((f) => ({ name: f.name, size: f.size, type: f.type || 'video/mp4' })) } });
+    const total = files.reduce((a, f) => a + f.size, 0), sent = files.map(() => 0);
+    const bar = () => { const b = $('#up-bar'); if (b) b.style.width = (sent.reduce((a, x) => a + x, 0) / total * 100) + '%'; };
+    const putOne = (f, l, i) => new Promise((ok, ko) => { const x = new XMLHttpRequest(); x.open('PUT', l.url); x.setRequestHeader('Content-Type', f.type || 'video/mp4');
+      x.upload.onprogress = (e) => { sent[i] = e.loaded; bar(); }; x.onload = () => (x.status < 300 ? ok() : ko(new Error(`«${f.name}» no se pudo subir (${x.status})`))); x.onerror = () => ko(new Error(`Se cortó la subida de «${f.name}»`)); x.send(f); });
+    // de a 3 a la vez: más rápido sin saturar la conexión
+    const metas = await Promise.all(files.map(videoMeta));
+    for (let i = 0; i < files.length; i += 3) await Promise.all(files.slice(i, i + 3).map((f, k) => putOne(f, links[i + k], i + k)));
+    await api(`/api/projects/${pid}/reels/complete`, { method: 'POST', body: { kind, items: files.map((f, i) => ({ key: links[i].key, name: f.name, ...metas[i] })) } });
+    toast(`${files.length} ${kind === 'crudo' ? (files.length === 1 ? 'crudo subido' : 'crudos subidos') : (files.length === 1 ? 'reel listo subido' : 'reels listos subidos')}`);
+  } catch (err) { fail(err); }
+  state.uploads = []; render();
+}
 function uploadReels(files) {
   files = [...files].filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name));
   if (!files.length) return toast('Elegí archivos de video', true);
+  const max = state.storage?.max || 1024 ** 3;
+  const big = files.find((f) => f.size > max); if (big) return toast(`«${big.name}» pesa más de ${Math.round(max / 1024 ** 3)} GB`, true);
+  if (state.storage?.r2) return uploadToR2(files);
   const fd = new FormData(); fd.append('kind', state.upKind || 'listo'); files.forEach((f) => fd.append('files', f));
   state.uploads = files; render();
   const x = new XMLHttpRequest();

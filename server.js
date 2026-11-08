@@ -12,6 +12,7 @@ import { ask, askError, agentReady } from './agent.js';
 import { initTrace, traced } from './trace.js';
 import { runBanco } from './banco.js';
 import { probe, review } from './mp4probe.js';
+import { r2Ready, putUrl, getUrl, head as r2Head, remove as r2Remove, download as r2Download, MAX_UPLOAD } from './storage.js';
 import { postBlocked, pautaNumbers } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
@@ -76,7 +77,7 @@ for (const [c, def] of [['ads_creds', "TEXT DEFAULT ''"], ['ads_name', "TEXT DEF
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
 // proyecto de demostración: se ve completo pero no publica ni pauta nada
 if (!cols('projects').includes('demo')) db.exec('ALTER TABLE projects ADD COLUMN demo INTEGER DEFAULT 0');
-for (const [c, def] of [['duration', 'REAL'], ['width', 'INTEGER'], ['height', 'INTEGER'], ['kind', "TEXT DEFAULT 'listo'"], ['hashtags', "TEXT DEFAULT ''"], ['source_id', 'INTEGER']])
+for (const [c, def] of [['duration', 'REAL'], ['width', 'INTEGER'], ['height', 'INTEGER'], ['kind', "TEXT DEFAULT 'listo'"], ['hashtags', "TEXT DEFAULT ''"], ['source_id', 'INTEGER'], ['storage', "TEXT DEFAULT 'local'"], ['archived_at', "TEXT DEFAULT ''"]])
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
 initTrace(db);
 initKnowledge(db);
@@ -167,6 +168,12 @@ app.get('/oauth/:network/callback', async (req, res) => {
   const missing = got.missing.length ? ` Faltó autorizar: ${got.missing.join(', ')}.` : '';
   back(a.project_id, { conexion: 'ok', cuenta: get('SELECT connected_as FROM accounts WHERE id = ?', a.id).connected_as + missing });
 });
+// los videos en R2 se ven con un link firmado de una hora; los del disco, directo
+app.get('/media/:file', requireAuth, async (req, res, next) => {
+  const r = get("SELECT file FROM reels WHERE file = ? AND storage = 'r2'", req.params.file);
+  if (!r) return next();
+  try { res.redirect(302, await getUrl(r.file)); } catch { res.status(502).json({ error: 'No pudimos abrir el video en el almacenamiento' }); }
+});
 app.use('/media', requireAuth, express.static(UPLOADS, { maxAge: '7d', immutable: true }));
 
 const upload = multer({
@@ -178,6 +185,8 @@ const upload = multer({
   fileFilter: (req, f, cb) => cb(null, /^(video|image)\//.test(f.mimetype) || /\.(mp4|mov|m4v|webm|jpe?g|png|webp)$/i.test(f.originalname)),
 });
 const rmFile = (f) => { if (f) fs.rm(path.join(UPLOADS, path.basename(f)), { force: true }, () => {}); };
+// borra el video de un reel donde esté (disco o R2)
+const dropFile = async (r) => { if (!r?.file) return; if (r.storage === 'r2') await r2Remove(r.file).catch((e) => console.error('R2 borrar:', e.message)); else rmFile(r.file); };
 
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
 function update(table, id, data) {
@@ -257,7 +266,7 @@ app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
 app.delete('/api/projects/:id', (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe' });
-  all('SELECT file FROM reels WHERE project_id = ?', p.id).forEach((r) => rmFile(r.file));
+  all('SELECT file, storage FROM reels WHERE project_id = ?', p.id).forEach((r) => dropFile(r));
   rmFile(p.photo);
   run('DELETE FROM projects WHERE id = ?', p.id);
   res.json({ ok: true });
@@ -373,6 +382,69 @@ app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
 const tags = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((t) => t.replace(/^#+/, '').trim()).filter(Boolean).map((t) => '#' + t))].join(' ');
 // el texto que sale en la red: descripción + hashtags (los que no estén ya escritos en la descripción)
 const postText = (r) => { const cap = (r.caption || '').trim(); const extra = tags(r.hashtags).split(' ').filter((t) => t && !cap.toLowerCase().includes(t.toLowerCase())).join(' '); return [cap || r.title || '', extra].filter(Boolean).join('\n\n').trim(); };
+// subida directa a R2: 1) el navegador pide links firmados, 2) sube cada video, 3) avisa y se crean los reels
+app.get('/api/storage', (req, res) => res.json({ r2: r2Ready(), max: r2Ready() ? MAX_UPLOAD : 1024 ** 3, retentionDays: RETENTION_DAYS }));
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm)$/i;
+app.post('/api/projects/:id/reels/uploads', async (req, res) => {
+  if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe' });
+  if (!r2Ready()) return res.status(400).json({ error: 'El almacenamiento de videos (R2) no está configurado' });
+  const files = Array.isArray(req.body?.files) ? req.body.files.slice(0, 50) : [];
+  if (!files.length) return res.status(400).json({ error: 'No llegó ningún video' });
+  const out = [];
+  for (const f of files) {
+    const name = String(f?.name || '');
+    if (!VIDEO_EXT.test(name)) return res.status(400).json({ error: `«${name}» no es un video MP4, MOV o WEBM` });
+    if (!(Number(f.size) > 0) || Number(f.size) > MAX_UPLOAD) return res.status(400).json({ error: `«${name}» pesa más de 5 GB` });
+    const key = `p${req.params.id}-${crypto.randomUUID()}${path.extname(name).toLowerCase()}`;
+    out.push({ name, key, url: await putUrl(key, String(f.type || 'video/mp4')) });
+  }
+  res.json(out);
+});
+app.post('/api/projects/:id/reels/complete', async (req, res) => {
+  const pid = Number(req.params.id);
+  if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe' });
+  const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 50) : [];
+  const kind = req.body?.kind === 'crudo' ? 'crudo' : 'listo';
+  const out = [];
+  for (const it of items) {
+    const key = String(it?.key || '');
+    if (!key.startsWith(`p${pid}-`) || get('SELECT 1 FROM reels WHERE file = ?', key)) return res.status(400).json({ error: 'Subida inválida' });
+    const h = await r2Head(key);
+    if (!h) return res.status(400).json({ error: `«${it.name}» no terminó de subir` });
+    const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+    const title = path.parse(String(it.name || 'reel')).name.replace(/[_-]+/g, ' ');
+    const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2')",
+      pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind);
+    out.push(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
+  }
+  res.json(out);
+});
+
+// limpieza: el video de una edición se borra N días después de su última publicación, el de un crudo N días después
+// de su última edición (o 2N si nunca tuvo). La fila queda (título, texto, publicaciones); solo se va el archivo.
+const RETENTION_DAYS = Math.max(0, Number(process.env.ACM_RETENTION_DAYS ?? 7));
+const daysAgo = (d) => localNow(-d * 1440);
+async function cleanup(days = RETENTION_DAYS) {
+  const lim = daysAgo(days); // publicaciones: hora argentina, como el programador
+  const ago = (d) => `-${d} days`; // reels: created_at está en UTC (datetime('now'))
+  const ed = all(`SELECT r.* FROM reels r JOIN projects pr ON pr.id = r.project_id
+    WHERE pr.demo = 0 AND r.archived_at = '' AND r.kind != 'crudo'
+      AND EXISTS (SELECT 1 FROM posts WHERE reel_id = r.id)
+      AND NOT EXISTS (SELECT 1 FROM posts WHERE reel_id = r.id AND status IN ('programado', 'publicando'))
+      AND (SELECT max(CASE WHEN published_at != '' THEN published_at ELSE scheduled_at END) FROM posts WHERE reel_id = r.id) <= ?`, lim);
+  const cr = all(`SELECT r.* FROM reels r JOIN projects pr ON pr.id = r.project_id
+    WHERE pr.demo = 0 AND r.archived_at = '' AND r.kind = 'crudo' AND r.created_at <= datetime('now', ?)
+      AND ((SELECT max(created_at) FROM reels e WHERE e.source_id = r.id) <= datetime('now', ?)
+        OR (NOT EXISTS (SELECT 1 FROM reels e WHERE e.source_id = r.id) AND r.created_at <= datetime('now', ?)))`, ago(days), ago(days), ago(days * 2));
+  for (const r of [...ed, ...cr]) { await dropFile(r); run('UPDATE reels SET archived_at = ? WHERE id = ?', localNow(), r.id); }
+  if (ed.length || cr.length) console.log(`[limpieza] ${ed.length} ediciones y ${cr.length} crudos sin archivo (más de ${days} días)`);
+  return { ediciones: ed.length, crudos: cr.length };
+}
+app.post('/api/maintenance/cleanup', async (req, res) => {
+  const d = req.body?.days; res.json(await cleanup(d === undefined ? RETENTION_DAYS : Math.max(0, Number(d) || 0)));
+});
+if (process.env.ACM_CLEANUP !== 'off') setInterval(() => cleanup().catch((e) => console.error('limpieza:', e)), 6 * 3600e3);
+
 app.put('/api/reels/:id', (req, res) => {
   const r = get('SELECT * FROM reels WHERE id = ?', req.params.id); if (!r) return res.status(404).json({ error: 'No existe' });
   const d = pick(req.body || {}, ['title', 'caption', 'hashtags', 'status', 'kind', 'source_id']);
@@ -393,7 +465,7 @@ app.put('/api/reels/:id', (req, res) => {
 });
 app.delete('/api/reels/:id', (req, res) => {
   const r = get('SELECT * FROM reels WHERE id = ?', req.params.id);
-  if (r) { rmFile(r.file); run('DELETE FROM reels WHERE id = ?', r.id); }
+  if (r) { dropFile(r); run('DELETE FROM reels WHERE id = ?', r.id); }
   res.json({ ok: true });
 });
 
@@ -415,7 +487,8 @@ app.post('/api/projects/:id/posts', (req, res) => {
       if (!at) throw new Error('Fecha inválida: tiene que ser AAAA-MM-DD HH:MM');
       if (!get('SELECT 1 FROM reels WHERE id = ? AND project_id = ?', it.reel_id, req.params.id) || !get('SELECT 1 FROM accounts WHERE id = ? AND project_id = ?', it.account_id, req.params.id))
         throw new Error('El reel o la cuenta no son de este proyecto');
-      const reel = get('SELECT title, kind FROM reels WHERE id = ?', it.reel_id);
+      const reel = get('SELECT title, kind, archived_at FROM reels WHERE id = ?', it.reel_id);
+      if (reel.archived_at) throw new Error(`El video de «${reel.title}» ya se borró del almacenamiento: subilo de nuevo.`);
       if (reel.kind === 'crudo') throw new Error(`«${reel.title}» es un crudo: subí una edición lista para publicarla.`);
       // el mismo video en dos cuentas de la misma red hace que la red bloquee las cuentas: una sola por red
       const net = get('SELECT network FROM accounts WHERE id = ?', it.account_id).network;
@@ -715,27 +788,33 @@ async function tick() {
   try {
     for (;;) {
       const now = localNow();
-      const p = get(`SELECT p.*, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.title, r.caption, r.hashtags, pr.propaganda_until
+      const p = get(`SELECT p.*, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.storage, r.archived_at, r.title, r.caption, r.hashtags, pr.propaganda_until
         FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id JOIN projects pr ON pr.id = p.project_id
         WHERE p.status = 'programado' AND pr.demo = 0 AND p.scheduled_at <= ? ORDER BY p.scheduled_at LIMIT 1`, now);
       if (!p) break;
       // se marca antes de subir: si dos vueltas se cruzan, solo una la toma
       if (!run("UPDATE posts SET status = 'publicando', attempts = attempts + 1 WHERE id = ? AND status = 'programado'", p.id).changes) continue;
       const fail = (msg) => run("UPDATE posts SET status = 'fallido', error = ? WHERE id = ?", msg, p.id);
-      const blocked = postBlocked(p);
+      const blocked = p.archived_at ? 'El video ya se borró del almacenamiento: subilo de nuevo.' : postBlocked(p);
       if (blocked) { fail(blocked); continue; }
+      // de R2 se baja a un archivo temporal solo para esta subida
+      let file = path.join(UPLOADS, path.basename(p.file)), tmp = '';
+      if (p.storage === 'r2') {
+        tmp = path.join(UPLOADS, `tmp-${p.id}-${path.basename(p.file)}`);
+        try { file = await r2Download(p.file, tmp); } catch (e) { fs.rm(tmp, { force: true }, () => {}); fail('No pudimos bajar el video del almacenamiento: ' + e.message); continue; }
+      }
       const creds = vault.open(p.creds);
       const save = (fresh) => run('UPDATE accounts SET creds = ? WHERE id = ?', vault.seal({ ...vault.open(get('SELECT creds FROM accounts WHERE id = ?', p.acc_id).creds), ...fresh }), p.acc_id);
       try {
         const r = await traced({ kind: 'publicacion', title: `${p.title} en ${({ instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' })[p.network]}`, project_id: p.project_id, account_id: p.acc_id, post_id: p.id, network: p.network, secrets: Object.values(creds) },
           async () => { let opts = {}; try { opts = p.options ? JSON.parse(p.options) : {}; } catch {}
-            const x = await publish(p.network, creds, path.join(UPLOADS, path.basename(p.file)), postText(p), p.title, save, (m) => console.log(`[publicar ${p.id}] ${m}`), opts); return { ...x, summary: x.url || x.note || 'Publicado' }; });
+            const x = await publish(p.network, creds, file, postText(p), p.title, save, (m) => console.log(`[publicar ${p.id}] ${m}`), opts); return { ...x, summary: x.url || x.note || 'Publicado' }; });
         run("UPDATE posts SET status = 'publicado', external_id = ?, external_url = ?, note = ?, error = '', published_at = ? WHERE id = ?", String(r.id || ''), r.url || '', r.note || '', localNow(), p.id);
         console.log(`[publicar ${p.id}] publicado en ${p.network}`);
       } catch (e) {
         fail(e.message);
         console.log(`[publicar ${p.id}] falló: ${e.message}`);
-      }
+      } finally { if (tmp) fs.rm(tmp, { force: true }, () => {}); }
     }
   } catch (e) { console.error('programador:', e); }
   finally { busy = false; }

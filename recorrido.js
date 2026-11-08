@@ -34,7 +34,7 @@ export async function startSandbox(bases) {
     cwd: APP, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, PORT: String(free), ACM_PUBLIC_URL: `http://127.0.0.1:${free}`, ACM_DATA: data, NODE_ENV: 'test',
       ACM_TIKTOK_CLIENT_KEY: 'tt-app', ACM_TIKTOK_CLIENT_SECRET: 'tt-secret', ACM_GOOGLE_CLIENT_ID: 'g-app', ACM_GOOGLE_CLIENT_SECRET: 'g-secret',
-      ACM_TIKTOK_AUTH_URL: bases.tiktokAuth, ACM_GOOGLE_AUTH_URL: bases.googleAuth, ANTHROPIC_BASE_URL: bases.anthropic, ANTHROPIC_API_KEY: 'sk-ant-simulador', ANTHROPIC_AUTH_TOKEN: '', ACM_PASSWORD: password, ACM_SECRET: crypto.randomBytes(32).toString('hex'), ACM_TICK_MS: '1000', ACM_FILL_MS: '50', ACM_SCHEDULER: 'on',
+      ACM_TIKTOK_AUTH_URL: bases.tiktokAuth, ACM_GOOGLE_AUTH_URL: bases.googleAuth, ANTHROPIC_BASE_URL: bases.anthropic, ACM_R2_ENDPOINT: bases.r2, ACM_R2_BUCKET: 'acm-test', ACM_R2_ACCESS_KEY_ID: 'r2-key', ACM_R2_SECRET_ACCESS_KEY: 'r2-secret-simulador', ACM_CLEANUP: 'off', ANTHROPIC_API_KEY: 'sk-ant-simulador', ANTHROPIC_AUTH_TOKEN: '', ACM_PASSWORD: password, ACM_SECRET: crypto.randomBytes(32).toString('hex'), ACM_TICK_MS: '1000', ACM_FILL_MS: '50', ACM_SCHEDULER: 'on',
       ACM_GRAPH_URL: bases.graph, ACM_RUPLOAD_URL: bases.rupload, ACM_TIKTOK_URL: bases.tiktok, ACM_GOOGLE_OAUTH_URL: bases.googleOauth, ACM_YOUTUBE_URL: bases.youtube, ACM_YT_UPLOAD_URL: bases.ytUpload },
   });
   let log = '';
@@ -316,6 +316,38 @@ export function recorridoCases(sb) {
       eq((await api('POST', `/api/campaigns/${c.camp}/meta`)).status, 400, 'crear campaña en Meta');
       await api('DELETE', `/api/posts/${x.id}`);
       eq((await api('PUT', `/api/projects/${c.p}`, { demo: '0' })).j?.demo, 0, 'modo demo apagado');
+    }],
+    [G('almacenamiento'), 'Sube directo a R2 con link firmado, lo muestra y lo publica desde ahí', async () => {
+      eq((await api('GET', '/api/storage')).j?.r2, true, 'R2 configurado');
+      const mp4 = fakeMp4(1080, 1920, 12);
+      const up = await api('POST', `/api/projects/${c.p}/reels/uploads`, { files: [{ name: 'edicion-r2.mp4', size: mp4.length, type: 'video/mp4' }] });
+      eq(up.status, 200, `links firmados (${up.j?.error})`);
+      const { key, url } = up.j[0];
+      yes(/X-Amz-Signature=/.test(url) && !url.includes('r2-secret-simulador'), 'el link no está firmado o trae la clave');
+      eq((await api('POST', `/api/projects/${c.p}/reels/complete`, { items: [{ key, name: 'edicion-r2.mp4' }] })).status, 400, 'avisar antes de subir');
+      const put = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'video/mp4' }, body: mp4 }); eq(put.status, 200, 'subida directa del navegador');
+      const done = await api('POST', `/api/projects/${c.p}/reels/complete`, { kind: 'listo', items: [{ key, name: 'edicion-r2.mp4', duration: 12, width: 1080, height: 1920 }] });
+      eq([done.status, done.j?.[0]?.storage, done.j?.[0]?.size, done.j?.[0]?.duration], [200, 'r2', mp4.length, 12], `reel en R2 (${done.j?.error})`);
+      c.r2reel = done.j[0].id;
+      eq((await api('POST', `/api/projects/${c.p}/reels/complete`, { items: [{ key, name: 'otra.mp4' }] })).status, 400, 'el mismo archivo dos veces');
+      eq((await api('POST', `/api/projects/${c.p}/reels/uploads`, { files: [{ name: 'virus.exe', size: 10 }] })).status, 400, 'archivo que no es video');
+      const m = await sb.box.raw(`/media/${key}`); yes(m.status === 302 && /X-Amz-Signature=/.test(m.headers.get('location') || ''), `ver el video: ${m.status}`);
+      eq((await sb.box.raw(`/media/${key}`, false)).status, 401, 'ver el video sin sesión');
+      await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.r2reel, account_id: c.acc.facebook, scheduled_at: (await api('GET', '/api/clock')).j.now }]);
+      let x; for (let i = 0; i < 20; i++) { await sleep(1000); x = (await api('GET', `/api/projects/${c.p}/posts`)).j.find((y) => y.reel_id === c.r2reel); if (x && !['programado', 'publicando'].includes(x.status)) break; }
+      eq(x?.status, 'publicado', `publicar desde R2 (${x?.error})`);
+    }],
+    [G('almacenamiento'), 'La limpieza borra los videos ya publicados y deja la ficha', async () => {
+      const r = await api('POST', '/api/maintenance/cleanup', { days: 0 });
+      yes(r.status === 200 && r.j.ediciones >= 1, `limpieza: ${JSON.stringify(r.j)}`);
+      const R = (await api('GET', `/api/projects/${c.p}/reels`)).j;
+      const a = R.find((y) => y.id === c.r2reel);
+      yes(a.archived_at, 'el reel de R2 no quedó archivado');
+      eq((await sb.box.raw(`/media/${a.file}`)).status, 302, 'la ficha sigue');
+      yes((sb.simLog?.() || []).some((l) => l === `r2 DELETE ${a.file}`), 'no se borró de R2');
+      const p = await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.r2reel, account_id: c.acc.youtube, scheduled_at: '2026-12-11 10:00' }]);
+      yes(p.status === 400 && /ya se borró/.test(p.j?.error), `programar un video borrado: ${p.j?.error}`);
+      eq((await api('POST', '/api/maintenance/cleanup', { days: 30 })).j, { ediciones: 0, crudos: 0 }, 'con 30 días no tendría que borrar nada');
     }],
     [G('proyecto'), 'Borrar el proyecto se lleva todo lo suyo', async () => {
       eq((await api('DELETE', `/api/projects/${c.p}`)).j?.ok, true, 'borrar');

@@ -801,3 +801,8 @@ dialog.wide { width: min(640px, calc(100vw - 32px)); }
 .rd-eds { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; margin-top: 12px; }
 .rd-eds a { display: flex; flex-direction: column; gap: 4px; text-decoration: none; color: inherit; }
 .rd-eds video { width: 100%; aspect-ratio: 9/16; object-fit: cover; border-radius: 8px; background: #000; }
+
+/* video ya borrado del almacenamiento */
+.gone { aspect-ratio: 9/16; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 16px; text-align: center; background: var(--line-2); color: var(--muted); font-weight: 600; font-size: 14px; }
+.gone span { font-weight: 400; font-size: 12.5px; }
+.gone.tall { border-radius: 10px; max-height: 520px; }

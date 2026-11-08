@@ -6,6 +6,7 @@ import http from 'node:http';
 const send = (res, code, obj, headers = {}) => { res.writeHead(code, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(obj)); };
 export function startSimulator(port = 0) {
   const log = [];
+  const objects = new Map(); // R2 de mentira: bucket acm-test
   let B = '';
   const server = http.createServer((req, res) => {
   const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
@@ -14,6 +15,22 @@ export function startSimulator(port = 0) {
     log.push(`${req.method} ${p} ${body.length}b`);
     const ok = { error: { code: 'ok' } };
     if (p === '/log') return send(res, 200, log);
+    // R2 (S3) de mentira: links firmados (X-Amz-Signature) o pedidos firmados del servidor (Authorization AWS4)
+    if (p.startsWith('/acm-test/')) {
+      const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, PUT, HEAD', 'Access-Control-Allow-Headers': 'Content-Type' };
+      if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
+      for (const [k, v] of Object.entries(cors)) res.setHeader(k, v);
+      const key = decodeURIComponent(p.slice('/acm-test/'.length));
+      const signed = u.searchParams.has('X-Amz-Signature') || /^AWS4-HMAC-SHA256 /.test(req.headers.authorization || '');
+      if (!signed) { res.writeHead(403); return res.end('sin firma'); }
+      log.push(`r2 ${req.method} ${key}`);
+      if (req.method === 'PUT') { objects.set(key, { body, type: req.headers['content-type'] || '' }); res.writeHead(200, { ETag: '"x"' }); return res.end(); }
+      const o = objects.get(key);
+      if (req.method === 'DELETE') { objects.delete(key); res.writeHead(204); return res.end(); }
+      if (!o) { res.writeHead(404); return res.end(); }
+      res.writeHead(200, { 'Content-Length': o.body.length, 'Content-Type': o.type || 'video/mp4' });
+      return res.end(req.method === 'HEAD' ? undefined : o.body);
+    }
     // Meta
     if (p === '/graph/PAGEBAD') return send(res, 400, { error: { message: `Malformed access token ${u.searchParams.get('access_token')}` } });
     if (p === '/graph/PAGE1' && req.method === 'GET') return send(res, 200, { name: 'Página Mock', followers_count: 999, instagram_business_account: { id: 'IG1', username: 'mock.ig', followers_count: 1234 } });
@@ -79,7 +96,7 @@ export function startSimulator(port = 0) {
     B = `http://127.0.0.1:${server.address().port}`;
     resolve({
       url: B, log,
-      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, ytUpload: `${B}/ytup`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic` },
+      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, ytUpload: `${B}/ytup`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, r2: B },
       close: () => new Promise((r) => server.close(r)),
     });
   }));
