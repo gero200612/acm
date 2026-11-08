@@ -284,6 +284,18 @@ export function recorridoCases(sb) {
       const C = (await api('GET', `/api/projects/${c.p}/campaigns`)).j.campaigns[0];
       eq([C.spent, C.impressions, C.reach], [Math.round(121000 / 1200 * 1.21 * 100) / 100, 34000, 21000], 'gasto en USD con IVA, impresiones y alcance');
     }],
+    [G('demo'), 'Un proyecto de demostración no publica ni pauta nada', async () => {
+      eq((await api('PUT', `/api/projects/${c.p}`, { demo: '1' })).j?.demo, 1, 'modo demo prendido');
+      await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.reel, account_id: c.acc.instagram, scheduled_at: c.now }]);
+      const x = (await api('GET', `/api/projects/${c.p}/posts`)).j.filter((y) => y.status === 'programado').at(-1);
+      await sleep(2500);
+      eq((await api('GET', `/api/projects/${c.p}/posts`)).j.find((y) => y.id === x.id).status, 'programado', 'el programador la publicó igual');
+      const r = await api('POST', `/api/posts/${x.id}/now`); yes(r.status === 400 && /demostración/.test(r.j?.error), `publicar ahora: ${r.j?.error}`);
+      eq((await api('POST', `/api/projects/${c.p}/campaigns/spend`)).status, 400, 'actualizar gasto en Meta');
+      eq((await api('POST', `/api/campaigns/${c.camp}/meta`)).status, 400, 'crear campaña en Meta');
+      await api('DELETE', `/api/posts/${x.id}`);
+      eq((await api('PUT', `/api/projects/${c.p}`, { demo: '0' })).j?.demo, 0, 'modo demo apagado');
+    }],
     [G('proyecto'), 'Borrar el proyecto se lleva todo lo suyo', async () => {
       eq((await api('DELETE', `/api/projects/${c.p}`)).j?.ok, true, 'borrar');
       eq((await api('GET', `/api/projects/${c.p}`)).status, 404, 'el proyecto sigue');

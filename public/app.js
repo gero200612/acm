@@ -271,7 +271,7 @@ function labReels() {
 // ---------- proyecto ----------
 function projectHead(p) {
   return `<div class="who">${avatar(p, true)}<div style="min-width:0"><h1 class="page-title">${esc(p.name)}</h1><p class="lead">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Proyecto')}</p></div></div>
-  <div class="row">${countdown(p)}${p.padron ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
+  <div class="row">${p.demo ? '<span class="chip s-pausada" title="No publica ni pauta nada">Demo · no publica</span>' : ''}${countdown(p)}${p.padron ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
 }
 const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']];
 function projectView(tab) {
@@ -405,7 +405,7 @@ function reelsView() {
     <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video><span class="reel-ver">Ver dónde está</span></a>
     <div class="body">
       <input class="title" value="${esc(r.title)}" data-act="reel-title" aria-label="Título">
-      <div class="meta"><span class="chip s-${r.status}">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'}</span><span>${fmt(r.size / 1048576, 1)} MB</span></div>
+      <div class="meta"><span class="chip s-${r.status}">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'}</span><span>${mb(r.size)}</span></div>
       ${reelNets(r.id)}
       <div class="row" style="gap:6px">
         <button class="btn sm accent" data-act="distribute" ${state.accounts.length ? '' : 'disabled'}>Repartir</button>
@@ -631,6 +631,7 @@ function pautaTabla(p, c) {
 }
 
 
+const mb = (b) => b >= 1048576 ? `${fmt(b / 1048576, 1)} MB` : `${fmt(b / 1024)} KB`;
 // redes donde está un reel, para la tarjeta: un ícono por cuenta con su estado
 function reelNets(rid) {
   const P = state.posts.filter((x) => x.reel_id === rid);
@@ -648,7 +649,7 @@ function reelDetailView() {
   const libres = state.accounts.filter((a) => !usadas.has(a.id));
   const n = (st) => P.filter((x) => x.status === st).length;
   const rows = P.map((x) => `<tr data-id="${x.id}">
-      <td><span class="row" style="gap:8px">${netBadge(x.network)}<span><b>${esc(x.handle ? '@' + x.handle : NETS[x.network].name + ' sin conectar')}</b><br><span class="small muted">${NETS[x.network].name}</span></span></span></td>
+      <td><span class="row" style="gap:8px">${netBadge(x.network)}<span><b>${esc((() => { const a = state.accounts.find((y) => y.id === x.account_id); return a ? accName(a) : x.handle ? '@' + x.handle : NETS[x.network].name; })())}</b><br><span class="small muted">${NETS[x.network].name}</span></span></span></td>
       <td><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span>${x.error ? `<p class="small err-t">${esc(x.error)}</p>` : ''}</td>
       <td class="small">${x.published_at ? `Salió el ${fmtDay(x.published_at)} a las ${fmtTime(x.published_at)}` : `${fmtDay(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</td>
       <td class="right">${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">Ver ↗</a>` : `<button class="btn sm ghost" data-act="open-post" data-pid="${x.id}">Abrir</button>`}</td>
@@ -656,9 +657,9 @@ function reelDetailView() {
   return `<div class="rd">
     <aside class="card rd-side">
       <a class="small" href="#/p/${p.id}/reels">← Todos los reels</a>
-      <video src="/media/${esc(r.file)}" preload="metadata" controls playsinline></video>
+      <video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>
       <h2 class="h2">${esc(r.title)}</h2>
-      <p class="small muted">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'} · ${fmt(r.size / 1048576, 1)} MB · subido el ${fmtDate(r.created_at)}</p>
+      <p class="small muted">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'} · ${mb(r.size)} · subido el ${fmtDate(r.created_at)}</p>
       ${r.caption ? `<p class="small">${esc(r.caption)}</p>` : ''}
       <div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length ? '' : 'disabled'}>Repartir en más cuentas</button></div>
     </aside>
@@ -842,6 +843,7 @@ function projectForm(p = {}) {
     ${p.id ? '' : `<label class="field">Personas en el padrón<input class="input" type="number" min="0" name="padron" value="" placeholder="65000"><span class="hint">Después podés subir el archivo en Ajustes</span></label>`}
     <div class="two"><label class="field">Color<input class="input" type="color" name="color" value="${esc(p.color || '#ff5a1f')}" style="padding:4px"></label>
     <label class="field">Foto<input class="input" type="file" name="photo" accept="image/*" style="padding:8px"></label></div>
+    ${p.id ? `<label class="field">Modo demostración<select class="input" name="demo"><option value="0" ${p.demo ? '' : 'selected'}>No: publica y pauta de verdad</option><option value="1" ${p.demo ? 'selected' : ''}>Sí: se ve completo pero no publica ni pauta nada</option></select></label>` : ''}
     <label class="field">Notas<textarea class="textarea" name="notes" rows="3" placeholder="Tono, temas, lo que nunca diría…">${esc(p.notes)}</textarea></label>
     <div class="row"><span class="spacer"></span><button class="btn primary" type="submit">${p.id ? 'Guardar' : 'Crear proyecto'}</button></div>
   </form>`;

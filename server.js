@@ -74,6 +74,8 @@ db.exec("UPDATE posts SET status = 'programado' WHERE status = 'publicando'");
 for (const [c, def] of [['ads_creds', "TEXT DEFAULT ''"], ['ads_name', "TEXT DEFAULT ''"], ['ads_currency', "TEXT DEFAULT ''"], ['ads_rate', 'REAL DEFAULT 0'], ['ads_political', 'INTEGER DEFAULT 1'],
   ['ads_audience_id', "TEXT DEFAULT ''"], ['ads_audience_count', 'INTEGER DEFAULT 0'], ['ads_campaign_id', "TEXT DEFAULT ''"], ['ads_ads', 'INTEGER DEFAULT 0'], ['ads_error', "TEXT DEFAULT ''"], ['ads_at', "TEXT DEFAULT ''"]])
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
+// proyecto de demostración: se ve completo pero no publica ni pauta nada
+if (!cols('projects').includes('demo')) db.exec('ALTER TABLE projects ADD COLUMN demo INTEGER DEFAULT 0');
 for (const [c, def] of [['duration', 'REAL'], ['width', 'INTEGER'], ['height', 'INTEGER']])
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
 initTrace(db);
@@ -183,7 +185,11 @@ function update(table, id, data) {
   if (!keys.length) return;
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
-const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes'];
+const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo'];
+const DEMO_MSG = 'Es un proyecto de demostración: no publica ni pauta nada. Se apaga en Ajustes.';
+const isDemo = (projectId) => !!get('SELECT demo FROM projects WHERE id = ?', projectId)?.demo;
+// corta la ruta si el proyecto (por :id o por la fila que se pasa) es de demostración
+const demoGuard = (req, res, next) => (isDemo(req.params.id) ? res.status(400).json({ error: DEMO_MSG }) : next());
 const A_FIELDS = ['network', 'posts_per_day'];
 // la cuenta que ve la pantalla: sin los datos cifrados, con qué campos de conexión hay cargados
 function accountOut(a) {
@@ -242,6 +248,7 @@ app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
   if (!p) return res.status(404).json({ error: 'No existe' });
   const data = pick(req.body || {}, P_FIELDS);
   if ('padron' in data) data.padron = Number(data.padron) || 0;
+  if ('demo' in data) data.demo = String(data.demo) === '1' ? 1 : 0;
   if (req.file) { rmFile(p.photo); data.photo = req.file.filename; }
   update('projects', p.id, data);
   res.json(projectSummary(get('SELECT * FROM projects WHERE id = ?', p.id)));
@@ -414,6 +421,7 @@ app.post('/api/posts/:id/now', (req, res) => {
   if (!p) return res.status(404).json({ error: 'No existe' });
   if (p.status === 'publicando') return res.status(409).json({ error: 'Ya se está publicando' });
   if (p.status === 'publicado') return res.status(409).json({ error: 'Ya está publicada' });
+  if (isDemo(p.project_id)) return res.status(400).json({ error: DEMO_MSG });
   if (req.body?.options) run('UPDATE posts SET options = ? WHERE id = ?', JSON.stringify(tiktokOptions(req.body.options)), p.id);
   run("UPDATE posts SET status = 'programado', scheduled_at = ?, error = '' WHERE id = ?", localNow(), p.id);
   setImmediate(tick);
@@ -447,7 +455,7 @@ app.post('/api/projects/:id/ads/test', async (req, res) => {
   try { const r = await adsRun('Probar cuenta publicitaria', async () => { const x = await testAds(vault.open(p.ads_creds)); return { ...x, summary: `${x.name} (${x.currency})` }; }); run("UPDATE projects SET ads_name = ?, ads_currency = ?, ads_error = '' WHERE id = ?", r.name, r.currency, p.id); sendProject(res, p.id); }
   catch (e) { adsFail(res, p.id, e); }
 });
-app.post('/api/projects/:id/ads/audience', async (req, res) => {
+app.post('/api/projects/:id/ads/audience', demoGuard, async (req, res) => {
   const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
   const rows = all('SELECT em, ph FROM padron WHERE project_id = ?', p.id);
   if (!rows.length) return res.status(400).json({ error: 'Primero subí el padrón con teléfonos o mails en Ajustes.' });
@@ -458,7 +466,7 @@ app.post('/api/projects/:id/ads/audience', async (req, res) => {
     sendProject(res, p.id);
   } catch (e) { adsFail(res, p.id, e); }
 });
-app.post('/api/projects/:id/ads/campaign', async (req, res) => {
+app.post('/api/projects/:id/ads/campaign', demoGuard, async (req, res) => {
   const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
   const pa = get('SELECT * FROM pauta WHERE project_id = ?', p.id) || {};
   if (!p.ads_audience_id) return res.status(400).json({ error: 'Primero subí el padrón como público.' });
@@ -611,6 +619,7 @@ app.delete('/api/campaigns/:id', (req, res) => { run('DELETE FROM campaigns WHER
 app.post('/api/campaigns/:id/meta', async (req, res) => {
   const c = get('SELECT * FROM campaigns WHERE id = ?', req.params.id); if (!c) return res.status(404).json({ error: 'No existe' });
   const p = projectRow(c.project_id);
+  if (p.demo) return res.status(400).json({ error: DEMO_MSG });
   if (!p.ads_audience_id) return res.status(400).json({ error: 'Primero subí el padrón como público en Pauta → Meta Ads.' });
   const cur = p.ads_currency || 'USD';
   if (cur !== 'USD' && !p.ads_rate) return res.status(400).json({ error: `La cuenta publicitaria está en ${cur}: cargá la cotización del dólar en Pauta.` });
@@ -638,7 +647,7 @@ app.post('/api/campaigns/:id/meta', async (req, res) => {
 });
 
 // trae de Meta cuánto gastó cada campaña (en USD con IVA, para comparar con el presupuesto)
-app.post('/api/projects/:id/campaigns/spend', async (req, res) => {
+app.post('/api/projects/:id/campaigns/spend', demoGuard, async (req, res) => {
   const p = need(req, res); if (!p) return;
   const cr = vault.open(p.ads_creds);
   const C = all("SELECT * FROM campaigns WHERE project_id = ? AND meta_campaign_id != ''", p.id);
@@ -683,7 +692,7 @@ async function tick() {
       const now = localNow();
       const p = get(`SELECT p.*, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.title, r.caption, pr.propaganda_until
         FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id JOIN projects pr ON pr.id = p.project_id
-        WHERE p.status = 'programado' AND p.scheduled_at <= ? ORDER BY p.scheduled_at LIMIT 1`, now);
+        WHERE p.status = 'programado' AND pr.demo = 0 AND p.scheduled_at <= ? ORDER BY p.scheduled_at LIMIT 1`, now);
       if (!p) break;
       // se marca antes de subir: si dos vueltas se cruzan, solo una la toma
       if (!run("UPDATE posts SET status = 'publicando', attempts = attempts + 1 WHERE id = ? AND status = 'programado'", p.id).changes) continue;

@@ -11,6 +11,8 @@ COPY tools/bajar-modelo.mjs tools/
 # el modelo va dentro de la imagen: ACM busca sin depender de internet
 RUN node tools/bajar-modelo.mjs
 COPY *.js ./
+COPY tools/demo.mjs tools/
+COPY tools/demo tools/demo
 COPY public ./public
 RUN mkdir -p /data && chown node:node /data
 USER node
