@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readPadron } from './padron.js';
 import { publish, tiktokOptions, tiktokCreator } from './publisher.js';
-import { testAds, uploadAudience, createCampaign } from './ads.js';
+import { testAds, uploadAudience, createCampaign, campaignInsights } from './ads.js';
+import { ask, askError, agentReady } from './agent.js';
 import { initTrace, traced } from './trace.js';
 import { runBanco } from './banco.js';
 import { probe, review } from './mp4probe.js';
@@ -77,6 +78,12 @@ for (const [c, def] of [['duration', 'REAL'], ['width', 'INTEGER'], ['height', '
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
 initTrace(db);
 initKnowledge(db);
+// campañas: el presupuesto total del proyecto (pauta.budget) se reparte en campañas con sus cuentas y su contenido
+db.exec(`CREATE TABLE IF NOT EXISTS campaigns (
+  id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, name TEXT NOT NULL,
+  budget REAL DEFAULT 0, start_date TEXT DEFAULT '', end_date TEXT DEFAULT '', accounts TEXT DEFAULT '[]', reels TEXT DEFAULT '[]',
+  notes TEXT DEFAULT '', meta_campaign_id TEXT DEFAULT '', meta_ads INTEGER DEFAULT 0, spent REAL DEFAULT 0, impressions INTEGER DEFAULT 0,
+  reach INTEGER DEFAULT 0, spent_at TEXT DEFAULT '', error TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`);
 db.exec('CREATE TABLE IF NOT EXISTS padron (project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, em TEXT, ph TEXT)');
 db.exec('CREATE INDEX IF NOT EXISTS padron_project ON padron(project_id)');
 for (const [c, def] of [['creds', "TEXT DEFAULT ''"], ['connected_as', "TEXT DEFAULT ''"], ['last_error', "TEXT DEFAULT ''"], ['last_checked_at', "TEXT DEFAULT ''"]])
@@ -533,6 +540,119 @@ app.post('/api/projects/:id/knowledge', (req, res) => {
   res.json({ ok: true });
 });
 app.delete('/api/knowledge/:id', (req, res) => { run('DELETE FROM knowledge WHERE id = ?', req.params.id); res.json({ ok: true }); });
+
+// preguntarle a la investigación (agente con las fichas del proyecto)
+app.post('/api/projects/:id/knowledge/ask', async (req, res) => {
+  const p = need(req, res); if (!p) return;
+  const question = String(req.body?.question || '').trim().slice(0, 2000);
+  if (!question) return res.status(400).json({ error: 'Escribí la pregunta' });
+  if (!agentReady()) return res.status(400).json({ error: 'Falta la clave de Claude en el servidor (ANTHROPIC_API_KEY).' });
+  // las fichas más parecidas: primero las de investigación, después publicaciones de las cuentas
+  const fichas = (await search(p.id, question, { limit: 30 })).items;
+  const pubs = fichas.filter((f) => f.kind === 'publicacion').slice(0, 10);
+  const elegidas = [...fichas.filter((f) => f.kind !== 'publicacion').slice(0, 20), ...pubs];
+  try {
+    const r = await traced({ kind: 'agente', title: `Pregunta a la investigación: ${question.slice(0, 80)}`, project_id: p.id },
+      async () => { const x = await ask({ question, history: Array.isArray(req.body?.history) ? req.body.history : [], fichas: elegidas, proyecto: p.name }); return { ...x, summary: `${x.sources.length} fichas citadas` }; });
+    res.json(r);
+  } catch (e) { res.status(400).json({ error: askError(e) }); }
+});
+app.get('/api/agent', (req, res) => res.json({ ready: agentReady() }));
+
+// campañas y presupuesto
+const J = (v, d = []) => { try { return JSON.parse(v); } catch { return d; } };
+const campOut = (c) => ({ ...c, accounts: J(c.accounts), reels: J(c.reels) });
+const pautaRow = (pid) => get('SELECT * FROM pauta WHERE project_id = ?', pid) || {};
+app.get('/api/projects/:id/campaigns', (req, res) => {
+  const p = need(req, res); if (!p) return;
+  res.json({ total: pautaRow(p.id).budget || 0, currency: p.ads_currency || '', rate: p.ads_rate || 0, campaigns: all('SELECT * FROM campaigns WHERE project_id = ? ORDER BY created_at', p.id).map(campOut) });
+});
+function campData(p, b, self = null) {
+  const d = {};
+  if (b.name !== undefined) { d.name = String(b.name).trim().slice(0, 120); if (!d.name) throw new Error('Ponele un nombre a la campaña'); }
+  if (b.budget !== undefined) { d.budget = Math.max(0, Math.round(Number(b.budget) * 100) / 100 || 0); if (!d.budget) throw new Error('Poné cuánto se invierte en la campaña'); }
+  for (const k of ['start_date', 'end_date']) if (b[k] !== undefined) { d[k] = String(b[k] || ''); if (d[k] && !/^\d{4}-\d{2}-\d{2}$/.test(d[k])) throw new Error('Fecha inválida'); }
+  if ((d.start_date || self?.start_date) && (d.end_date || self?.end_date) && (d.start_date ?? self.start_date) > (d.end_date ?? self.end_date)) throw new Error('La campaña termina antes de empezar');
+  if (b.notes !== undefined) d.notes = String(b.notes).slice(0, 2000);
+  if (b.accounts !== undefined) {
+    const ids = [...new Set((b.accounts || []).map(Number))];
+    if (ids.some((i) => !get('SELECT 1 FROM accounts WHERE id = ? AND project_id = ?', i, p.id))) throw new Error('Hay cuentas que no son de este proyecto');
+    d.accounts = JSON.stringify(ids);
+  }
+  if (b.reels !== undefined) {
+    const ids = [...new Set((b.reels || []).map(Number))];
+    if (ids.some((i) => !get('SELECT 1 FROM reels WHERE id = ? AND project_id = ?', i, p.id))) throw new Error('Hay reels que no son de este proyecto');
+    d.reels = JSON.stringify(ids);
+  }
+  // las campañas no pueden repartir más que el presupuesto total
+  const total = pautaRow(p.id).budget || 0;
+  if (d.budget !== undefined && total) {
+    const otras = get('SELECT coalesce(sum(budget), 0) s FROM campaigns WHERE project_id = ? AND id != ?', p.id, self?.id || 0).s;
+    if (otras + d.budget > total + 0.001) throw new Error(`Con esta campaña te pasás del presupuesto total: quedan USD ${Math.max(0, total - otras).toFixed(0)} sin asignar.`);
+  }
+  return d;
+}
+app.post('/api/projects/:id/campaigns', (req, res) => {
+  const p = need(req, res); if (!p) return;
+  let d; try { d = campData(p, { accounts: [], reels: [], ...req.body }); if (!d.name || !d.budget) throw new Error('Faltan el nombre o la inversión'); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const keys = Object.keys(d);
+  const r = run(`INSERT INTO campaigns (project_id, ${keys.join(', ')}) VALUES (?, ${keys.map(() => '?').join(', ')})`, p.id, ...keys.map((k) => d[k]));
+  res.json(campOut(get('SELECT * FROM campaigns WHERE id = ?', r.lastInsertRowid)));
+});
+app.put('/api/campaigns/:id', (req, res) => {
+  const c = get('SELECT * FROM campaigns WHERE id = ?', req.params.id); if (!c) return res.status(404).json({ error: 'No existe' });
+  let d; try { d = campData(projectRow(c.project_id), req.body || {}, c); } catch (e) { return res.status(400).json({ error: e.message }); }
+  update('campaigns', c.id, d);
+  res.json(campOut(get('SELECT * FROM campaigns WHERE id = ?', c.id)));
+});
+app.delete('/api/campaigns/:id', (req, res) => { run('DELETE FROM campaigns WHERE id = ?', req.params.id); res.json({ ok: true }); });
+
+// crea la campaña en Meta (en pausa) con su presupuesto, el padrón como público y un anuncio por reel publicado en sus cuentas de Instagram
+app.post('/api/campaigns/:id/meta', async (req, res) => {
+  const c = get('SELECT * FROM campaigns WHERE id = ?', req.params.id); if (!c) return res.status(404).json({ error: 'No existe' });
+  const p = projectRow(c.project_id);
+  if (!p.ads_audience_id) return res.status(400).json({ error: 'Primero subí el padrón como público en Pauta → Meta Ads.' });
+  const cur = p.ads_currency || 'USD';
+  if (cur !== 'USD' && !p.ads_rate) return res.status(400).json({ error: `La cuenta publicitaria está en ${cur}: cargá la cotización del dólar en Pauta.` });
+  const today = localNow().slice(0, 10);
+  const from = c.start_date && c.start_date > today ? c.start_date : today;
+  const to = c.end_date || [p.propaganda_until, p.election_date].filter(Boolean).sort()[0];
+  if (!to || to < from) return res.status(400).json({ error: 'Revisá las fechas de la campaña.' });
+  const accs = J(c.accounts), reels = J(c.reels);
+  const igRows = all("SELECT id, creds FROM accounts WHERE project_id = ? AND network = 'instagram' AND status = 'conectada'", p.id).filter((a) => !accs.length || accs.includes(a.id));
+  const ig = igRows.map((a) => vault.open(a.creds))[0] || {};
+  const media = all(`SELECT po.external_id AS id, r.title, po.reel_id, po.account_id FROM posts po JOIN reels r ON r.id = po.reel_id JOIN accounts a ON a.id = po.account_id
+    WHERE po.project_id = ? AND a.network = 'instagram' AND po.status = 'publicado' AND po.external_id != ''`, p.id)
+    .filter((m) => (!reels.length || reels.includes(m.reel_id)) && (!accs.length || accs.includes(m.account_id)))
+    .filter((m, i, A) => A.findIndex((x) => x.reel_id === m.reel_id) === i); // un anuncio por reel aunque se haya publicado dos veces
+  const { perWeek } = pautaNumbers({ budget: c.budget, from, to, padron: p.padron, contacts: p.padron_contacts });
+  const usdNet = c.budget / 1.21;
+  try {
+    const cr = { ...vault.open(p.ads_creds), pageId: ig.pageId, instagramId: ig.instagramBusinessId };
+    const start = from === today ? new Date(Date.now() + 15 * 6e4).toISOString() : `${from}T00:00:00-03:00`;
+    const r = await traced({ kind: 'meta_ads', title: `Crear campaña «${c.name}» en pausa`, project_id: p.id, network: 'meta', secrets: Object.values(cr) },
+      async () => { const x = await createCampaign(cr, { name: `ACM · ${p.name} · ${c.name}`, budget: cur === 'USD' ? usdNet : usdNet * p.ads_rate, start, end: `${to}T23:59:00-03:00`, perWeek, audienceId: p.ads_audience_id, political: !!p.ads_political, media: ig.pageId ? media : [] }); return { ...x, summary: `Campaña ${x.campaignId} con ${x.ads.length} anuncios` }; });
+    run("UPDATE campaigns SET meta_campaign_id = ?, meta_ads = ?, error = '' WHERE id = ?", r.campaignId, r.ads.length, c.id);
+    res.json(campOut(get('SELECT * FROM campaigns WHERE id = ?', c.id)));
+  } catch (e) { run('UPDATE campaigns SET error = ? WHERE id = ?', e.message, c.id); res.status(400).json({ error: e.message }); }
+});
+
+// trae de Meta cuánto gastó cada campaña (en USD con IVA, para comparar con el presupuesto)
+app.post('/api/projects/:id/campaigns/spend', async (req, res) => {
+  const p = need(req, res); if (!p) return;
+  const cr = vault.open(p.ads_creds);
+  const C = all("SELECT * FROM campaigns WHERE project_id = ? AND meta_campaign_id != ''", p.id);
+  const cur = p.ads_currency || 'USD';
+  const errores = [];
+  for (const c of C) {
+    try {
+      const x = await traced({ kind: 'meta_ads', title: `Gasto de «${c.name}»`, project_id: p.id, network: 'meta', secrets: Object.values(cr) }, async () => { const i = await campaignInsights(cr, c.meta_campaign_id); return { ...i, summary: `${i.spend} ${cur}` }; });
+      const usd = cur === 'USD' ? x.spend : (p.ads_rate ? x.spend / p.ads_rate : 0);
+      run("UPDATE campaigns SET spent = ?, impressions = ?, reach = ?, spent_at = ?, error = '' WHERE id = ?", Math.round(usd * 1.21 * 100) / 100, x.impressions, x.reach, localNow(), c.id);
+    } catch (e) { errores.push(`${c.name}: ${e.message}`); run('UPDATE campaigns SET error = ? WHERE id = ?', e.message, c.id); }
+  }
+  res.json({ ok: !errores.length, updated: C.length - errores.length, errors: errores });
+});
 
 // pauta
 app.put('/api/projects/:id/pauta', (req, res) => {

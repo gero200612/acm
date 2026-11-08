@@ -80,8 +80,8 @@ async function loadProject(id) {
 }
 
 function route() {
-  const [, a, id, tab] = location.hash.replace(/^#/, '').split('/');
-  if (a === 'p' && id) return { view: 'project', id: Number(id), tab: tab || 'resumen' };
+  const [, a, id, tab, sub] = location.hash.replace(/^#/, '').split('/');
+  if (a === 'p' && id) return { view: 'project', id: Number(id), tab: tab || 'resumen', sub: Number(sub) || 0 };
   if (a === 'lab') return { view: 'lab', tab: id || 'corridas' };
   return { view: 'home' };
 }
@@ -93,7 +93,7 @@ async function render() {
   const r = route();
   try {
     await loadProjects();
-    if (r.view === 'project') await loadProject(r.id);
+    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
     else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
@@ -273,12 +273,13 @@ function projectHead(p) {
   return `<div class="who">${avatar(p, true)}<div style="min-width:0"><h1 class="page-title">${esc(p.name)}</h1><p class="lead">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Proyecto')}</p></div></div>
   <div class="row">${countdown(p)}${p.padron ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
 }
-const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']];
+const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']];
 function projectView(tab) {
   const p = state.project;
   const counts = { cuentas: state.accounts.length, reels: state.reels.length, calendario: state.posts.filter((x) => x.status === 'programado').length };
-  const tabs = `<nav class="tabs">${TABS.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${tab === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
-  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, pauta: pautaView, investigacion: investigacionView, ajustes: ajustesView };
+  const on = tab === 'reel' ? 'reels' : tab;
+  const tabs = `<nav class="tabs">${TABS.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
+  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, pauta: pautaView, campanas: campanasView, reel: reelDetailView, investigacion: investigacionView, ajustes: ajustesView };
   return tabs + (views[tab] || resumenView)();
 }
 
@@ -401,10 +402,11 @@ function reelsView() {
     <p class="note">${state.accounts.length ? `Con <b>Repartir</b> cada reel sale en las cuentas que elijas, con horarios separados para que no publiquen lo mismo a la vez.` : 'Cargá cuentas para poder repartir los reels.'}</p>
   </aside>`;
   const grid = R.length ? `<div class="reels">${R.map((r) => `<article class="reel" data-id="${r.id}">
-    <video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>
+    <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video><span class="reel-ver">Ver dónde está</span></a>
     <div class="body">
       <input class="title" value="${esc(r.title)}" data-act="reel-title" aria-label="Título">
-      <div class="meta"><span class="chip s-${r.status}">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'}</span><span>${fmt(r.size / 1048576, 1)} MB · ${r.posts} ${r.posts === 1 ? 'publicación' : 'publicaciones'}</span></div>
+      <div class="meta"><span class="chip s-${r.status}">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'}</span><span>${fmt(r.size / 1048576, 1)} MB</span></div>
+      ${reelNets(r.id)}
       <div class="row" style="gap:6px">
         <button class="btn sm accent" data-act="distribute" ${state.accounts.length ? '' : 'disabled'}>Repartir</button>
         <button class="btn sm" data-act="reel-approve">${r.status === 'aprobado' ? 'A borrador' : 'Aprobar'}</button>
@@ -628,11 +630,138 @@ function pautaTabla(p, c) {
   <p class="small muted" style="margin-top:12px">Es solo la plata que cobra Meta por mostrar los videos; la plataforma va aparte. TikTok no acepta propaganda política paga. Meta exige verificar al anunciante y mostrar quién paga.</p>`;
 }
 
+
+// redes donde está un reel, para la tarjeta: un ícono por cuenta con su estado
+function reelNets(rid) {
+  const P = state.posts.filter((x) => x.reel_id === rid);
+  if (!P.length) return `<a class="reel-nets none" href="#/p/${state.project.id}/reel/${rid}">Sin repartir todavía</a>`;
+  const pub = P.filter((x) => x.status === 'publicado').length;
+  return `<a class="reel-nets" href="#/p/${state.project.id}/reel/${rid}" title="Ver en qué cuentas está">${P.slice(0, 6).map((x) => `<span class="rn s-${x.status}">${netBadge(x.network)}</span>`).join('')}${P.length > 6 ? `<span class="small muted">+${P.length - 6}</span>` : ''}<span class="small">${pub} de ${P.length} publicadas</span></a>`;
+}
+
+// ---------- detalle de un reel: en qué cuentas está y cómo le fue ----------
+function reelDetailView() {
+  const p = state.project, r = state.reels.find((x) => x.id === state.sub);
+  if (!r) return `<div class="card empty"><h2 class="h2">Ese reel ya no está</h2><a class="btn" href="#/p/${p.id}/reels">Volver a Reels</a></div>`;
+  const P = state.posts.filter((x) => x.reel_id === r.id).sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+  const usadas = new Set(P.map((x) => x.account_id));
+  const libres = state.accounts.filter((a) => !usadas.has(a.id));
+  const n = (st) => P.filter((x) => x.status === st).length;
+  const rows = P.map((x) => `<tr data-id="${x.id}">
+      <td><span class="row" style="gap:8px">${netBadge(x.network)}<span><b>${esc(x.handle ? '@' + x.handle : NETS[x.network].name + ' sin conectar')}</b><br><span class="small muted">${NETS[x.network].name}</span></span></span></td>
+      <td><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span>${x.error ? `<p class="small err-t">${esc(x.error)}</p>` : ''}</td>
+      <td class="small">${x.published_at ? `Salió el ${fmtDay(x.published_at)} a las ${fmtTime(x.published_at)}` : `${fmtDay(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</td>
+      <td class="right">${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">Ver ↗</a>` : `<button class="btn sm ghost" data-act="open-post" data-pid="${x.id}">Abrir</button>`}</td>
+    </tr>`).join('');
+  return `<div class="rd">
+    <aside class="card rd-side">
+      <a class="small" href="#/p/${p.id}/reels">← Todos los reels</a>
+      <video src="/media/${esc(r.file)}" preload="metadata" controls playsinline></video>
+      <h2 class="h2">${esc(r.title)}</h2>
+      <p class="small muted">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'} · ${fmt(r.size / 1048576, 1)} MB · subido el ${fmtDate(r.created_at)}</p>
+      ${r.caption ? `<p class="small">${esc(r.caption)}</p>` : ''}
+      <div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length ? '' : 'disabled'}>Repartir en más cuentas</button></div>
+    </aside>
+    <div class="stack">
+      <div class="rd-stats card"><div><b>${P.length}</b><span>cuentas</span></div><div><b>${n('publicado')}</b><span>publicadas</span></div><div><b>${n('programado') + n('publicando')}</b><span>programadas</span></div><div><b>${n('fallido')}</b><span>con error</span></div></div>
+      <section class="card"><div class="card-head"><h2 class="h2">Dónde está este reel</h2></div>
+        ${P.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Cuenta</th><th>Estado</th><th>Cuándo</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no está en ninguna cuenta. Tocá <b>Repartir</b>.</p>'}
+      </section>
+      ${libres.length ? `<section class="card"><h2 class="h2">Cuentas donde no está</h2><div class="rd-free">${libres.map((a) => `<span class="chip nodot">${netBadge(a.network)} ${esc(accName(a))}</span>`).join('')}</div></section>` : ''}
+    </div>
+  </div>`;
+}
+
+// ---------- campañas: el presupuesto grande repartido en campañas chicas ----------
+const cusd = (n) => 'USD ' + fmt(n);
+function campanasView() {
+  const p = state.project, D = state.camps || { total: 0, campaigns: [] }, C = D.campaigns;
+  const asignado = C.reduce((s, c) => s + c.budget, 0), gastado = C.reduce((s, c) => s + (c.spent || 0), 0);
+  const libre = Math.max(0, D.total - asignado);
+  const pct = (v) => D.total ? Math.min(100, v / D.total * 100) : 0;
+  const colors = ['#2f6bff', '#13a37f', '#f29a1f', '#c2459a', '#7a5cff', '#0fa3c4', '#d9534f', '#6b8e23'];
+  const accById = Object.fromEntries(state.accounts.map((a) => [a.id, a])), reelById = Object.fromEntries(state.reels.map((r) => [r.id, r]));
+  const bar = `<div class="cg-bar" aria-label="Reparto del presupuesto">${C.map((c, i) => `<i style="width:${pct(c.budget)}%;background:${colors[i % colors.length]}" title="${esc(c.name)} · ${cusd(c.budget)}"></i>`).join('')}</div>
+    <div class="cg-legend">${C.map((c, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${esc(c.name)} · ${cusd(c.budget)}</span>`).join('')}${libre ? `<span><i class="free"></i>Sin asignar · ${cusd(libre)}</span>` : ''}</div>`;
+  const card = (c, i) => {
+    const g = c.budget ? Math.min(100, (c.spent || 0) / c.budget * 100) : 0;
+    return `<article class="card cg-card" data-id="${c.id}" style="--c:${colors[i % colors.length]}">
+      <div class="cg-top"><h3>${esc(c.name)}</h3><span class="spacer"></span>${c.meta_campaign_id ? `<span class="chip s-conectada">En Meta · ${c.meta_ads} ${c.meta_ads === 1 ? 'anuncio' : 'anuncios'}</span>` : '<span class="chip nodot">Solo en ACM</span>'}
+        <button class="icon-btn" data-act="camp-edit" title="Editar">${icon('edit', 16)}</button><button class="icon-btn danger" data-act="camp-del" title="Borrar">${icon('trash', 16)}</button></div>
+      <p class="small muted">${c.start_date || c.end_date ? `${c.start_date ? fmtShort(c.start_date) : 'hoy'} → ${c.end_date ? fmtShort(c.end_date) : 'fin de campaña'}` : 'Sin fechas: usa las de la pauta'}${c.notes ? ' · ' + esc(c.notes) : ''}</p>
+      <div class="cg-money"><div><b>${cusd(c.budget)}</b><span>presupuesto</span></div><div><b>${cusd(c.spent || 0)}</b><span>gastado${c.spent_at ? ' al ' + fmtShort(c.spent_at) : ''}</span></div><div><b>${fmtK(c.impressions || 0)}</b><span>impresiones</span></div><div><b>${fmtK(c.reach || 0)}</b><span>personas</span></div></div>
+      <div class="cg-spend"><i style="width:${g}%"></i></div>
+      <div class="cg-tags"><span class="small muted">Cuentas</span>${c.accounts.length ? c.accounts.map((id) => accById[id] ? `<span class="chip nodot">${netBadge(accById[id].network)} ${esc(accName(accById[id]))}</span>` : '').join('') : '<span class="small">todas las de Instagram</span>'}</div>
+      <div class="cg-tags"><span class="small muted">Reels</span>${c.reels.length ? c.reels.map((id) => reelById[id] ? `<a class="chip nodot" href="#/p/${p.id}/reel/${id}">${esc(reelById[id].title)}</a>` : '').join('') : '<span class="small">todos los publicados</span>'}</div>
+      ${c.error ? `<p class="banner err">${esc(c.error)}</p>` : ''}
+      ${c.meta_campaign_id ? '' : `<div class="row"><button class="btn sm accent" data-act="camp-meta">Crear en Meta (en pausa)</button></div>`}
+    </article>`;
+  };
+  return `<div class="cg">
+    <section class="card cg-head">
+      <div class="cg-total"><label class="field">Presupuesto total (USD, con IVA)<span class="pz-money2"><span>USD</span><input type="number" min="0" step="100" id="cg-total" value="${D.total || ''}" placeholder="10000"></span></label>
+        <p class="small muted">Lo que el cliente quiere invertir en toda la campaña. Es el mismo número de Pauta.</p></div>
+      <div class="cg-nums"><div><b>${cusd(asignado)}</b><span>asignado a ${C.length} ${C.length === 1 ? 'campaña' : 'campañas'}</span></div><div><b>${cusd(libre)}</b><span>sin asignar</span></div><div><b>${cusd(gastado)}</b><span>gastado (${D.total ? fmt(gastado / D.total * 100, 1) : 0} %)</span></div></div>
+      ${D.total ? bar : ''}
+      <div class="row"><button class="btn primary" data-act="camp-new" ${D.total ? '' : 'disabled'}>${icon('plus')} Nueva campaña</button>${C.some((c) => c.meta_campaign_id) ? `<button class="btn" data-act="camp-spend">Actualizar gasto desde Meta</button>` : ''}${D.total ? '' : '<span class="small muted">Primero poné el presupuesto total.</span>'}</div>
+    </section>
+    ${C.length ? `<div class="cg-list">${C.map(card).join('')}</div>` : `<div class="card empty"><h2 class="h2">Sin campañas todavía</h2><p>Partí el presupuesto en campañas chicas: cada una con sus cuentas, sus reels y su plata. Por ejemplo «Socios jóvenes» con los reels de TikTok y «Interior» con los de Facebook.</p></div>`}
+  </div>`;
+}
+function campDialog(c) {
+  const p = state.project, D = state.camps, otras = D.campaigns.filter((x) => x.id !== c?.id).reduce((s, x) => s + x.budget, 0);
+  const libre = Math.max(0, D.total - otras);
+  const d = openDialog(c ? 'Editar campaña' : 'Nueva campaña', `<form class="form" id="camp-form">
+    <label class="field">Nombre<input class="input" name="name" required maxlength="80" value="${esc(c?.name)}" placeholder="Socios jóvenes"></label>
+    <label class="field">Presupuesto (USD, con IVA) · quedan ${cusd(libre)}<input class="input" type="number" name="budget" min="1" max="${libre}" step="10" required value="${c?.budget || ''}"></label>
+    <div class="two"><label class="field">Desde<input class="input" type="date" name="start_date" value="${esc(c?.start_date)}"></label><label class="field">Hasta<input class="input" type="date" name="end_date" value="${esc(c?.end_date)}" ${p.propaganda_until ? `max="${esc(p.propaganda_until)}"` : ''}></label></div>
+    <b class="small">Cuentas (ninguna = todas las de Instagram)</b>
+    <div class="acc-pick">${state.accounts.map((a) => `<label><input type="checkbox" name="acc" value="${a.id}" ${c?.accounts.includes(a.id) ? 'checked' : ''}>${netBadge(a.network)}${esc(accName(a))}</label>`).join('') || '<p class="small muted">No hay cuentas.</p>'}</div>
+    <b class="small">Reels (ninguno = todos los publicados)</b>
+    <div class="acc-pick">${state.reels.map((r) => `<label><input type="checkbox" name="reel" value="${r.id}" ${c?.reels.includes(r.id) ? 'checked' : ''}>${esc(r.title)}</label>`).join('') || '<p class="small muted">No hay reels.</p>'}</div>
+    <label class="field">Notas<input class="input" name="notes" maxlength="300" value="${esc(c?.notes)}" placeholder="A quién apunta, qué mensaje"></label>
+    <p class="err" id="camp-err"></p>
+  </form>`, `<button class="btn" data-close>Cancelar</button><button class="btn primary" form="camp-form" type="submit">${c ? 'Guardar' : 'Crear campaña'}</button>`);
+  $('#camp-form', d).addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = e.target;
+    const body = { name: f.name.value.trim(), budget: Number(f.budget.value), start_date: f.start_date.value, end_date: f.end_date.value, notes: f.notes.value.trim(),
+      accounts: $$('[name=acc]:checked', f).map((x) => Number(x.value)), reels: $$('[name=reel]:checked', f).map((x) => Number(x.value)) };
+    try { await api(c ? `/api/campaigns/${c.id}` : `/api/projects/${p.id}/campaigns`, { method: c ? 'PUT' : 'POST', body }); d.close(); toast(c ? 'Campaña guardada' : 'Campaña creada'); render(); }
+    catch (err) { $('#camp-err', d).textContent = err.message; }
+  });
+}
+
+// ---------- preguntale a la investigación (agente con Claude) ----------
+const ASK = { pid: null, turns: [], busy: false };
+function askCard() {
+  return `<section class="card ask" id="ask">
+    <div class="card-head"><div><h2 class="h2">Preguntale a la investigación</h2><p class="small muted">Responde solo con las fichas del proyecto y cita cada dato. Ej.: «¿Quién es Fulano y qué le conviene decir?»</p></div></div>
+    <div class="ask-log" id="ask-log"></div>
+    ${state.agent ? `<form class="kn-row" id="ask-form"><input class="input" name="q" placeholder="Este es el dirigente X: ¿dónde está parado y qué temas le sirven?" autocomplete="off" maxlength="2000"><button class="btn primary" type="submit">Preguntar</button></form>`
+      : '<p class="banner">Falta la clave de Claude en el servidor (ANTHROPIC_API_KEY). Mientras tanto, usá la búsqueda de abajo.</p>'}
+  </section>`;
+}
+function askDraw() {
+  const log = $('#ask-log'); if (!log) return;
+  log.innerHTML = ASK.turns.map((t) => t.role === 'user' ? `<div class="ask-q">${esc(t.content)}</div>`
+    : `<div class="ask-a ${t.error ? 'err' : ''}">${esc(t.content).replace(/\[(\d+)\]/g, (m, n) => { const s = t.sources?.find((x) => x.n === Number(n)); return s ? `<a href="${/^https?:/.test(s.source || '') ? esc(s.source) : '#'}" target="_blank" rel="noopener noreferrer" class="cite" title="${esc(s.title)}">${n}</a>` : m; }).replace(/\n/g, '<br>')}
+      ${t.sources?.length ? `<div class="ask-src">${t.sources.map((s) => `<span><b>${s.n}</b> ${esc(s.title)}</span>`).join('')}</div>` : ''}</div>`).join('') + (ASK.busy ? '<div class="ask-a muted">Leyendo las fichas…</div>' : '');
+  log.scrollTop = log.scrollHeight;
+}
+async function askSend(e) {
+  e.preventDefault(); const q = e.target.q.value.trim(); if (!q || ASK.busy) return;
+  const history = ASK.turns.filter((t) => !t.error).map(({ role, content }) => ({ role, content }));
+  ASK.turns.push({ role: 'user', content: q }); ASK.busy = true; e.target.q.value = ''; askDraw();
+  try { const r = await api(`/api/projects/${state.project.id}/knowledge/ask`, { method: 'POST', body: { question: q, history } }); ASK.turns.push({ role: 'assistant', content: r.answer + (r.truncated ? '\n(La respuesta quedó cortada.)' : ''), sources: r.sources }); }
+  catch (err) { ASK.turns.pop(); ASK.turns.push({ role: 'user', content: q }, { role: 'assistant', content: err.message, error: true }); }
+  ASK.busy = false; askDraw();
+}
+
 // ---------- investigación (fichas con búsqueda por significado) ----------
 const K = { q: '', kind: '', handle: '', data: null, pid: null };
 const CONF = { alta: 'Confianza alta', media: 'Confianza media', baja: 'Sin confirmar' };
 function investigacionView() {
-  return `<div class="kn">
+  return `${askCard()}<div class="kn">
     <form class="card kn-search" id="kn-form">
       <div class="kn-row"><input class="input" name="q" placeholder="Preguntá algo: ¿quién está cerca de la AFA? ¿qué propone cada uno sobre la deuda? ¿qué le funciona a Gaudio?" value="${esc(K.q)}" autocomplete="off">
       <button class="btn primary" type="submit">Buscar</button></div>
@@ -934,8 +1063,12 @@ function uploadReels(files) {
 function afterRender(r) {
   if (r.view === 'project' && r.tab === 'investigacion') {
     knLoad();
+    if (ASK.pid !== state.project.id) Object.assign(ASK, { pid: state.project.id, turns: [] });
+    askDraw(); $('#ask-form')?.addEventListener('submit', askSend);
     $('#kn-form').addEventListener('submit', (e) => { e.preventDefault(); K.q = e.target.q.value.trim(); knLoad(); });
   }
+  const ct = $('#cg-total');
+  if (ct) { ct.addEventListener('change', () => { (async () => { try { state.project.pauta = await api(`/api/projects/${state.project.id}/pauta`, { method: 'PUT', body: { ...(state.project.pauta || {}), budget: Number(ct.value) || 0 } }); render(); } catch (e) { fail(e); } })(); }); }
   const drop = $('#drop');
   if (drop) {
     $('#reel-input').addEventListener('change', (e) => uploadReels(e.target.files));
@@ -1001,6 +1134,11 @@ document.addEventListener('click', async (e) => {
         state.calMonth = act === 'cal-today' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : new Date(m.getFullYear(), m.getMonth() + (act === 'cal-next' ? 1 : -1), 1);
         render(); break; }
       case 'open-post': postDialog([Number(el.dataset.pid)]); break;
+      case 'camp-new': campDialog(); break;
+      case 'camp-edit': campDialog(state.camps.campaigns.find((c) => c.id === id)); break;
+      case 'camp-del': if (await confirmBox('Borrar campaña', 'Se borra de ACM. Si ya estaba creada en Meta, allá queda en pausa.')) { await api(`/api/campaigns/${id}`, { method: 'DELETE' }); render(); } break;
+      case 'camp-meta': el.disabled = true; el.textContent = 'Creando…'; try { await api(`/api/campaigns/${id}/meta`, { method: 'POST' }); toast('Campaña creada en Meta, en pausa'); } catch (err) { fail(err); } render(); break;
+      case 'camp-spend': el.disabled = true; el.textContent = 'Consultando…'; try { const r = await api(`/api/projects/${state.project.id}/campaigns/spend`, { method: 'POST' }); toast(r.errors?.length ? `Actualizadas ${r.updated}; ${r.errors.length} con error` : `Gasto actualizado (${r.updated})`, !!r.errors?.length); } catch (err) { fail(err); } render(); break;
       case 'kn-kind': K.kind = el.dataset.k; knLoad(); break;
       case 'kn-handle': K.handle = K.handle === el.dataset.h ? '' : el.dataset.h; K.kind = K.handle ? 'publicacion' : ''; knLoad(); break;
       case 'kn-del': if (await confirmBox('Borrar ficha', 'La ficha se borra de la investigación del proyecto.', 'Borrar')) { await api(`/api/knowledge/${el.dataset.id}`, { method: 'DELETE' }); knLoad(); } break;

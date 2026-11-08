@@ -67,3 +67,10 @@ export async function createCampaign(c, o) {
   }
   return { campaignId: camp.id, adsetId: adset.id, ads };
 }
+
+// Gasto real de una campaña (en la moneda de la cuenta publicitaria), con impresiones y alcance
+export async function campaignInsights(c, id) {
+  const r = await g('GET', `${id}/insights`, c.accessToken, { fields: 'spend,impressions,reach', date_preset: 'maximum' });
+  const d = r.data?.[0] || {};
+  return { spend: Number(d.spend) || 0, impressions: Number(d.impressions) || 0, reach: Number(d.reach) || 0 };
+}

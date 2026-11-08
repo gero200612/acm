@@ -63,6 +63,15 @@ export function startSimulator(port = 0) {
     if (p === '/graph/act_999/adsets') { log.push('adset ' + JSON.stringify({ b: params.lifetime_budget, s: params.start_time, e: params.end_time, f: params.frequency_control_specs, t: params.targeting })); return send(res, 200, { id: 'SET1' }); }
     if (p === '/graph/act_999/adcreatives') return params.source_instagram_media_id ? send(res, 200, { id: 'CR1' }) : send(res, 400, { error: { message: 'sin media' } });
     if (p === '/graph/act_999/ads') return send(res, 200, { id: 'AD1' });
+    if (p === '/graph/CAMP1/insights') return send(res, 200, { data: [{ spend: '121000', impressions: '34000', reach: '21000' }] });
+    // Claude: responde citando la primera ficha, y si se le pide, se niega
+    if (p === '/anthropic/v1/messages') {
+      const j = JSON.parse(body); log.push('claude ' + JSON.stringify({ model: j.model, effort: j.output_config?.effort, fallbacks: j.fallbacks, beta: req.headers['anthropic-beta'], key: !!(req.headers['x-api-key'] || /^Bearer sk-ant-/.test(req.headers.authorization || '')), turns: j.messages.length }));
+      const pregunta = String(j.messages.at(-1).content);
+      const primera = (pregunta.match(/\[1\] \([^)]*\) ([^\n]+)/) || [])[1] || 'sin fichas';
+      if (/NEGATE/.test(pregunta)) return send(res, 200, { id: 'msg_2', type: 'message', role: 'assistant', model: j.model, content: [], stop_reason: 'refusal', usage: { input_tokens: 1, output_tokens: 0 } });
+      return send(res, 200, { id: 'msg_1', type: 'message', role: 'assistant', model: j.model, content: [{ type: 'text', text: `Según la investigación, ${primera} [1].` }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 20 } });
+    }
     send(res, 404, { error: { message: 'mock: no conozco ' + p } });
   });
   });
@@ -70,7 +79,7 @@ export function startSimulator(port = 0) {
     B = `http://127.0.0.1:${server.address().port}`;
     resolve({
       url: B, log,
-      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, ytUpload: `${B}/ytup`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth` },
+      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, ytUpload: `${B}/ytup`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic` },
       close: () => new Promise((r) => server.close(r)),
     });
   }));

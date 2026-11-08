@@ -106,7 +106,7 @@ export async function runBanco() {
   let ok = 0, total = 0;
   // la copia aislada de ACM para el recorrido completo (si no arranca, esos casos fallan con el motivo)
   const sb = {};
-  try { sb.box = await startSandbox(sim.bases); } catch (e) { sb.error = e.message; }
+  try { sb.box = await startSandbox({ ...sim.bases, __log: sim.log }); sb.simLog = () => sim.log; } catch (e) { sb.error = e.message; }
   try {
     await traced({ kind: 'banco', title: 'Banco de pruebas', bases: sim.bases }, async () => {
       for (const [group, name, fn] of [...cases(video, sim), ...recorridoCases(sb)]) {

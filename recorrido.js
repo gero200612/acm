@@ -34,7 +34,7 @@ export async function startSandbox(bases) {
     cwd: APP, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, PORT: String(free), ACM_PUBLIC_URL: `http://127.0.0.1:${free}`, ACM_DATA: data, NODE_ENV: 'test',
       ACM_TIKTOK_CLIENT_KEY: 'tt-app', ACM_TIKTOK_CLIENT_SECRET: 'tt-secret', ACM_GOOGLE_CLIENT_ID: 'g-app', ACM_GOOGLE_CLIENT_SECRET: 'g-secret',
-      ACM_TIKTOK_AUTH_URL: bases.tiktokAuth, ACM_GOOGLE_AUTH_URL: bases.googleAuth, ACM_PASSWORD: password, ACM_SECRET: crypto.randomBytes(32).toString('hex'), ACM_TICK_MS: '1000', ACM_FILL_MS: '50', ACM_SCHEDULER: 'on',
+      ACM_TIKTOK_AUTH_URL: bases.tiktokAuth, ACM_GOOGLE_AUTH_URL: bases.googleAuth, ANTHROPIC_BASE_URL: bases.anthropic, ANTHROPIC_API_KEY: 'sk-ant-simulador', ANTHROPIC_AUTH_TOKEN: '', ACM_PASSWORD: password, ACM_SECRET: crypto.randomBytes(32).toString('hex'), ACM_TICK_MS: '1000', ACM_FILL_MS: '50', ACM_SCHEDULER: 'on',
       ACM_GRAPH_URL: bases.graph, ACM_RUPLOAD_URL: bases.rupload, ACM_TIKTOK_URL: bases.tiktok, ACM_GOOGLE_OAUTH_URL: bases.googleOauth, ACM_YOUTUBE_URL: bases.youtube, ACM_YT_UPLOAD_URL: bases.ytUpload },
   });
   let log = '';
@@ -58,7 +58,7 @@ export async function startSandbox(bases) {
   });
   const raw = (url, withCookie = true) => als.exit(() => fetch(url.startsWith('http') ? url : base + url, { redirect: 'manual', headers: withCookie ? { cookie } : {}, signal: AbortSignal.timeout(20000) }));
   const stop = async () => { child.kill(); await sleep(300); fs.rmSync(data, { recursive: true, force: true }); };
-  return { api, raw, password, stop, base };
+  return { api, raw, password, stop, base, simLog: () => bases.__log || [] };
 }
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -244,6 +244,45 @@ export function recorridoCases(sb) {
         const r = await sb.box.raw(u, false); const t = await r.text();
         eq(r.status, 200, u); yes(t.includes(want), `${u} no dice «${want}»`);
       }
+    }],
+    [G('investigación'), 'El agente responde con las fichas y las cita', async () => {
+      const r = await api('POST', `/api/projects/${c.p}/knowledge/ask`, { question: 'quién tiene relación con la AFA', history: [{ role: 'user', content: 'hola' }, { role: 'assistant', content: 'hola, ¿qué querés saber?' }] });
+      eq(r.status, 200, `respuesta (${r.j?.error})`);
+      yes(/\[1\]/.test(r.j.answer) && r.j.sources[0]?.title === 'Nakis', `tendría que citar la ficha de Nakis: ${JSON.stringify(r.j)}`);
+      const R = (await api('GET', '/api/lab/runs?kind=agente')).j;
+      yes(R[0]?.status === 'ok', 'la pregunta no quedó en el Laboratorio');
+      const d = JSON.stringify((await api('GET', `/api/lab/runs/${R[0].id}`)).j);
+      yes(!d.includes('sk-ant-simulador'), 'la traza guarda la clave de Claude');
+    }],
+    [G('investigación'), 'El agente usa el modelo, el esfuerzo y el respaldo pedidos, y avisa si se niega', async () => {
+      const L = (sb.simLog?.() || []).filter((l) => l.startsWith('claude '));
+      const last = JSON.parse(L.at(-1).slice(7));
+      eq([last.model, last.effort, last.fallbacks, /server-side-fallback-2026-07-01/.test(last.beta), last.key, last.turns], ['claude-opus-5-5', 'medium', 'default', true, true, 3], 'modelo, esfuerzo, respaldo, cabecera, clave y turnos');
+      const r = await api('POST', `/api/projects/${c.p}/knowledge/ask`, { question: 'NEGATE esto' });
+      yes(r.status === 400 && /no quiso responder/.test(r.j?.error), `tendría que avisar el rechazo: ${r.j?.error}`);
+      eq((await api('POST', `/api/projects/${c.p}/knowledge/ask`, { question: '  ' })).status, 400, 'pregunta vacía');
+    }],
+    [G('campañas'), 'Reparte el presupuesto total sin pasarse', async () => {
+      await api('PUT', `/api/projects/${c.p}/pauta`, { budget: 3000 });
+      const a = await api('POST', `/api/projects/${c.p}/campaigns`, { name: 'Socios jóvenes', budget: 2000, accounts: [c.acc.instagram], reels: [c.reel], start_date: '2026-11-20', end_date: '2026-12-10' });
+      eq(a.status, 200, `crear (${a.j?.error})`); c.camp = a.j.id;
+      const b = await api('POST', `/api/projects/${c.p}/campaigns`, { name: 'Interior', budget: 1500 });
+      yes(b.status === 400 && /quedan USD 1000/.test(b.j.error), `tendría que avisar que se pasa: ${b.j?.error}`);
+      const b2 = await api('POST', `/api/projects/${c.p}/campaigns`, { name: 'Interior', budget: 1000 }); eq(b2.status, 200, 'la que entra justo');
+      eq((await api('PUT', `/api/campaigns/${c.camp}`, { budget: 2500 })).status, 400, 'subir una campaña por encima del total');
+      eq((await api('PUT', `/api/campaigns/${c.camp}`, { start_date: '2026-12-11' })).status, 400, 'termina antes de empezar');
+      eq((await api('POST', `/api/projects/${c.p}/campaigns`, { name: 'X', budget: 10, accounts: [99999] })).status, 400, 'cuenta de otro proyecto');
+      await api('DELETE', `/api/campaigns/${b2.j.id}`);
+      const L = (await api('GET', `/api/projects/${c.p}/campaigns`)).j;
+      eq([L.total, L.campaigns.length, L.campaigns[0].accounts, L.campaigns[0].reels], [3000, 1, [c.acc.instagram], [c.reel]], 'total, campañas, cuentas y reels');
+    }],
+    [G('campañas'), 'Crea la campaña en Meta en pausa y trae cuánto gastó', async () => {
+      const m = await api('POST', `/api/campaigns/${c.camp}/meta`);
+      eq([m.status, m.j?.meta_campaign_id, m.j?.meta_ads], [200, 'CAMP1', 1], `en Meta (${m.j?.error})`);
+      const s = await api('POST', `/api/projects/${c.p}/campaigns/spend`);
+      eq([s.status, s.j?.updated], [200, 1], 'actualizar gasto');
+      const C = (await api('GET', `/api/projects/${c.p}/campaigns`)).j.campaigns[0];
+      eq([C.spent, C.impressions, C.reach], [Math.round(121000 / 1200 * 1.21 * 100) / 100, 34000, 21000], 'gasto en USD con IVA, impresiones y alcance');
     }],
     [G('proyecto'), 'Borrar el proyecto se lleva todo lo suyo', async () => {
       eq((await api('DELETE', `/api/projects/${c.p}`)).j?.ok, true, 'borrar');
