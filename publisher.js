@@ -110,7 +110,9 @@ async function tiktok(c, file, caption, log, _title, save, opts = {}) {
   try { ini = await init(privacy); }
   catch (e) {
     // mientras TikTok no aprueba la app, solo deja publicar en privado
-    if (!/unaudited_client_can_only_post_to_private_accounts|can only post to private/i.test(e.message + (e.code || '')) || privacy === 'SELF_ONLY') throw e;
+    const unaudited = /unaudited_client_can_only_post_to_private_accounts/.test(e.code || '');
+    if (unaudited && privacy === 'SELF_ONLY') throw new Error('TikTok solo deja publicar en cuentas privadas mientras la app no esté aprobada: en la app de TikTok, Perfil → Configuración y privacidad → Privacidad → Cuenta privada, y probá de nuevo.');
+    if (!unaudited) throw e;
     privacy = 'SELF_ONLY'; aviso = 'publicado como privado: la app de TikTok todavía no está aprobada';
     ini = await init(privacy);
   }

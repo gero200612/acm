@@ -35,6 +35,10 @@ function cases(video, sim) {
       let msg = ''; try { await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba'); } catch (e) { msg = e.message; }
       yes(/privacidad/.test(msg), `tendría que pedir la privacidad: ${msg}`);
     }],
+    ['Publicación', 'TikTok: con cuenta pública y app sin aprobar explica cómo hacerla privada', async () => {
+      let msg = ''; try { await publish('tiktok', { accessToken: 'TT_PUBLICA' }, video, 'Prueba', 'Prueba', () => {}, () => {}, { privacy: 'SELF_ONLY' }); } catch (e) { msg = e.message; }
+      yes(/Cuenta privada/.test(msg), `tendría que explicar cómo hacer privada la cuenta: ${msg}`);
+    }],
     ['Publicación', 'TikTok: comentarios, dúos y stitch apagados salvo que se pidan', async () => {
       await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba', () => {}, () => {}, { privacy: 'SELF_ONLY', allowComment: true });
       const last = JSON.parse(sim.log.filter((l) => l.startsWith('ttinit ')).pop().slice(7));

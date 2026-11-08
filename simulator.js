@@ -25,7 +25,7 @@ export function startSimulator(port = 0) {
     if (p === '/graph/PAGE1/video_reels') return params.upload_phase === 'start' ? send(res, 200, { video_id: 'V1', upload_url: `${B}/rup/fb/V1` }) : params.upload_phase === 'finish' && params.video_state === 'PUBLISHED' ? send(res, 200, { success: true }) : send(res, 400, { error: { message: 'fase' } });
     if (p === '/rup/fb/V1') return Number(req.headers.file_size) === body.length ? send(res, 200, { success: true }) : send(res, 400, { error: { message: 'tamaño' } });
     // TikTok
-    if (p === '/tt/v2/user/info/') return req.headers.authorization === 'Bearer TT_OK' ? send(res, 200, { data: { user: { username: 'mock.tt', follower_count: 50 } }, ...ok }) : send(res, 401, { error: { code: 'access_token_invalid', message: 'vencido' } });
+    if (p === '/tt/v2/user/info/') return ['Bearer TT_OK', 'Bearer TT_PUBLICA'].includes(req.headers.authorization) ? send(res, 200, { data: { user: { username: 'mock.tt', follower_count: 50 } }, ...ok }) : send(res, 401, { error: { code: 'access_token_invalid', message: 'vencido' } });
     if (p === '/tt/v2/oauth/token/') {
       if (params.grant_type === 'authorization_code') return params.code === 'TTCODE' && params.client_key === 'tt-app' && params.redirect_uri ? send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2', open_id: 'OPEN1', scope: 'user.info.basic,user.info.profile,user.info.stats,video.publish,video.upload' }) : send(res, 400, { error: 'invalid_grant', error_description: 'código o app incorrectos' });
       return send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2' });
@@ -42,7 +42,7 @@ export function startSimulator(port = 0) {
     if (p === '/tt/v2/post/publish/video/init/') {
       const j = JSON.parse(body); log.push('ttinit ' + JSON.stringify(j.post_info));
       // como el Sandbox real: una app sin auditar solo publica en privado
-      if (j.post_info?.privacy_level !== 'SELF_ONLY') return send(res, 403, { error: { code: 'unaudited_client_can_only_post_to_private_accounts', message: 'Please review our integration guidelines' } });
+      if (j.post_info?.privacy_level !== 'SELF_ONLY' || req.headers.authorization === 'Bearer TT_PUBLICA') return send(res, 403, { error: { code: 'unaudited_client_can_only_post_to_private_accounts', message: 'Please review our integration guidelines' } });
       return send(res, 200, { data: { publish_id: 'P1', upload_url: `${B}/tt-up` }, ...ok });
     }
     if (p === '/tt-up') return send(res, 201, {});
