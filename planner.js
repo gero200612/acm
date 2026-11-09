@@ -11,10 +11,22 @@ const minHm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m 
 const absMin = (at) => new Date(String(at).slice(0, 16).replace(' ', 'T') + ':00Z').getTime() / 6e4;
 
 // 'YYYY-MM-DD HH:MM' (o ISO) de vencimiento; solo fecha = vale todo ese día. '' = no vence.
-function expiryOf(e) {
+export function expiryOf(e) {
   const s = String(e || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return '';
   return s.length <= 10 ? `${s} 23:59` : s.slice(0, 16).replace('T', ' ');
+}
+
+// por qué una edición ya no se publica por vencida (null = vigente); lo usa el programador al publicar
+export function expiredBlocked(expires_at, now) {
+  const exp = expiryOf(expires_at);
+  return exp && exp < String(now).slice(0, 16) ? `La edición venció el ${exp}: ya no se publica.` : null;
+}
+
+// ¿la edición todavía puede salir ese día? (no venció y le queda algún horario del día a repartir)
+export function stillUsable(e, now, date) {
+  const exp = expiryOf(e.expires_at);
+  return !exp || (exp >= now && exp >= `${date} ${WINDOW[0]}`);
 }
 
 // puntaje de una edición: actualidad que vence pronto primero, después lo que dicen los aprendizajes
@@ -37,7 +49,7 @@ function scoreOf(ed, learnings, now) {
 export function planDay({ project, accounts = [], bank = [], existingPosts = [], learnings = {}, date, now, youtubeQuota = 100, activeProjects = 1, tz }) {
   const accs = accounts.filter((a) => a.status === 'conectada');
   const byId = new Map(accounts.map((a) => [a.id, a]));
-  const cand = bank.filter((e) => e.review === 'aprobado' && !(expiryOf(e.expires_at) && expiryOf(e.expires_at) < now))
+  const cand = bank.filter((e) => e.review === 'aprobado' && stillUsable(e, now, date))
     .map((e) => ({ e, score: scoreOf(e, learnings, now) }))
     .sort((a, b) => b.score - a.score || a.e.id - b.e.id).map((x) => x.e);
 
@@ -73,7 +85,10 @@ export function planDay({ project, accounts = [], bank = [], existingPosts = [],
   const out = [];
   // intenta poner una edición en una cuenta: el primer horario (de mejor a peor) que cumple las reglas duras
   const place = (a, ed) => {
-    for (const m of timesFor(a, dayCount.get(a.id) || 0)) {
+    const exp = expiryOf(ed.expires_at);
+    let times = timesFor(a, dayCount.get(a.id) || 0);
+    if (exp) { times = times.filter((m) => `${date} ${minHm(m)}` <= exp); if (exp.slice(0, 10) === date) times = times.sort((x, y) => x - y); } // lo que vence hoy sale lo antes posible
+    for (const m of times) {
       const at = `${date} ${minHm(m)}`, abs = absMin(at);
       if ((bySlot.get(a.id) || []).some((x) => Math.abs(x - abs) < OWN_GAP)) continue;
       const why = scheduleBlocked({ reel_id: ed.id, account_id: a.id, network: a.network, scheduled_at: at, clip_id: ed.clip_id, review: ed.review },
@@ -140,7 +155,7 @@ export function planProject(db, projectId, { now, date, tz, youtubeQuota = Numbe
   // banco vacío: quedan lugares sin llenar y no hay ninguna edición que todavía pueda ir a alguna red conectada
   const used = new Set([...existing, ...plan].map((p) => `${p.reel_id}|${accounts.find((a) => a.id === p.account_id)?.network}`));
   const nets = [...new Set(accounts.filter((a) => a.status === 'conectada').map((a) => a.network))];
-  const left = bank.some((e) => !(expiryOf(e.expires_at) && expiryOf(e.expires_at) < now) && nets.some((n) => !used.has(`${e.id}|${n}`)));
+  const left = bank.some((e) => stillUsable(e, now, day) && nets.some((n) => !used.has(`${e.id}|${n}`)));
   const free = accounts.filter((a) => a.status === 'conectada').reduce((s, a) => s + Math.max(0, (a.posts_per_day || 3) - [...existing, ...plan].filter((p) => p.account_id === a.id && String(p.scheduled_at).slice(0, 10) === day && LIVE.has(p.status || 'programado')).length), 0);
   const empty = nets.length > 0 && !left && free > 0 ? 1 : 0;
   db.prepare('INSERT INTO plan_runs (project_id, date, bank_empty, planned) VALUES (?, ?, ?, ?) ON CONFLICT(project_id, date) DO UPDATE SET bank_empty = excluded.bank_empty, planned = planned + excluded.planned')

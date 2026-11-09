@@ -19,7 +19,7 @@ import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleB
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
 import { initAlerts } from './alerts.js';
-import { initPlanner, planProject } from './planner.js';
+import { initPlanner, planProject, expiredBlocked } from './planner.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -1023,7 +1023,7 @@ async function tick() {
     const waiting = []; // de un recorte, fuera del horario: quedan 'programado' y salen cuando se abre la ventana
     for (;;) {
       const now = localNow();
-      const p = get(`SELECT p.*, r.clip_id, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.storage, r.archived_at, r.title, r.caption, r.hashtags, pr.propaganda_until
+      const p = get(`SELECT p.*, r.clip_id, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.storage, r.archived_at, r.expires_at AS reel_expires, r.title, r.caption, r.hashtags, pr.propaganda_until
         FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id JOIN projects pr ON pr.id = p.project_id
         WHERE p.status = 'programado' AND pr.demo = 0 AND p.scheduled_at <= ? ${waiting.length ? `AND p.id NOT IN (${waiting.join(',')})` : ''} ORDER BY p.scheduled_at LIMIT 1`, now);
       if (!p) break;
@@ -1031,6 +1031,9 @@ async function tick() {
       // se marca antes de subir: si dos vueltas se cruzan, solo una la toma
       if (!run("UPDATE posts SET status = 'publicando', attempts = attempts + 1 WHERE id = ? AND status = 'programado'", p.id).changes) continue;
       const fail = (msg) => run("UPDATE posts SET status = 'fallido', error = ? WHERE id = ?", msg, p.id);
+      // una edición vencida no sale aunque se haya programado antes
+      const venc = expiredBlocked(p.reel_expires, now);
+      if (venc) { run("UPDATE posts SET status = 'bloqueado', note = ? WHERE id = ?", venc, p.id); console.log(`[publicar ${p.id}] bloqueada: ${venc}`); continue; }
       // una publicación programada antes de un rechazo (o que ya no cumple las reglas) no sale
       const hard = scheduleCheck({ id: p.id, reel_id: p.reel_id, account_id: p.account_id, scheduled_at: p.scheduled_at });
       if (hard) { run("UPDATE posts SET status = 'bloqueado', note = ? WHERE id = ?", hard, p.id); console.log(`[publicar ${p.id}] bloqueada: ${hard}`); continue; }

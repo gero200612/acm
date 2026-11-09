@@ -573,6 +573,35 @@ export function recorridoCases(sb) {
         eq((await box.api('GET', `/api/projects/${p}/reels`)).j[0].status, 'en_cola', 'sigue en cola, sin error');
       } finally { await box.stop(); }
     }],
+    [G('editor'), 'Con una edición aprobada que llega en un proyecto automático, GET /plan devuelve lo programado (y no repite si llega de nuevo)', async () => {
+      await api('PUT', `/api/projects/${c.p}`, { review_mode: 'auto' });
+      const id = "0a1b2c3d-0000-4000-8000-000000000801";
+      const r = await sb.box.editorApi('/api/editor/edicion', { crudo_id: c.crudo, clip_id: 'clip-plan', review: 'aprobado', edicion_id: id, file_url: `${sb.editor.base}/video.mp4` });
+      eq([r.status, r.j?.review], [200, 'aprobado'], 'edición aprobada');
+      const hoy = (await api('GET', '/api/clock')).j.now.slice(0, 10), manana = new Date(new Date(hoy + 'T12:00:00Z').getTime() + 864e5).toISOString().slice(0, 10);
+      const plan = async () => [...(await api('GET', `/api/projects/${c.p}/plan?date=${hoy}`)).j, ...(await api('GET', `/api/projects/${c.p}/plan?date=${manana}`)).j].filter((x) => x.reel_id === r.j.id);
+      const antes = await plan();
+      yes(antes.length >= 1 && antes.every((x) => x.scheduled_at.slice(11) >= '08:00' && x.scheduled_at.slice(11) <= '23:00'), `no quedó programada en horario: ${JSON.stringify(antes)}`);
+      eq(new Set(antes.map((x) => x.network)).size, antes.length, 'una vez por red');
+      await sb.box.editorApi('/api/editor/edicion', { crudo_id: c.crudo, clip_id: 'clip-plan', review: 'aprobado', edicion_id: id, file_url: `${sb.editor.base}/video.mp4` });
+      eq((await plan()).length, antes.length, 'el reintento no duplica');
+      await api('PUT', `/api/projects/${c.p}`, { review_mode: 'manual' });
+    }],
+    [G('editor'), 'Una edición vencida que ya estaba programada no sale: el tick la bloquea', async () => {
+      await api('PUT', `/api/projects/${c.p}`, { review_mode: 'auto' });
+      const r = await sb.box.editorApi('/api/editor/edicion', { crudo_id: c.crudo, clip_id: 'clip-venc', review: 'aprobado', edicion_id: "0a1b2c3d-0000-4000-8000-000000000802", file_url: `${sb.editor.base}/video.mp4`, expires_at: '2020-01-01 00:00' });
+      await api('PUT', `/api/projects/${c.p}`, { review_mode: 'manual' });
+      eq(r.status, 200, 'entrega');
+      eq((await api('GET', `/api/projects/${c.p}/posts`)).j.filter((x) => x.reel_id === r.j.id).length, 0, 'el planificador no programa vencidos');
+      const P = await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: r.j.id, account_id: c.acc.youtube, scheduled_at: '2030-01-10 10:00' }]);
+      eq(P.status, 200, `programar a mano (${P.j?.error})`);
+      const p = (await api('GET', `/api/projects/${c.p}/posts`)).j.find((x) => x.reel_id === r.j.id);
+      eq((await api('POST', `/api/posts/${p.id}/now`, {})).status, 200, 'publicar ahora');
+      const inside = withinWindow((await api('GET', '/api/clock')).j.now);
+      let q; for (let i = 0; i < 20; i++) { await sleep(500); q = (await api('GET', `/api/projects/${c.p}/posts`)).j.find((x) => x.id === p.id); if (q.status !== 'programado') break; }
+      if (inside) yes(q.status === 'bloqueado' && /venci/.test(q.note), `estado ${q.status}, nota ${q.note}`);
+      else eq(q.status, 'programado', 'fuera de horario espera');
+    }],
     [G('proyecto'), 'Borrar el proyecto se lleva todo lo suyo', async () => {
       eq((await api('DELETE', `/api/projects/${c.p}`)).j?.ok, true, 'borrar');
       eq((await api('GET', `/api/projects/${c.p}`)).status, 404, 'el proyecto sigue');

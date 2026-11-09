@@ -12,7 +12,7 @@ import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS } from './rules.js';
 import { embed } from './knowledge.js';
 import { DatabaseSync } from 'node:sqlite';
-import { planDay, planProject, initPlanner } from './planner.js';
+import { planDay, planProject, initPlanner, expiredBlocked } from './planner.js';
 import { initAlerts } from './alerts.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
@@ -185,6 +185,10 @@ function cases(video, sim) {
       planProject(db, 1, { now: '2026-12-02 07:30' }); eq(alertas(), 1, 'dos días seguidos vacíos alertan');
       planProject(db, 1, { now: '2026-12-02 10:00' }); eq(alertas(), 1, 'un aviso por día');
       planProject(db, 1, { now: '2026-12-04 07:30' }); eq(alertas(), 1, 'con un día de por medio no alerta');
+      // un banco con solo ediciones que no pueden salir hoy (vencen antes de las 08:00) cuenta como vacío
+      db.exec("INSERT INTO reels (id, project_id, kind, clip_id, review, expires_at) VALUES (1, 1, 'listo', 'x', 'aprobado', '2026-12-05 07:50')");
+      planProject(db, 1, { now: '2026-12-05 07:30' }); // el 04 estaba vacío y el 05 solo tiene una edición que vence a las 07:50
+      eq(alertas(), 2, 'ediciones imposibles de ubicar por vencimiento también dan falta_material');
     }],
     ['Circuito', 'Planificador: no programa reels vencidos ni sin aprobar, ni en cuentas no conectadas', async () => {
       const { accounts, bank } = planFixture(2, 2);
@@ -194,6 +198,21 @@ function cases(video, sim) {
       yes(!plan.some((p) => p.reel_id === bank[0].id), 'programó un vencido'); yes(!plan.some((p) => p.reel_id === bank[1].id), 'programó uno sin aprobar');
       yes(plan.some((p) => p.reel_id === bank[2].id), 'el que vence a la noche sí va');
       yes(plan.every((p) => p.account_id === accounts[0].id), 'usó una cuenta no conectada');
+    }],
+    ['Circuito', 'Planificador: una edición que vence a las 10:00 no recibe horario después de las 10:00 y sale temprano; si no entra, no se programa', async () => {
+      const acc = [{ id: 1, network: 'instagram', status: 'conectada', posts_per_day: 3 }];
+      const mk = (id, expires_at) => ({ id, clip_id: `c${id}`, review: 'aprobado', expires_at, recipe: null });
+      const plan = planDay({ accounts: acc, bank: [mk(1, ''), mk(2, '2026-12-01 10:00')], existingPosts: [], date: '2026-12-01', now: '2026-12-01 07:30' });
+      const v = plan.find((p) => p.reel_id === 2); yes(v && v.scheduled_at <= '2026-12-01 10:00', `la que vence a las 10: ${v?.scheduled_at}`);
+      eq(plan.find((p) => p.reel_id === 1) && plan[0].reel_id, 2, 'la que vence primero va primero');
+      eq(planDay({ accounts: acc, bank: [mk(2, '2026-12-01 07:45')], existingPosts: [], date: '2026-12-01', now: '2026-12-01 07:30' }), [], 'vence antes de abrir la ventana: no entra');
+      eq(planDay({ accounts: acc, bank: [mk(2, '2026-12-01 23:59')], existingPosts: [], date: '2026-12-02', now: '2026-12-01 23:00' }), [], 'vence antes del día a repartir');
+    }],
+    ['Circuito', 'Al publicar, una edición vencida se bloquea (la regla del programador)', async () => {
+      yes(/venció/.test(expiredBlocked('2026-12-01 10:00', '2026-12-01 10:01')), 'vencida');
+      eq(expiredBlocked('2026-12-01 10:00', '2026-12-01 10:00'), null, 'justo a la hora');
+      eq(expiredBlocked('', '2026-12-01 10:00'), null, 'sin vencimiento');
+      eq(expiredBlocked('2026-12-01', '2026-12-01 23:30'), null, 'solo fecha: vale todo el día');
     }],
     ['Circuito', 'Planificador: YouTube respeta su cuota por proyecto y usa el mejor horario aprendido', async () => {
       const yt = [{ id: 1, network: 'youtube', status: 'conectada', posts_per_day: 3 }];
