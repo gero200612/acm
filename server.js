@@ -77,7 +77,7 @@ if (!cols('pauta').includes('budget')) db.exec('ALTER TABLE pauta ADD COLUMN bud
 if (!cols('pauta').includes('end_date')) db.exec("ALTER TABLE pauta ADD COLUMN end_date TEXT DEFAULT ''");
 for (const [c, def] of [['propaganda_until', "TEXT DEFAULT ''"], ['padron_contacts', 'INTEGER DEFAULT 0'], ['padron_phones', 'INTEGER DEFAULT 0'], ['padron_emails', 'INTEGER DEFAULT 0'], ['padron_file', "TEXT DEFAULT ''"], ['padron_at', "TEXT DEFAULT ''"]])
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
-for (const [c, def] of [['options', "TEXT DEFAULT ''"], ['external_id', "TEXT DEFAULT ''"], ['external_url', "TEXT DEFAULT ''"], ['error', "TEXT DEFAULT ''"], ['note', "TEXT DEFAULT ''"], ['published_at', "TEXT DEFAULT ''"], ['attempts', 'INTEGER DEFAULT 0']])
+for (const [c, def] of [['options', "TEXT DEFAULT ''"], ['external_id', "TEXT DEFAULT ''"], ['external_url', "TEXT DEFAULT ''"], ['error', "TEXT DEFAULT ''"], ['note', "TEXT DEFAULT ''"], ['published_at', "TEXT DEFAULT ''"], ['network_video_id', "TEXT DEFAULT ''"], ['attempts', 'INTEGER DEFAULT 0']])
   if (!cols('posts').includes(c)) db.exec(`ALTER TABLE posts ADD COLUMN ${c} ${def}`);
 // si el servidor se reinició a mitad de una subida, esas vuelven a la fila
 db.exec("UPDATE posts SET status = 'programado' WHERE status = 'publicando'");
@@ -318,7 +318,7 @@ function circuitFields(d, kindBefore) {
   if ('review_mode' in d && !['manual', 'auto'].includes(d.review_mode)) return 'Modo de revisión inválido: manual o auto';
   if ('score_weights' in d) {
     let v = d.score_weights; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return 'Pesos del puntaje inválidos'; } }
-    if (!v || typeof v !== 'object' || Array.isArray(v) || WEIGHT_KEYS.some((k) => !(Number(v[k]) >= 0))) return 'Los pesos del puntaje tienen que ser números de 0 en adelante';
+    if (!v || typeof v !== 'object' || Array.isArray(v) || WEIGHT_KEYS.some((k) => k in v && (v[k] === '' || v[k] === null || !(Number(v[k]) >= 0)))) return 'Los pesos del puntaje tienen que ser números de 0 en adelante (los que falten quedan en su valor por defecto)';
     d.score_weights = JSON.stringify(weightsOf(v));
   }
   if ('ads_networks' in d) {

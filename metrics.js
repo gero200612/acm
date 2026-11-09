@@ -58,7 +58,8 @@ const READERS = {
     const st = d.items?.[0]?.statistics;
     if (!st) throw new Error('YouTube no encontró el video.');
     const out = { views: num(st.viewCount), reach: null, avg_watch_s: null, completion: null, likes: num(st.likeCount), comments: num(st.commentCount), shares: null };
-    try {
+    // Analytics pide un permiso aparte que hoy no se pide (R16): solo con ACM_YT_ANALYTICS=1
+    if (process.env.ACM_YT_ANALYTICS === '1') try {
       const day = (t) => new Date(t).toISOString().slice(0, 10);
       const q = new URLSearchParams({ ids: 'channel==MINE', metrics: 'views,averageViewDuration,averageViewPercentage,shares', filters: `video==${id}`, startDate: day(Date.now() - 30 * 864e5), endDate: day(Date.now()) });
       const a = await getJson('YouTube Analytics', `${bases().youtubeAnalytics}/v2/reports?${q}`, { headers: h });
@@ -69,14 +70,24 @@ const READERS = {
         out.completion = col.averageViewPercentage !== null && col.averageViewPercentage !== undefined ? Math.min(1, col.averageViewPercentage / 100) : completionOf(out.avg_watch_s, o.duration);
         out.shares = col.shares ?? null;
       }
-    } catch (e) { out.note = `sin Analytics: ${e.message}`; }
+    } catch (e) { out.note = mask(`sin Analytics: ${e.message}`, [token]); }
     return out;
   },
   // TikTok: POST /v2/video/query/ (view, like, comment, share; la API no da alcance ni tiempo de visualización)
   async tiktok(c, id, o) {
     const token = await getTikTokToken(c, o.save);
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' };
+    // lo que se guarda al publicar es el publish_id: se cambia por el ID del video una sola vez y se recuerda
+    let videoId = o.videoId;
+    if (!videoId) {
+      const st = await getJson('TikTok', `${bases().tiktok}/v2/post/publish/status/fetch/`, { method: 'POST', headers, body: JSON.stringify({ publish_id: id }) });
+      videoId = [].concat(st.data?.publicaly_available_post_id || [])[0];
+      if (!videoId) throw new Error('TikTok todavía no dio el ID del video (puede estar procesándose o en privado).');
+      videoId = String(videoId);
+      o.onVideoId?.(videoId);
+    }
     const r = await getJson('TikTok', `${bases().tiktok}/v2/video/query/?fields=id,view_count,like_count,comment_count,share_count`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' }, body: JSON.stringify({ filters: { video_ids: [id] } }),
+      method: 'POST', headers, body: JSON.stringify({ filters: { video_ids: [videoId] } }),
     });
     const v = r.data?.videos?.[0];
     if (!v) throw new Error('TikTok no devolvió el video (puede que todavía se esté procesando).');
@@ -117,11 +128,13 @@ export function score(metrics, weights = DEFAULT_WEIGHTS) {
 }
 
 // --- lectura periódica ---
-// Publicaciones de los últimos `days` días en proyectos que no son de demostración. Un error en una no frena a las demás:
+// Publicaciones desde `since` (el servidor pasa 7 días atrás) en proyectos que no son de demostración. Un error en una no frena a las demás:
 // queda una fila con la nota (sin secretos). Devuelve {read, failed}.
-export async function readDue(db, vault, { since, days = 7, now = new Date() } = {}) {
-  const cutoff = since || new Date(now.getTime() - days * 864e5).toISOString().slice(0, 16).replace('T', ' ');
-  const posts = db.prepare(`SELECT po.id, po.external_id, po.account_id, a.network, a.creds, r.duration FROM posts po
+// `since` es obligatorio y va en el mismo formato en que se guarda posts.published_at: hora local 'YYYY-MM-DD HH:MM'
+export async function readDue(db, vault, { since } = {}) {
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(since || '')) throw new Error("readDue pide 'since' en hora local 'YYYY-MM-DD HH:MM'");
+  const cutoff = since;
+  const posts = db.prepare(`SELECT po.id, po.external_id, po.account_id, a.network, a.creds, po.network_video_id, r.duration FROM posts po
     JOIN accounts a ON a.id = po.account_id JOIN projects p ON p.id = po.project_id JOIN reels r ON r.id = po.reel_id
     WHERE po.status = 'publicado' AND po.external_id != '' AND p.demo = 0 AND po.published_at >= ? ORDER BY po.id`).all(cutoff);
   const ins = db.prepare('INSERT INTO post_metrics (post_id, views, reach, avg_watch_s, completion, likes, comments, shares, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
@@ -130,7 +143,7 @@ export async function readDue(db, vault, { since, days = 7, now = new Date() } =
     try {
       const creds = vault.open(po.creds);
       const save = (fresh) => db.prepare('UPDATE accounts SET creds = ? WHERE id = ?').run(vault.seal({ ...vault.open(db.prepare('SELECT creds FROM accounts WHERE id = ?').get(po.account_id).creds), ...fresh }), po.account_id);
-      const m = await readMetrics(po.network, creds, po.external_id, { duration: po.duration, save });
+      const m = await readMetrics(po.network, creds, po.external_id, { duration: po.duration, save, videoId: po.network_video_id || '', onVideoId: (v) => db.prepare('UPDATE posts SET network_video_id = ? WHERE id = ?').run(v, po.id) });
       ins.run(po.id, m.views, m.reach, m.avg_watch_s, m.completion, m.likes, m.comments, m.shares, m.note || '');
       read++;
     } catch (e) {

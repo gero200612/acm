@@ -63,7 +63,7 @@ export function startSimulator(port = 0) {
       return send(res, 200, { data: { publish_id: 'P1', upload_url: `${B}/tt-up` }, ...ok });
     }
     if (p === '/tt-up') return send(res, 201, {});
-    if (p === '/tt/v2/post/publish/status/fetch/') return send(res, 200, { data: { status: 'PUBLISH_COMPLETE' }, ...ok });
+    if (p === '/tt/v2/post/publish/status/fetch/') return send(res, 200, { data: { status: 'PUBLISH_COMPLETE', publicaly_available_post_id: ['TV1'] }, ...ok });
     // Google
     if (p === '/goauth/token') {
       if (params.grant_type === 'authorization_code') return params.code === 'GCODE' && params.client_id === 'g-app' ? send(res, 200, { access_token: 'ya29.mock', refresh_token: 'G_REFRESH', scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly' }) : send(res, 400, { error: 'invalid_grant', error_description: 'código o app incorrectos' });
