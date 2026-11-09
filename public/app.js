@@ -296,7 +296,7 @@ function recetaResumen(r) {
 function aprobarView() {
   const p = state.project, R = state.review || { clips: [], pending: 0, review_mode: p.review_mode };
   const auto = R.review_mode === 'auto';
-  const head = `<div class="ap-head"><div><h2 class="h2">Para aprobar <span class="count">${R.pending}</span></h2><p class="muted small">${R.pending ? `${R.pending} ${R.pending === 1 ? 'recorte espera' : 'recortes esperan'} tu decisión. Aprobás o rechazás las 3 versiones juntas.` : 'No hay recortes esperando.'}</p></div>
+  const head = `<div class="ap-head"><div><h2 class="h2">Para aprobar <span class="count">${R.pending}</span></h2><p class="muted small">${R.pending ? `${R.pending} ${R.pending === 1 ? 'recorte espera' : 'recortes esperan'} tu decisión. Aprobás o rechazás todas sus versiones juntas.` : 'No hay recortes esperando.'}</p></div>
     <span class="chip ${auto ? 's-conectada' : 'nodot'}" title="${auto ? 'Lo que el analista aprueba entra solo; lo dudoso siempre espera acá. Un rechazo tuyo la vuelve a manual.' : 'Con 19 de los últimos 20 recortes aprobados pasa a automática.'}">Revisión ${auto ? 'automática' : 'manual'}</span></div>`;
   const rec = (R.recent || []).length ? `<h2 class="h2" style="margin-top:8px">Aprobados recientes</h2>${R.recent.map((c) => `
   <section class="card ap-clip" data-clip="${esc(c.clip_id)}">
