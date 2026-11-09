@@ -1,0 +1,55 @@
+# Editor: orquestador de ediciones de ACM
+
+Servicio Node 24 (express + node:sqlite). ACM le manda cada crudo recién subido; el editor lo transcribe en el Estudio, elige momentos, pide los recortes editados, los revisa y se los entrega a ACM, avisando en cada etapa.
+
+## Flujo
+
+```
+ACM  --POST /trabajos {project_id, reel_id, url, duracion_s, aprendizajes_url}-->  editor   (202 {id})
+editor --POST /api/editor/estado {reel_id, estado, detalle}-->  ACM                 (en cada etapa)
+editor --POST /api/editor/edicion {crudo_id, clip_id, moment, recipe, caption, hashtags,
+                                   file_url, cover_url, duration, review, expires_at?}-->  ACM
+```
+
+Todo va con `Authorization: Bearer EDITOR_TOKEN`. ACM baja el video y la portada de `file_url` / `cover_url` (el editor los sirve en `/entregas/<uuid>.mp4|jpg`, sin token, con nombre imposible de adivinar, y los borra al entregar) y crea el reel `kind='listo'`, `source_id=crudo_id`.
+
+Estados del crudo en ACM (`reels.status`): `en_cola`, `transcribiendo`, `buscando_momentos`, `editando`, `revisando`, `listo`, `sin_momentos`, `error`.
+
+## Enchufar criterio: `crearRunner`
+
+`runner.js` exporta `crearRunner({ db, estudio, acm, elegirMomentos, armarRecetas, revisar, publicUrl, dir, log })`. Las tres funciones se inyectan (por `hooks` en `crearEditor`, ver el final de `server.js`); si faltan se usan los rellenos de `rellenos` (sin momentos, sin recetas, review `pendiente`).
+
+| función | recibe | devuelve |
+| --- | --- | --- |
+| `elegirMomentos` (Tarea 6) | `{ trabajo, transcripcion, aprendizajes }` | `[{ inicio_s, fin_s, ...datos }]` (`datos.caption` y `datos.hashtags` se usan como texto por defecto) |
+| `armarRecetas` (Tarea 6) | `{ trabajo, momento, transcripcion, aprendizajes }` | `[receta, ...]`, hasta 3 por momento (todas comparten el `clip_id` del momento) |
+| `revisar` (Tarea 7) | `{ trabajo, momento, edicion, resultado }` | `{ review: 'pendiente'\|'aprobado'\|'rechazado', caption?, hashtags?, notas? }` |
+
+- `transcripcion` es el resultado del Estudio: `{ duracion_s, palabras: [{inicio_s, fin_s, texto}], audio: { lufs } }`.
+- `aprendizajes` es la lista que devuelve `GET {aprendizajes_url}` de ACM (hoy vacía; la llena el analista).
+- A `editar-recorte` van solo las palabras que tocan el momento, con los tiempos absolutos del crudo.
+- El `clip_id` lo pone el corredor: `c<reel_id>-<n°>` y no cambia si el trabajo se retoma.
+- Cada edición que falla queda en `ediciones` con su error; si salen todas mal el crudo pasa a `error`, si salen algunas queda `listo` con el detalle «N de M ediciones».
+
+`estudio.js` (`crearEstudio`, más `transcribir(url)` y `editarRecorte(pedido)` con la configuración del entorno) espera con sondeo hasta `listo` o `fallo`. Cada pedido lleva `X-Empresa` y `Authorization: Bearer`.
+
+## Base (node:sqlite)
+
+`trabajos` (un crudo, con su etapa y la transcripción), `momentos` (con `clip_id`), `ediciones` (una por receta: `pendiente` → `editada` → `entregada` o `fallo`). Al reiniciar, los trabajos que no llegaron a un estado final se retoman sin repetir la transcripción ni los momentos.
+
+## Variables
+
+| variable | uso |
+| --- | --- |
+| `EDITOR_TOKEN` | clave compartida con ACM (obligatoria) |
+| `EDITOR_PUBLIC_URL` | dirección pública del editor, para que ACM baje los videos |
+| `EDITOR_DATA` | carpeta de la base y de `entregas/` (`./data`) |
+| `PORT` | 4000 |
+| `ESTUDIO_URL`, `ESTUDIO_EMPRESA`, `ESTUDIO_CLAVE` | el Estudio |
+| `ACM_URL` | dirección de ACM |
+
+En ACM: `EDITOR_URL` (si falta, los crudos quedan `en_cola` y no pasa nada) y `EDITOR_TOKEN`.
+
+## Pruebas
+
+`node editor/banco.mjs` (Estudio y ACM falsos en servidores locales; imprime «Pasaron X de Y»).

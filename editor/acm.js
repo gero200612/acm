@@ -1,0 +1,33 @@
+// Cliente de ACM: avisa en qué etapa va cada crudo y entrega las ediciones. Siempre con Bearer EDITOR_TOKEN.
+const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn = fetch } = {}) {
+  const base = String(url || '').replace(/\/+$/, '');
+  async function post(ruta, body) {
+    if (!base) throw new Error('Falta ACM_URL');
+    let ultimo;
+    for (let i = 0; i < reintentos; i++) {
+      try {
+        const r = await fetchFn(base + ruta, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token || ''}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(30 * 60e3) });
+        if (r.ok) return r.json();
+        ultimo = new Error(`ACM respondió ${r.status} en ${ruta}: ${(await r.text()).slice(0, 200)}`);
+        if (r.status < 500) throw Object.assign(ultimo, { definitivo: true }); // un 4xx no se arregla reintentando
+      } catch (e) { if (e.definitivo) throw e; ultimo = e; }
+      await dormir(esperaMs * (i + 1));
+    }
+    throw ultimo;
+  }
+  return {
+    // lo aprendido del proyecto (lo llena la fase del analista); si no se puede traer, el trabajo sigue sin eso
+    async aprendizajes(urlAprendizajes) {
+      if (!urlAprendizajes) return [];
+      try {
+        const r = await fetchFn(urlAprendizajes, { headers: { authorization: `Bearer ${token || ''}` }, signal: AbortSignal.timeout(20000) });
+        return r.ok ? ((await r.json()).aprendizajes || []) : [];
+      } catch { return []; }
+    },
+    estado: (reel_id, estado, detalle = '') => post('/api/editor/estado', { reel_id, estado, detalle }),
+    // {crudo_id, clip_id, moment, recipe, caption, hashtags, file_url, cover_url, duration, review, expires_at?}
+    edicion: (payload) => post('/api/editor/edicion', payload),
+  };
+}

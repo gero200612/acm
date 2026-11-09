@@ -3,6 +3,7 @@
 // Meta Ads, trazas e investigación. Nunca toca la base real ni las redes reales; al terminar la copia se borra.
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,6 +26,28 @@ export function fakeMp4(width, height, seconds) {
   return Buffer.concat([box('ftyp', Buffer.from('isom\0\0\x02\0isomiso2mp41', 'latin1')), box('moov', box('mvhd', mvhd), box('trak', box('tkhd', tkhd), box('mdia', box('hdlr', hdlr)))), box('mdat', Buffer.alloc(64 * 1024, 7))]);
 }
 
+export const EDITOR_TOKEN = 'tok-editor-prueba';
+// Editor de mentira: guarda lo que ACM le manda y sirve un video para que ACM lo baje
+export function startFakeEditor() {
+  const jobs = [];
+  const video = fakeMp4(1080, 1920, 6);
+  const server = http.createServer((req, res) => {
+    const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
+      if (req.url === '/video.mp4') { res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': video.length }); return res.end(video); }
+      if (req.url === '/portada.jpg') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9])); }
+      if (req.method === 'POST' && req.url === '/trabajos') {
+        jobs.push({ auth: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString() || '{}') });
+        res.writeHead(202, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ id: 'T1' }));
+      }
+      res.writeHead(404); res.end();
+    });
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    resolve({ base, jobs, video, close: () => new Promise((r) => { server.closeAllConnections(); server.close(r); }) });
+  }));
+}
+
 // Arranca la copia aislada y devuelve un cliente HTTP con su sesión
 export async function startSandbox(bases) {
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'acm-recorrido-'));
@@ -36,7 +59,8 @@ export async function startSandbox(bases) {
     env: { ...process.env, PORT: String(free), ACM_PUBLIC_URL: `http://127.0.0.1:${free}`, ACM_DATA: data, NODE_ENV: 'test',
       ACM_TIKTOK_CLIENT_KEY: 'tt-app', ACM_TIKTOK_CLIENT_SECRET: 'tt-secret', ACM_GOOGLE_CLIENT_ID: 'g-app', ACM_GOOGLE_CLIENT_SECRET: 'g-secret',
       ACM_TIKTOK_AUTH_URL: bases.tiktokAuth, ACM_GOOGLE_AUTH_URL: bases.googleAuth, ANTHROPIC_BASE_URL: bases.anthropic, ACM_R2_ENDPOINT: bases.r2, ACM_R2_BUCKET: 'acm-test', ACM_R2_ACCESS_KEY_ID: 'r2-key', ACM_R2_SECRET_ACCESS_KEY: 'r2-secret-simulador', ACM_CLEANUP: 'off', ANTHROPIC_API_KEY: 'sk-ant-simulador', ANTHROPIC_AUTH_TOKEN: '', ACM_PASSWORD: password, ACM_SECRET: crypto.randomBytes(32).toString('hex'), ACM_TICK_MS: '1000', ACM_FILL_MS: '50', ACM_SCHEDULER: 'on',
-      ACM_GRAPH_URL: bases.graph, ACM_RUPLOAD_URL: bases.rupload, ACM_TIKTOK_URL: bases.tiktok, ACM_GOOGLE_OAUTH_URL: bases.googleOauth, ACM_YOUTUBE_URL: bases.youtube, ACM_YT_UPLOAD_URL: bases.ytUpload },
+      ACM_GRAPH_URL: bases.graph, ACM_RUPLOAD_URL: bases.rupload, ACM_TIKTOK_URL: bases.tiktok, ACM_GOOGLE_OAUTH_URL: bases.googleOauth, ACM_YOUTUBE_URL: bases.youtube, ACM_YT_UPLOAD_URL: bases.ytUpload,
+      EDITOR_URL: bases.editor || '', EDITOR_TOKEN: EDITOR_TOKEN },
   });
   let log = '';
   const port = await new Promise((resolve, reject) => {
@@ -59,7 +83,8 @@ export async function startSandbox(bases) {
   });
   const raw = (url, withCookie = true) => als.exit(() => fetch(url.startsWith('http') ? url : base + url, { redirect: 'manual', headers: withCookie ? { cookie } : {}, signal: AbortSignal.timeout(20000) }));
   const stop = async () => { child.kill(); await sleep(300); fs.rmSync(data, { recursive: true, force: true }); };
-  return { api, raw, password, stop, base, simLog: () => bases.__log || [] };
+  const editorApi = (url, body) => als.exit(async () => { const r = await fetch(base + url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${EDITOR_TOKEN}` }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, j }; });
+  return { api, raw, editorApi, password, stop, base, simLog: () => bases.__log || [] };
 }
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -399,6 +424,63 @@ export function recorridoCases(sb) {
       const p = await api('POST', `/api/projects/${c.p}/posts`, [{ reel_id: c.r2reel, account_id: c.acc.youtube, scheduled_at: '2026-12-11 10:00' }]);
       yes(p.status === 400 && /ya se borró/.test(p.j?.error), `programar un video borrado: ${p.j?.error}`);
       eq((await api('POST', '/api/maintenance/cleanup', { days: 30 })).j, { ediciones: 0, crudos: 0 }, 'con 30 días no tendría que borrar nada');
+    }],
+    [G('editor'), 'Las rutas del editor piden la clave del editor: sin ella, 401', async () => {
+      const raw = (path, body, auth) => als.exit(() => fetch(sb.box.base + path, { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(body) }));
+      eq((await raw('/api/editor/edicion', { crudo_id: 1, clip_id: 'x', file_url: 'http://x/y.mp4' })).status, 401, 'edicion sin token');
+      eq((await raw('/api/editor/edicion', { crudo_id: 1 }, 'Bearer otro')).status, 401, 'edicion con token malo');
+      eq((await raw('/api/editor/estado', { reel_id: 1, estado: 'listo' })).status, 401, 'estado sin token');
+    }],
+    [G('editor'), 'Completar la subida de un crudo manda el trabajo al editor con el token', async () => {
+      yes(sb.editor, 'no hay editor de mentira');
+      const mp4 = fakeMp4(1080, 1920, 30);
+      const up = await api('POST', `/api/projects/${c.p}/reels/uploads`, { files: [{ name: 'crudo-editor.mp4', size: mp4.length, type: 'video/mp4' }] });
+      const { key, url } = up.j[0];
+      eq((await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'video/mp4' }, body: mp4 })).status, 200, 'subida');
+      const done = await api('POST', `/api/projects/${c.p}/reels/complete`, { kind: 'crudo', items: [{ key, name: 'crudo-editor.mp4', duration: 30 }] });
+      eq([done.status, done.j?.[0]?.kind, done.j?.[0]?.status], [200, 'crudo', 'en_cola'], 'crudo en cola');
+      c.crudo = done.j[0].id;
+      for (let i = 0; i < 40 && !sb.editor.jobs.length; i++) await sleep(100);
+      const job = sb.editor.jobs[0]; yes(job, 'el editor no recibió el trabajo');
+      eq(job.auth, `Bearer ${EDITOR_TOKEN}`, 'token');
+      eq([job.body.project_id, job.body.reel_id, job.body.duracion_s], [c.p, c.crudo, 30], 'datos del trabajo');
+      yes(/X-Amz-Signature=/.test(job.body.url), 'el link del crudo no está firmado');
+      yes(/\/api\/editor\/aprendizajes\/\d+$/.test(job.body.aprendizajes_url), `aprendizajes_url: ${job.body.aprendizajes_url}`);
+    }],
+    [G('editor'), 'El estado del crudo avanza con los avisos del editor y rechaza uno inventado', async () => {
+      const post = (b) => sb.box.editorApi('/api/editor/estado', b);
+      eq((await post({ reel_id: c.crudo, estado: 'transcribiendo', detalle: 'Escuchando' })).status, 200, 'transcribiendo');
+      let r = (await api('GET', `/api/projects/${c.p}/reels`)).j.find((x) => x.id === c.crudo);
+      eq([r.status, r.status_detail], ['transcribiendo', 'Escuchando'], 'estado guardado');
+      eq((await post({ reel_id: c.crudo, estado: 'inventado' })).status, 400, 'estado inválido');
+      eq((await post({ reel_id: 999999, estado: 'listo' })).status, 404, 'crudo inexistente');
+      eq((await post({ reel_id: c.crudo, estado: 'listo' })).status, 200, 'listo');
+    }],
+    [G('editor'), 'POST /api/editor/edicion con token crea el reel listo con source_id, clip_id y review pendiente', async () => {
+      const b = { crudo_id: c.crudo, clip_id: 'clip-abc', moment: { inicio_s: 1, fin_s: 9 }, recipe: { id: 'rapido' }, caption: 'Un corte', hashtags: 'club, deporte', file_url: `${sb.editor.base}/video.mp4`, cover_url: `${sb.editor.base}/portada.jpg`, duration: 8, expires_at: '2026-12-01 12:00' };
+      const r = await sb.box.editorApi('/api/editor/edicion', b);
+      eq(r.status, 200, `entrega (${r.j?.error})`);
+      eq([r.j.kind, r.j.source_id, r.j.clip_id, r.j.review, r.j.storage, r.j.expires_at], ['listo', c.crudo, 'clip-abc', 'pendiente', 'r2', '2026-12-01 12:00'], 'reel creado');
+      eq([JSON.parse(r.j.moment).fin_s, JSON.parse(r.j.recipe).id, r.j.hashtags, r.j.duration], [9, 'rapido', '#club #deporte', 8], 'datos');
+      yes(r.j.cover && (await sb.box.raw(`/media/${r.j.cover}`)).status === 200, 'la portada no se sirve');
+      eq((await sb.box.raw(`/media/${r.j.file}`)).status, 302, 'el video quedó en R2');
+      yes((sb.simLog?.() || []).some((l) => l === `r2 PUT ${r.j.file}`), 'no se subió a R2');
+      eq((await sb.box.editorApi('/api/editor/edicion', { ...b, crudo_id: 999999 })).status, 404, 'crudo inexistente');
+      eq((await sb.box.editorApi('/api/editor/edicion', { ...b, clip_id: '' })).status, 400, 'sin clip_id');
+      eq((await sb.box.editorApi('/api/editor/edicion', { ...b, review: 'x' })).status, 400, 'revisión inválida');
+    }],
+    [G('editor'), 'Sin EDITOR_URL el crudo queda en cola y no hay error', async () => {
+      const box = await startSandbox({ ...sb.bases, editor: '' });
+      try {
+        const p = (await box.api('POST', '/api/login', { password: box.password }), (await box.api('POST', '/api/projects', (() => { const f = new FormData(); f.set('name', 'Sin editor'); return f; })(), true)).j.id);
+        const mp4 = fakeMp4(1080, 1920, 20);
+        const up = await box.api('POST', `/api/projects/${p}/reels/uploads`, { files: [{ name: 'c.mp4', size: mp4.length, type: 'video/mp4' }] });
+        await fetch(up.j[0].url, { method: 'PUT', headers: { 'Content-Type': 'video/mp4' }, body: mp4 });
+        const done = await box.api('POST', `/api/projects/${p}/reels/complete`, { kind: 'crudo', items: [{ key: up.j[0].key, name: 'c.mp4', duration: 20 }] });
+        eq([done.status, done.j?.[0]?.status], [200, 'en_cola'], 'en cola');
+        await sleep(300);
+        eq((await box.api('GET', `/api/projects/${p}/reels`)).j[0].status, 'en_cola', 'sigue en cola, sin error');
+      } finally { await box.stop(); }
     }],
     [G('proyecto'), 'Borrar el proyecto se lleva todo lo suyo', async () => {
       eq((await api('DELETE', `/api/projects/${c.p}`)).j?.ok, true, 'borrar');

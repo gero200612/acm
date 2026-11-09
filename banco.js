@@ -11,7 +11,7 @@ import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS } from './rules.js';
 import { embed } from './knowledge.js';
-import { startSandbox, recorridoCases } from './recorrido.js';
+import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (cond, what) => { if (!cond) throw new Error(what); };
@@ -140,7 +140,10 @@ export async function runBanco() {
   let ok = 0, total = 0;
   // la copia aislada de ACM para el recorrido completo (si no arranca, esos casos fallan con el motivo)
   const sb = {};
-  try { sb.box = await startSandbox({ ...sim.bases, __log: sim.log }); sb.simLog = () => sim.log; } catch (e) { sb.error = e.message; }
+  try {
+    sb.editor = await startFakeEditor(); sb.bases = { ...sim.bases, __log: sim.log };
+    sb.box = await startSandbox({ ...sb.bases, editor: sb.editor.base }); sb.simLog = () => sim.log;
+  } catch (e) { sb.error = e.message; }
   try {
     await traced({ kind: 'banco', title: 'Banco de pruebas', bases: sim.bases }, async () => {
       for (const [group, name, fn] of [...cases(video, sim), ...recorridoCases(sb)]) {
@@ -153,6 +156,6 @@ export async function runBanco() {
       return `Pasaron los ${total} casos`;
     });
   } catch {}
-  finally { await sb.box?.stop(); await sim.close(); fs.rmSync(video, { force: true }); }
+  finally { await sb.box?.stop(); await sb.editor?.close(); await sim.close(); fs.rmSync(video, { force: true }); }
   return { ok, total };
 }

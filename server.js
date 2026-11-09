@@ -5,6 +5,8 @@ import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { readPadron } from './padron.js';
 import { publish, tiktokOptions, tiktokCreator } from './publisher.js';
 import { testAds, uploadAudience, createCampaign, campaignInsights } from './ads.js';
@@ -84,6 +86,7 @@ for (const [c, def] of [['kind', "TEXT DEFAULT 'club'"], ['ads_networks', `TEXT 
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
 for (const [c, def] of [['clip_id', 'TEXT'], ['moment', 'TEXT'], ['recipe', 'TEXT'], ['review', "TEXT DEFAULT 'pendiente'"], ['expires_at', "TEXT DEFAULT ''"], ['cover', "TEXT DEFAULT ''"]])
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
+if (!cols('reels').includes('status_detail')) db.exec("ALTER TABLE reels ADD COLUMN status_detail TEXT DEFAULT ''");
 initTrace(db);
 initKnowledge(db);
 // campañas: el presupuesto total del proyecto (pauta.budget) se reparte en campañas con sus cuentas y su contenido
@@ -153,6 +156,68 @@ async function login(req, res) {
 app.post('/api/logout', (req, res) => { res.set('Set-Cookie', 'acm=; Path=/; HttpOnly; Max-Age=0'); res.json({ ok: true }); });
 app.get('/api/session', (req, res) => res.json({ ok: authed(req) }));
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+// ---------- editor (orquestador de ediciones): habla con ACM con un token, no con la sesión de una persona ----------
+const EDITOR_STATES = ['en_cola', 'transcribiendo', 'buscando_momentos', 'editando', 'revisando', 'listo', 'sin_momentos', 'error'];
+function requireEditor(req, res, next) {
+  const want = Buffer.from(process.env.EDITOR_TOKEN || '');
+  const given = Buffer.from((req.headers.authorization || '').replace(/^Bearer /, ''));
+  if (!want.length || given.length !== want.length || !crypto.timingSafeEqual(given, want)) return res.status(401).json({ error: 'Sin token' });
+  next();
+}
+// el editor avisa en qué etapa va el crudo
+app.post('/api/editor/estado', requireEditor, (req, res) => {
+  const b = req.body || {};
+  const r = get("SELECT id FROM reels WHERE id = ? AND kind = 'crudo'", Number(b.reel_id));
+  if (!r) return res.status(404).json({ error: 'No existe ese crudo' });
+  if (!EDITOR_STATES.includes(b.estado)) return res.status(400).json({ error: `Estado inválido: ${EDITOR_STATES.join(', ')}` });
+  run('UPDATE reels SET status = ?, status_detail = ? WHERE id = ?', b.estado, String(b.detalle || '').slice(0, 500), r.id);
+  res.json({ ok: true });
+});
+// lo que el editor aprendió de lo publicado: lo llena la fase del analista; por ahora devuelve la lista vacía
+app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => res.json({ project_id: Number(req.params.pid), aprendizajes: [] }));
+// el editor entrega una edición lista: ACM baja el archivo (y la portada), lo guarda donde guarda todo y crea el reel
+async function bajar(url, dest) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(30 * 60e3) });
+  if (!r.ok || !r.body) throw new Error(`no se pudo bajar ${new URL(url).pathname}: ${r.status}`);
+  await pipeline(Readable.fromWeb(r.body), fs.createWriteStream(dest));
+}
+app.post('/api/editor/edicion', requireEditor, async (req, res) => {
+  const b = req.body || {};
+  const crudo = get("SELECT * FROM reels WHERE id = ? AND kind = 'crudo'", Number(b.crudo_id));
+  if (!crudo) return res.status(404).json({ error: 'No existe ese crudo' });
+  if (!String(b.clip_id || '').trim()) return res.status(400).json({ error: 'Falta el clip_id' });
+  if (!/^https?:\/\//.test(String(b.file_url || ''))) return res.status(400).json({ error: 'Falta el link del video (file_url)' });
+  const review = b.review === undefined ? 'pendiente' : b.review;
+  if (!['pendiente', 'aprobado', 'rechazado'].includes(review)) return res.status(400).json({ error: 'Revisión inválida: pendiente, aprobado o rechazado' });
+  const json = (v) => (v === undefined || v === null ? null : typeof v === 'string' ? v : JSON.stringify(v));
+  const id = crypto.randomUUID(), tmp = path.join(UPLOADS, `tmp-ed-${id}.mp4`);
+  let file = `${id}.mp4`, storage = 'local', cover = '';
+  try {
+    await bajar(b.file_url, tmp);
+    if (r2Ready()) {
+      file = `p${crudo.project_id}-${id}.mp4`; storage = 'r2';
+      const size = fs.statSync(tmp).size;
+      const put = await fetch(await putUrl(file, 'video/mp4'), { method: 'PUT', headers: { 'content-type': 'video/mp4', 'content-length': String(size) }, body: fs.createReadStream(tmp), duplex: 'half' });
+      if (!put.ok) throw new Error(`R2 no aceptó el video: ${put.status}`);
+    } else fs.renameSync(tmp, path.join(UPLOADS, file));
+    // la portada es chica: va al disco del servidor
+    if (/^https?:\/\//.test(String(b.cover_url || ''))) {
+      try { cover = `${id}.jpg`; await bajar(b.cover_url, path.join(UPLOADS, cover)); } catch { cover = ''; }
+    }
+  } catch (e) {
+    console.error('editor/edicion:', e.message);
+    return res.status(502).json({ error: `No pudimos traer el video: ${e.message}` });
+  } finally { fs.rm(tmp, { force: true }, () => {}); }
+  const m = (storage === 'local' && probe(path.join(UPLOADS, file))) || {};
+  const size = storage === 'local' ? fs.statSync(path.join(UPLOADS, file)).size : 0;
+  const dur = Number(b.duration) > 0 ? Number(b.duration) : (m.duration ?? null);
+  const title = String(b.title || '').trim() || `${crudo.title} · ${String(b.clip_id).slice(0, 12)}`;
+  const r = run("INSERT INTO reels (project_id, title, caption, hashtags, file, original_name, size, duration, width, height, kind, source_id, storage, clip_id, moment, recipe, review, expires_at, cover, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', ?, ?, ?, ?, ?, ?, ?, ?, 'borrador')",
+    crudo.project_id, title, String(b.caption || ''), tags(b.hashtags), file, `${title}.mp4`, size, dur, m.width ?? null, m.height ?? null, crudo.id, storage,
+    String(b.clip_id), json(b.moment), json(b.recipe), review, String(b.expires_at || ''), cover);
+  res.json(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
+});
 
 app.use('/api', requireAuth);
 
@@ -437,10 +502,28 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
     const title = path.parse(String(it.name || 'reel')).name.replace(/[_-]+/g, ' ');
     const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2')",
       pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind);
+    if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola' WHERE id = ?", r.lastInsertRowid);
     out.push(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
   }
   res.json(out);
+  // un crudo recién subido va al editor; sin EDITOR_URL queda en cola y listo
+  for (const r of out) if (r.kind === 'crudo') sendToEditor(r).catch((e) => console.error('editor:', e.message));
 });
+async function sendToEditor(r) {
+  const base = (process.env.EDITOR_URL || '').replace(/\/+$/, '');
+  if (!base) return;
+  try {
+    const pub = (process.env.ACM_PUBLIC_URL || '').replace(/\/+$/, '');
+    const resp = await fetch(`${base}/trabajos`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.EDITOR_TOKEN || ''}` }, signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({ project_id: r.project_id, reel_id: r.id, url: await getUrl(r.file, 12 * 3600), duracion_s: r.duration, aprendizajes_url: pub ? `${pub}/api/editor/aprendizajes/${r.project_id}` : '' }),
+    });
+    if (!resp.ok) throw new Error(`el editor respondió ${resp.status}`);
+  } catch (e) {
+    run("UPDATE reels SET status = 'error', status_detail = ? WHERE id = ?", `No pudimos mandar el video al editor: ${e.message}`.slice(0, 500), r.id);
+    throw e;
+  }
+}
 
 // limpieza: el video de una edición se borra N días después de su última publicación, el de un crudo N días después
 // de su última edición (o 2N si nunca tuvo). La fila queda (título, texto, publicaciones); solo se va el archivo.

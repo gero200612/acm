@@ -129,10 +129,10 @@
 - Estados del crudo en ACM (`reels.status`): `en_cola|transcribiendo|buscando_momentos|editando|revisando|listo|sin_momentos|error`.
 - `estudio.js` exporta `transcribir(url)` y `editarRecorte(pedido)`, que esperan con sondeo hasta `listo` o `fallo`.
 
-- [ ] Caso de editor: con un Estudio falso (servidor local que responde al contrato), un trabajo termina llamando a `/api/editor/estado` con `listo`.
-- [ ] Caso ACM: un `POST /api/editor/edicion` sin token da 401. Con token crea el reel con `source_id`, `clip_id` y `review='pendiente'`.
-- [ ] Caso ACM: completar la subida de un crudo con `EDITOR_URL` configurado manda el trabajo. Sin `EDITOR_URL` el crudo queda `en_cola` y no hay error.
-- [ ] Implementar. La base del orquestador es node:sqlite (`trabajos`, `momentos`, `ediciones`). Commit.
+- [x] Caso de editor: con un Estudio falso (servidor local que responde al contrato), un trabajo termina llamando a `/api/editor/estado` con `listo`.
+- [x] Caso ACM: un `POST /api/editor/edicion` sin token da 401. Con token crea el reel con `source_id`, `clip_id` y `review='pendiente'`.
+- [x] Caso ACM: completar la subida de un crudo con `EDITOR_URL` configurado manda el trabajo. Sin `EDITOR_URL` el crudo queda `en_cola` y no hay error.
+- [x] Implementar. La base del orquestador es node:sqlite (`trabajos`, `momentos`, `ediciones`). Commit.
 
 ### Task 6: Momentos y recetas (Claude)
 
