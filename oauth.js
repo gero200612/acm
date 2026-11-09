@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import { bases, appCreds } from './connections.js';
 export { appCreds };
 
-export const PUBLIC_URL = (process.env.ACM_PUBLIC_URL || (process.env.NODE_ENV === 'production' ? 'https://acm.punchi.dev' : `http://localhost:${process.env.PORT || 3000}`)).replace(/\/$/, '');
+export const publicUrl = (env = process.env) => (env.ACM_PUBLIC_URL || (env.NODE_ENV === 'production' ? 'https://acm.punchi.dev' : `http://localhost:${env.PORT || 3000}`)).replace(/\/+$/, '');
+export const PUBLIC_URL = publicUrl();
 
 export const oauthReady = (network) => { const a = appCreds(network); return !!(a.key && a.secret); };
 export const redirectUri = (network) => `${PUBLIC_URL}/oauth/${network}/callback`;

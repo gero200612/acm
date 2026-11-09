@@ -1,7 +1,7 @@
 // TikTok Ads (Marketing API v1.3): Spark Ads con el video orgánico ya publicado. Todo lo que depende de la forma de la API está acá,
 // aislado para corregirlo sin tocar el resto. Credenciales de pauta del proyecto: ttAdvertiserId, ttAccessToken, ttIdentityId, ttBcId.
 import { bases } from './connections.js';
-import { AdRejected, AdSkip, callJson, endOfDay } from './ads-iface.js';
+import { AdRejected, AdSkip, callJson, endOfDay, adName } from './ads-iface.js';
 
 const V = 'v1.3';
 const AR_LOCATION = '3865483'; // Argentina
@@ -11,6 +11,8 @@ const REJECT_CODES = new Set([40911]);
 const REJECT = /reject|polic|violat|disapprov|prohibit/i;
 export const isPolicyReject = (path, code, msg) => path === 'ad/create/' && (REJECT_CODES.has(code) || REJECT.test(msg));
 // TikTok manda la fecha como 'YYYY-MM-DD HH:MM:SS' en UTC
+// estado secundario de un anuncio que cuenta como rechazo después de crearlo (revisión asincrónica)
+export const TT_REJECTED = /REJECT|DISAPPROV|AUDIT_DENY|AUDIT_FAIL/i;
 const utc = (iso) => new Date(iso).toISOString().slice(0, 19).replace('T', ' ');
 
 export function tiktokAdapter(ctx) {
@@ -47,7 +49,7 @@ export function tiktokAdapter(ctx) {
       const end = ctx.endDate();
       if (!end) throw new Error('Falta la fecha de fin de la pauta.');
       const group = await call('POST', 'adgroup/create/', {
-        ...adv, campaign_id: campaignId, adgroup_name: `ACM · post ${post.id}`, placement_type: 'PLACEMENT_TYPE_NORMAL', placements: ['PLACEMENT_TIKTOK'],
+        ...adv, campaign_id: campaignId, adgroup_name: adName(post), placement_type: 'PLACEMENT_TYPE_NORMAL', placements: ['PLACEMENT_TIKTOK'],
         budget_mode: 'BUDGET_MODE_DAY', budget: Number(dailyUsd.toFixed(2)),
         schedule_type: 'SCHEDULE_START_END', schedule_start_time: utc(new Date()), schedule_end_time: utc(endOfDay(end)),
         optimization_goal: 'REACH', billing_event: 'CPM', pacing: 'PACING_MODE_SMOOTH', location_ids: [AR_LOCATION], operation_status: 'ENABLE',
@@ -56,7 +58,7 @@ export function tiktokAdapter(ctx) {
       try {
         // Spark Ad: se usa el video orgánico de la cuenta vinculada (identidad autorizada en el Business Center)
         await call('POST', 'ad/create/', { ...adv, adgroup_id: groupId, creatives: [{
-          ad_name: `ACM · post ${post.id}`, ad_format: 'SINGLE_VIDEO', tiktok_item_id: String(video),
+          ad_name: adName(post), ad_format: 'SINGLE_VIDEO', tiktok_item_id: String(video),
           identity_type: 'BC_AUTH_TTO', identity_id: c.ttIdentityId, identity_authorized_bc_id: c.ttBcId,
         }] });
       } catch (e) { try { await this.pause(groupId); } catch {} throw e; }
@@ -71,7 +73,13 @@ export function tiktokAdapter(ctx) {
       });
       const m = r.list?.[0]?.metrics || {};
       // TikTok no cruza el alcance con un público propio: sin dato de alcance dentro del padrón
-      return { spend: Number(m.spend) || 0, impressions: Number(m.impressions) || 0, reach: Number(m.reach) || 0, target_reach: null };
+      const out = { spend: Number(m.spend) || 0, impressions: Number(m.impressions) || 0, reach: Number(m.reach) || 0, target_reach: null };
+      try {
+        const a = await call('GET', 'ad/get/', { ...adv, filtering: { adgroup_ids: [adId] }, fields: ['ad_id', 'secondary_status'] });
+        const bad = (a.list || []).find((x) => TT_REJECTED.test(String(x.secondary_status || '')));
+        if (bad) out.rejected = `TikTok marcó el anuncio como ${bad.secondary_status}`;
+      } catch (e) { out.status_error = e.message; }
+      return out;
     },
   };
 }

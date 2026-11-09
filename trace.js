@@ -31,6 +31,8 @@ export function mask(text, secrets = []) {
     .replace(/\bEAA[A-Za-z0-9_-]{4,}/g, '••••')
     .replace(/\bya29\.[A-Za-z0-9_.-]+/g, '••••')
     .replace(/Bearer\s+[A-Za-z0-9_.-]+/g, 'Bearer ••••')
+    // links firmados (R2/S3): la firma, la credencial y el token de sesión nunca salen (estos links llegan hasta Telegram)
+    .replace(/(X-Amz-(?:Signature|Credential|Security-Token)=)[^&\s"'<>]+/gi, '$1••••')
     // datos personales: las listas del padrón y cualquier huella SHA-256 nunca quedan en la traza
     .replace(/"data"\s*:\s*\[[\s\S]*?\]\s*\]/g, '"data":"[filas del padrón: no se guardan]"')
     .replace(/\b(?=[0-9a-f]*[a-f])[0-9a-f]{16,}\b/gi, '••••');

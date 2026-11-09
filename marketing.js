@@ -10,6 +10,7 @@ export const MIN_DAILY_USD = 1;        // menos que esto no vale la pena lanzarl
 export const MAX_ACTIVE_PER_NETWORK = 2;
 export const UNTARGETED_REACH_WEIGHT = 0.5; // sin alcance dentro del público: el alcance total cuenta a la mitad
 export const CUT_MARGIN = 0.85;       // se corta solo si rinde menos del 85 % del promedio (evita idas y vueltas)
+export const ORPHAN_MINUTES = 10;     // una fila 'pendiente' más vieja que esto quedó de un lanzamiento cortado a la mitad
 
 export function initMarketing(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS promotions (
@@ -28,6 +29,18 @@ const minutes = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 
 const hoursBetween = (from, to) => (minutes(to) - minutes(from)) / 60;
 const round2 = (x) => Math.round(x * 100) / 100;
 
+// un aviso que no se pudo anotar (base trabada, disco lleno) nunca corta el ciclo: lo que sigue puede ser una pausa
+function safeAlert(db, kind, projectId, text, at, key) {
+  try { return addAlert(db, kind, projectId, text, at, key); } catch (e) { console.error(`aviso ${kind}:`, e.message); return null; }
+}
+
+// Proyectos que recorre el ciclo de 6 h: los que pautan (no demo, con presupuesto) y TODOS los que tienen anuncios activos o a medio lanzar,
+// aunque hayan pasado a demo o se hayan quedado sin presupuesto: esos anuncios siguen gastando y hay que poder frenarlos.
+export function projectsToCycle(db) {
+  return db.prepare(`SELECT p.id FROM projects p LEFT JOIN pauta pa ON pa.project_id = p.id
+    WHERE (p.demo = 0 AND pa.budget > 0) OR EXISTS (SELECT 1 FROM promotions pr WHERE pr.project_id = p.id AND pr.status IN ('activa', 'pendiente')) ORDER BY p.id`).all().map((r) => r.id);
+}
+
 const running = new Set(); // un solo ciclo por proyecto a la vez: dos ciclos pisándose podrían pasar el total
 
 // deps: { db, adapters: {meta, youtube, tiktok}, now?: () => 'YYYY-MM-DD HH:MM' (hora local) }
@@ -42,41 +55,80 @@ export async function marketingCycle(projectId, deps = {}) {
 async function cycle(db, projectId, adapters, nowStr, today) {
   const p = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
   if (!p) return { skipped: 'no existe el proyecto' };
-  if (p.demo) return { skipped: 'proyecto de demostración' };
   const pa = db.prepare('SELECT * FROM pauta WHERE project_id = ?').get(projectId) || {};
   const budget = Number(pa.budget) || 0;
-  if (budget <= 0) return { skipped: 'sin presupuesto' };
-  if (!AD_NETWORKS.some((n) => adapters[n])) {
-    // sin ninguna red conectada no se puede pausar ni controlar nada: si hay anuncios activos, hay que avisar
-    const activos = db.prepare("SELECT count(*) n FROM promotions WHERE project_id = ? AND status = 'activa'").get(projectId).n;
-    if (activos) addAlert(db, 'pausa_imposible', projectId, `Hay ${activos} ${activos === 1 ? 'anuncio activo' : 'anuncios activos'} pero no se pudo conectar con ninguna red de pauta (credenciales faltantes o inválidas): ACM no puede pausarlos ni controlar el gasto. Revisalos a mano.`, `${nowStr}:00`);
-    return { skipped: 'sin adaptadores' };
-  }
-  const startDay = (pa.start_date || '').slice(0, 10);
-  if (startDay && today < startDay) {
-    const ya = db.prepare("SELECT 1 FROM decisions WHERE project_id = ? AND kind = 'espera' AND substr(at, 1, 10) = ?").get(projectId, today);
-    if (!ya) db.prepare('INSERT INTO decisions (project_id, at, kind, target, data, reason) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(projectId, nowStr, 'espera', 'pauta', JSON.stringify({ start: startDay }), `La pauta empieza el ${startDay}: todavía no se promociona nada.`);
-    return { skipped: 'antes del inicio de la pauta' };
-  }
-
   const decide = (kind, target, data, reason) => db.prepare('INSERT INTO decisions (project_id, at, kind, target, data, reason) VALUES (?, ?, ?, ?, ?, ?)')
     .run(projectId, nowStr, kind, String(target ?? ''), JSON.stringify(data || {}), reason);
-  let enabled; try { enabled = typeof p.ads_networks === 'string' ? JSON.parse(p.ads_networks) : p.ads_networks; } catch { enabled = null; }
-  // una red bloqueada (rechazó un anuncio) se trata como apagada hasta que Gero la reactive
-  let blocked; try { blocked = typeof p.ads_blocked === 'string' ? JSON.parse(p.ads_blocked || '{}') : p.ads_blocked; } catch { blocked = null; }
-  blocked = blocked && typeof blocked === 'object' ? blocked : {};
-  // un adaptador "solo pausa" (cuenta que no está en dólares, datos incompletos) nunca promociona: la red cuenta como apagada y lo activo se pausa
-  const on = (n) => !!enabled?.[n] && !blocked[n] && !adapters[n]?.pauseOnly;
-  enabled = { meta: on('meta'), youtube: on('youtube'), tiktok: on('tiktok') };
-  const weights = weightsOf(p.score_weights);
-  const to = [pa.end_date, p.propaganda_until].filter(Boolean).map((d) => d.slice(0, 10)).sort()[0] || '';
-  const from = (pa.start_date || '').slice(0, 10) || today;
   const promos = () => db.prepare("SELECT * FROM promotions WHERE project_id = ? AND status = 'activa' ORDER BY id").all(projectId);
   const setPromo = (id, fields) => { const ks = Object.keys(fields); db.prepare(`UPDATE promotions SET ${ks.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`).run(...ks.map((k) => fields[k]), nowStr, id); };
   const out = { promoted: 0, raised: 0, lowered: 0, cut: 0, paused: 0 };
 
-  // 1) leer lo gastado de cada anuncio activo (acumulado) y llevar la cuenta del día
+  // 0) huérfanas: una fila 'pendiente' vieja es un lanzamiento que se cortó (caída del servidor) entre la llamada a la red y el registro.
+  // El anuncio puede estar corriendo sin control: se avisa con la red y el post (el nombre en la red lleva la fila) y la fila queda 'huerfana'.
+  for (const r of db.prepare("SELECT * FROM promotions WHERE project_id = ? AND status = 'pendiente' ORDER BY id").all(projectId)) {
+    if (minutes(nowStr) - minutes(r.started_at) < ORPHAN_MINUTES) continue;
+    db.prepare("UPDATE promotions SET status = 'huerfana', updated_at = ? WHERE id = ?").run(nowStr, r.id);
+    decide('error', `post ${r.post_id}`, { network: r.network, row: r.id }, `El lanzamiento del post ${r.post_id} en ${r.network} quedó a medio registrar (fila ${r.id}).`);
+    safeAlert(db, 'anuncio_sin_registro', projectId, `Un anuncio de ${r.network} para el post ${r.post_id} quedó a medio lanzar y ACM no lo controla: buscalo en la red como «ACM · post ${r.post_id} · fila ${r.id}» y pausalo a mano si está corriendo.`, `${nowStr}:00`, `anuncio_sin_registro:${r.post_id}`);
+  }
+
+  const activos = db.prepare("SELECT count(*) n FROM promotions WHERE project_id = ? AND status = 'activa'").get(projectId).n;
+  // palancas de corte: un proyecto que pasó a demostración o se quedó sin presupuesto se trata como pauta terminada
+  const stop = p.demo ? 'El proyecto pasó a demostración: se pausa toda la pauta.' : budget <= 0 ? 'La pauta se quedó sin presupuesto: se pausa todo.' : '';
+  if (stop && !activos) return { skipped: p.demo ? 'proyecto de demostración' : 'sin presupuesto' };
+  if (!AD_NETWORKS.some((n) => adapters[n])) {
+    // sin ninguna red conectada no se puede pausar ni controlar nada: si hay anuncios activos, hay que avisar
+    if (activos) safeAlert(db, 'pausa_imposible', projectId, `Hay ${activos} ${activos === 1 ? 'anuncio activo' : 'anuncios activos'} pero no se pudo conectar con ninguna red de pauta (credenciales faltantes o inválidas): ACM no puede pausarlos ni controlar el gasto. Revisalos a mano.`, `${nowStr}:00`);
+    return { skipped: 'sin adaptadores' };
+  }
+
+  const pausePromo = async (pr, kind, reason, status) => {
+    // sin adaptador (credenciales borradas, red sin acceso) el anuncio sigue gastando: NO se marca pausado, queda activo y se avisa
+    try { if (!adapters[pr.network]) throw new Error('no hay credenciales para hablar con la red'); await adapters[pr.network].pause(pr.ad_id); }
+    catch (e) {
+      decide('error', pr.ad_id, { network: pr.network }, `No se pudo pausar en ${pr.network}: ${e.message}`.slice(0, 300));
+      safeAlert(db, 'pausa_imposible', projectId, `No se pudo pausar un anuncio de ${pr.network} (${pr.ad_id}); pausalo a mano.`, `${nowStr}:00`, `pausa_imposible:${pr.ad_id}`);
+      return false;
+    }
+    setPromo(pr.id, { status, daily_usd: 0 });
+    decide(kind, pr.ad_id, { network: pr.network, post_id: pr.post_id, spend: pr.spend }, reason);
+    return true;
+  };
+  if (stop) {
+    for (const pr of promos()) if (await pausePromo(pr, 'pausa_total', stop, 'pausada')) out.paused++;
+    if (out.paused) safeAlert(db, 'pauta_terminada', projectId, stop, `${nowStr}:00`);
+    return out;
+  }
+
+  const startDay = (pa.start_date || '').slice(0, 10);
+  if (startDay && today < startDay) {
+    const ya = db.prepare("SELECT 1 FROM decisions WHERE project_id = ? AND kind = 'espera' AND substr(at, 1, 10) = ?").get(projectId, today);
+    if (!ya) decide('espera', 'pauta', { start: startDay }, `La pauta empieza el ${startDay}: todavía no se promociona nada.`);
+    return { skipped: 'antes del inicio de la pauta' };
+  }
+
+  let rawEnabled; try { rawEnabled = typeof p.ads_networks === 'string' ? JSON.parse(p.ads_networks) : p.ads_networks; } catch { rawEnabled = null; }
+  // una red bloqueada (rechazó un anuncio) se trata como apagada hasta que Gero la reactive
+  let blocked; try { blocked = typeof p.ads_blocked === 'string' ? JSON.parse(p.ads_blocked || '{}') : p.ads_blocked; } catch { blocked = null; }
+  blocked = blocked && typeof blocked === 'object' ? blocked : {};
+  // un adaptador "solo pausa" (cuenta que no está en dólares, datos incompletos) nunca promociona: la red cuenta como apagada y lo activo se pausa
+  const on = (n) => !!rawEnabled?.[n] && !blocked[n] && !adapters[n]?.pauseOnly;
+  const netsOn = () => ({ meta: on('meta'), youtube: on('youtube'), tiktok: on('tiktok') });
+  let enabled = netsOn();
+  // la red rechazó un anuncio (al crearlo o después, en su revisión): queda bloqueada en el proyecto, con una decisión y un aviso por red
+  const blockNet = (net, postId, reason) => {
+    if (blocked[net]) return;
+    blocked[net] = { at: nowStr, post_id: postId, reason: String(reason).slice(0, 200) };
+    db.prepare('UPDATE projects SET ads_blocked = ? WHERE id = ?').run(JSON.stringify(blocked), projectId);
+    decide('bloqueo', net, { network: net }, `La red ${net} quedó bloqueada en el proyecto hasta que se reactive.`);
+    safeAlert(db, 'red_bloqueada', projectId, `${net} rechazó un anuncio (post ${postId}): ${reason}. La red quedó bloqueada: no se le reparte plata hasta que la reactives en Pauta.`.slice(0, 300), `${nowStr}:00`, `red_bloqueada:${net}`);
+  };
+  const weights = weightsOf(p.score_weights);
+  const to = [pa.end_date, p.propaganda_until].filter(Boolean).map((d) => d.slice(0, 10)).sort()[0] || '';
+  const from = (pa.start_date || '').slice(0, 10) || today;
+
+  // 1) leer lo gastado de cada anuncio activo (acumulado) y llevar la cuenta del día; de paso, si la red lo desaprobó después de crearlo
+  const rejectedNow = [];
   for (const pr of promos()) {
     const ad = adapters[pr.network];
     if (!ad) continue;
@@ -90,38 +142,36 @@ async function cycle(db, projectId, adapters, nowStr, today) {
       const last = db.prepare("SELECT * FROM post_metrics WHERE post_id = ? AND views IS NOT NULL AND note != 'pauta' ORDER BY id DESC LIMIT 1").get(pr.post_id) || {};
       db.prepare('INSERT INTO post_metrics (post_id, views, reach, avg_watch_s, completion, likes, comments, shares, spend, impressions, target_reach, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(pr.post_id, last.views ?? null, last.reach ?? null, last.avg_watch_s ?? null, last.completion ?? null, last.likes ?? null, last.comments ?? null, last.shares ?? null, spend, f.impressions, f.target_reach, 'pauta');
+      if (i.rejected) rejectedNow.push({ pr: { ...pr, ...f }, reason: String(i.rejected) });
+      else if (i.status_error) decide('error', pr.ad_id, { network: pr.network }, `No se pudo leer el estado de revisión en ${pr.network}: ${i.status_error}`.slice(0, 300));
     } catch (e) { decide('error', pr.ad_id, { network: pr.network }, `No se pudo leer lo gastado en ${pr.network}: ${e.message}`.slice(0, 300)); }
   }
+  // rechazo después de crear: mismo camino que AdRejected al lanzar (decisión 'rechazo', se pausa, la red queda bloqueada, aviso red_bloqueada)
+  for (const { pr, reason } of rejectedNow) {
+    decide('rechazo', `post ${pr.post_id}`, { network: pr.network, ad_id: pr.ad_id }, `${pr.network} rechazó el anuncio del post ${pr.post_id} en su revisión: ${reason}`.slice(0, 300));
+    if (await pausePromo(pr, 'pausa', `${pr.network} rechazó el anuncio: se pausa.`, 'pausada')) out.paused++;
+    blockNet(pr.network, pr.post_id, reason);
+  }
+  if (rejectedNow.length) enabled = netsOn();
   const all = db.prepare('SELECT * FROM promotions WHERE project_id = ?').all(projectId);
   const spent = all.reduce((a, r) => a + (Number(r.spend) || 0), 0);
   const spentToday = all.reduce((a, r) => a + (r.spend_day === today ? Math.max(0, (Number(r.spend) || 0) - (Number(r.spend_day_start) || 0)) : 0), 0);
   const remaining = Math.max(0, budget - spent);
 
-  const pausePromo = async (pr, kind, reason, status) => {
-    // sin adaptador (credenciales borradas, red sin acceso) el anuncio sigue gastando: NO se marca pausado, queda activo y se avisa
-    try { if (!adapters[pr.network]) throw new Error('no hay credenciales para hablar con la red'); await adapters[pr.network].pause(pr.ad_id); }
-    catch (e) {
-      decide('error', pr.ad_id, { network: pr.network }, `No se pudo pausar en ${pr.network}: ${e.message}`.slice(0, 300));
-      addAlert(db, 'pausa_imposible', projectId, `No se pudo pausar un anuncio de ${pr.network} (${pr.ad_id}); pausalo a mano.`, `${nowStr}:00`);
-      return false;
-    }
-    setPromo(pr.id, { status, daily_usd: 0 });
-    decide(kind, pr.ad_id, { network: pr.network, post_id: pr.post_id, spend: pr.spend }, reason);
-    return true;
-  };
-
   // 2) tope duro: pasada la fecha máxima o sin plata, se pausa todo en este mismo ciclo
   const expired = !!to && today > to;
   if (expired || remaining <= 0.005) {
     const why = expired ? `Pasó la fecha máxima de propaganda (${to}): se pausa toda la pauta.` : 'Se terminó la pauta total: se pausa todo.';
-    for (const pr of promos()) if (await pausePromo(pr, 'pausa_total', why, 'pausada')) out.paused++;
-    if (out.paused) addAlert(db, 'pauta_terminada', projectId, why, `${nowStr}:00`);
+    let n = 0;
+    for (const pr of promos()) if (await pausePromo(pr, 'pausa_total', why, 'pausada')) n++;
+    out.paused += n;
+    if (n) safeAlert(db, 'pauta_terminada', projectId, why, `${nowStr}:00`);
     return out;
   }
-  if (!to) return { ...out, skipped: 'sin fecha de fin de la pauta' };
 
-  // 3) redes apagadas: no se usan
-  for (const pr of promos()) if (!enabled[pr.network]) if (await pausePromo(pr, 'pausa', `La red ${pr.network} está apagada en el proyecto.`, 'pausada')) out.paused++;
+  // 3) redes apagadas (o bloqueadas, o solo de pausa): no se usan y lo activo se pausa. Va antes de mirar la fecha de fin: sin fin igual se pausa
+  for (const pr of promos()) if (!enabled[pr.network]) if (await pausePromo(pr, 'pausa', blocked[pr.network] ? `La red ${pr.network} está bloqueada en el proyecto.` : `La red ${pr.network} está apagada en el proyecto.`, 'pausada')) out.paused++;
+  if (!to) return { ...out, skipped: 'sin fecha de fin de la pauta' };
 
   // 4) corte: con gasto o tiempo suficientes, se corta lo que rinde bajo el promedio o viene cayendo en 3 lecturas
   const metricsOf = (postId, pr) => {
@@ -163,7 +213,8 @@ async function cycle(db, projectId, adapters, nowStr, today) {
     `Reparto de hoy entre redes: ${AD_NETWORKS.filter((n) => usable[n]).map((n) => `${n} ${split[n]} %`).join(', ')} (tope diario USD ${cap}).`);
 
   // candidatos: publicados hace 24 h o más, con ID en la red, nunca promocionados ni rechazados, de una red habilitada y con adaptador
-  const ever = new Set(all.map((r) => r.post_id));
+  // una fila 'huerfana' ya se avisó: no bloquea el post para siempre
+  const ever = new Set(all.filter((r) => r.status !== 'huerfana').map((r) => r.post_id));
   const rejected = new Set(db.prepare("SELECT target FROM decisions WHERE project_id = ? AND kind = 'rechazo'").all(projectId).map((r) => r.target));
   const cands = db.prepare(`SELECT po.id, po.external_id, po.network_video_id, po.published_at, a.network FROM posts po JOIN accounts a ON a.id = po.account_id
     WHERE po.project_id = ? AND po.status = 'publicado' AND po.external_id != '' ORDER BY po.id`).all(projectId)
@@ -189,7 +240,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
     if (want >= pr.daily_usd - 0.005) continue;
     try { await adapters[pr.network].setBudget(pr.ad_id, want); } catch (e) {
       decide('error', pr.ad_id, {}, `No se pudo bajar el presupuesto: ${e.message}`.slice(0, 300));
-      addAlert(db, 'pauta_no_baja', projectId, `No se pudo bajar el presupuesto del anuncio ${pr.ad_id} de ${pr.network}; revisalo a mano.`, `${nowStr}:00`);
+      safeAlert(db, 'pauta_no_baja', projectId, `No se pudo bajar el presupuesto del anuncio ${pr.ad_id} de ${pr.network}; revisalo a mano.`, `${nowStr}:00`);
       continue;
     }
     setPromo(pr.id, { daily_usd: want });
@@ -200,7 +251,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
     const want = targets.get(pr.id) ?? 0;
     if (want <= pr.daily_usd + 0.005) continue;
     const g = guardSpend({ kind: 'raise', dailyUsd: want, currentUsd: pr.daily_usd }, state(pr.id));
-    if (!g.ok || g.usd <= pr.daily_usd + 0.005) { decide('tope', pr.ad_id, { want }, `No se sube el anuncio: ${g.reason || 'sin lugar en el tope'}.`); addAlert(db, 'tope', projectId, `El tope de pauta frenó una suba de presupuesto (anuncio ${pr.ad_id} de ${pr.network}): ${g.reason || 'sin lugar en el tope'}.`, `${nowStr}:00`); continue; }
+    if (!g.ok || g.usd <= pr.daily_usd + 0.005) { decide('tope', pr.ad_id, { want }, `No se sube el anuncio: ${g.reason || 'sin lugar en el tope'}.`); safeAlert(db, 'tope', projectId, `El tope de pauta frenó una suba de presupuesto (anuncio ${pr.ad_id} de ${pr.network}): ${g.reason || 'sin lugar en el tope'}.`, `${nowStr}:00`); continue; }
     try { await adapters[pr.network].setBudget(pr.ad_id, g.usd); } catch (e) { decide('error', pr.ad_id, {}, `No se pudo subir el presupuesto: ${e.message}`.slice(0, 300)); continue; }
     setPromo(pr.id, { daily_usd: g.usd });
     decide('suba', pr.ad_id, { network: pr.network, from: pr.daily_usd, to: g.usd, want }, `Sube el presupuesto diario de USD ${pr.daily_usd} a USD ${g.usd}${g.clamped ? ` (${g.reason})` : ''}.`);
@@ -210,14 +261,14 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   for (const c of launch) {
     if (blocked[c.net]) continue; // la red rechazó un anuncio en este mismo ciclo: no se reintenta
     const g = guardSpend({ kind: 'promote', dailyUsd: c.each, currentUsd: 0 }, state(0));
-    if (!g.ok || g.usd < MIN_DAILY_USD) { { const why = `No se promociona el post ${c.id}: ${g.reason || `quedan menos de USD ${MIN_DAILY_USD} para hoy`}.`; decide('tope', `post ${c.id}`, { want: c.each }, why); addAlert(db, 'tope', projectId, `El tope de pauta frenó una promoción. ${why}`, `${nowStr}:00`); } continue; }
+    if (!g.ok || g.usd < MIN_DAILY_USD) { { const why = `No se promociona el post ${c.id}: ${g.reason || `quedan menos de USD ${MIN_DAILY_USD} para hoy`}.`; decide('tope', `post ${c.id}`, { want: c.each }, why); safeAlert(db, 'tope', projectId, `El tope de pauta frenó una promoción. ${why}`, `${nowStr}:00`); } continue; }
     let rowId = null, adId = null;
     try {
       // se reserva la fila antes de llamar a la red: si algo falla después, el anuncio no queda sin registrar
       rowId = Number(db.prepare("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at, spend_day, spend_day_start) VALUES (?, ?, ?, '', ?, 'pendiente', ?, ?, ?, 0)")
         .run(projectId, c.id, c.net, g.usd, nowStr, nowStr, today).lastInsertRowid);
       if (!ensured.has(c.net)) { await adapters[c.net].ensureCampaign(p); ensured.add(c.net); }
-      adId = String((await adapters[c.net].promote({ id: c.id, external_id: c.external_id, network: c.network }, g.usd)).adId);
+      adId = String((await adapters[c.net].promote({ id: c.id, external_id: c.external_id, network: c.network, row: rowId }, g.usd)).adId);
       db.prepare("UPDATE promotions SET ad_id = ?, status = 'activa' WHERE id = ?").run(adId, rowId);
       decide('promover', String(adId), { post_id: c.id, network: c.net, daily_usd: g.usd, score: c.s },
         `Se promociona el post ${c.id} en ${c.net} con USD ${g.usd} por día: tiene el mejor puntaje (${c.s}) entre los de más de ${MIN_ORGANIC_HOURS} h orgánicas${g.clamped ? ` (${g.reason})` : ''}.`);
@@ -225,7 +276,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
     } catch (e) {
       if (adId) { // la red lo lanzó pero no pudimos registrarlo: se intenta pausar y se avisa
         try { await adapters[c.net].pause(adId); db.prepare("UPDATE promotions SET status = 'pausada', ad_id = ?, daily_usd = 0 WHERE id = ?").run(adId, rowId); } catch {}
-        addAlert(db, 'anuncio_sin_registro', projectId, `Un anuncio de ${c.net} (${adId}) se lanzó pero no se pudo registrar; revisá que esté pausado.`, `${nowStr}:00`);
+        safeAlert(db, 'anuncio_sin_registro', projectId, `Un anuncio de ${c.net} (${adId}) se lanzó pero no se pudo registrar; revisá que esté pausado.`, `${nowStr}:00`, `anuncio_sin_registro:${c.id}`);
         decide('error', adId, { network: c.net }, `Se lanzó el anuncio ${adId} pero no se pudo registrar: ${e.message}`.slice(0, 300));
         continue;
       }
@@ -234,10 +285,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
       else if (e instanceof AdRejected) {
         decide('rechazo', `post ${c.id}`, { network: c.net }, `${c.net} rechazó el anuncio del post ${c.id}: ${e.message}`.slice(0, 300));
         // la red queda bloqueada en el proyecto: sin reparto y sin reintentos hasta que Gero la reactive
-        blocked[c.net] = { at: nowStr, post_id: c.id, reason: String(e.message).slice(0, 200) };
-        db.prepare('UPDATE projects SET ads_blocked = ? WHERE id = ?').run(JSON.stringify(blocked), projectId);
-        decide('bloqueo', c.net, { network: c.net }, `La red ${c.net} quedó bloqueada en el proyecto hasta que se reactive.`);
-        addAlert(db, 'red_bloqueada', projectId, `${c.net} rechazó un anuncio (post ${c.id}): ${e.message}. La red quedó bloqueada: no se le reparte plata hasta que la reactives en Pauta.`.slice(0, 300), `${nowStr}:00`);
+        blockNet(c.net, c.id, e.message);
       } else decide('error', `post ${c.id}`, { network: c.net }, `No se pudo promocionar en ${c.net}: ${e.message}`.slice(0, 300));
     }
   }

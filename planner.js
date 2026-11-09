@@ -18,6 +18,16 @@ export function expiryOf(e) {
   return s.length <= 10 ? `${s} 23:59` : s.slice(0, 16).replace('T', ' ');
 }
 
+// El editor manda el vencimiento como ISO en UTC (con Z u offset); acá todo es hora local sin zona ('YYYY-MM-DD HH:MM' en ACM_TZ).
+// Un ISO con zona se pasa a hora local; cualquier otra cosa (ya local, solo fecha, vacío) queda como vino.
+export function localExpiry(v, tz = 'America/Argentina/Buenos_Aires') {
+  const s = String(v ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(d).replace(',', '');
+}
+
 // por qué una edición ya no se publica por vencida (null = vigente); lo usa el programador al publicar
 export function expiredBlocked(expires_at, now) {
   const exp = expiryOf(expires_at);

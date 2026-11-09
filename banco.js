@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startSimulator } from './simulator.js';
-import { traced, step } from './trace.js';
+import { traced, step, mask } from './trace.js';
+import { publicUrl } from './oauth.js';
 import { testConnection } from './connections.js';
 import { publish } from './publisher.js';
 import { uploadAudience, createCampaign, testAds } from './ads.js';
@@ -12,12 +13,12 @@ import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS } from './rules.js';
 import { embed } from './knowledge.js';
 import { DatabaseSync } from 'node:sqlite';
-import { planDay, planProject, initPlanner, expiredBlocked } from './planner.js';
+import { planDay, planProject, initPlanner, expiredBlocked, localExpiry } from './planner.js';
 import { initAlerts, addAlert } from './alerts.js';
 import { initMetrics, readMetrics, readDue, score, DEFAULT_WEIGHTS } from './metrics.js';
 import { makeVault } from './connections.js';
 import { dailyCap, splitNetworks, canJudge, guardSpend } from './budget.js';
-import { initMarketing, marketingCycle, UNTARGETED_REACH_WEIGHT } from './marketing.js';
+import { initMarketing, marketingCycle, projectsToCycle, UNTARGETED_REACH_WEIGHT } from './marketing.js';
 import { AdRejected, AdSkip } from './ads-iface.js';
 import { isPolicyReject as metaPolicy } from './ads.js';
 import { isPolicyReject as ttPolicy } from './ads-tiktok.js';
@@ -104,16 +105,18 @@ const hypo = async ({ winner }) => `hipótesis de prueba: ganó la versión ${wi
 const ADS_VAULT = makeVault('banco-pauta');
 const ADS_CREDS = { adAccountId: '999', accessToken: 'EAAadsSecreto123', ttAdvertiserId: '70001', ttAccessToken: 'TTADS_OK', ttIdentityId: 'ID1', ttBcId: 'BC1',
   gCustomerId: '123-456-7890', gDeveloperToken: 'DEVTOK', gRefreshToken: 'GREFRESH-secreto', gClientId: 'g-app', gClientSecret: 'g-secreto-1' };
-function adsFixture({ nets = '{"meta":true,"youtube":true,"tiktok":true}', demo = 0, creds = ADS_CREDS, audience = 'AUD1', until = '2026-11-30', budget = 900 } = {}) {
+// las cuentas de TikTok y Google ya probadas en dólares (sin moneda guardada solo pausan)
+const USD_STATE = JSON.stringify({ tiktok: { currency: 'USD' }, youtube: { currency: 'USD' } });
+function adsFixture({ nets = '{"meta":true,"youtube":true,"tiktok":true}', demo = 0, creds = ADS_CREDS, audience = 'AUD1', until = '2026-11-30', budget = 900, kind = 'club', state = USD_STATE } = {}) {
   const d = new DatabaseSync(':memory:');
-  d.exec(`CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT, demo INTEGER DEFAULT 0, ads_networks TEXT, score_weights TEXT DEFAULT '', propaganda_until TEXT DEFAULT '',
-      ads_creds TEXT DEFAULT '', ads_state TEXT DEFAULT '', ads_blocked TEXT DEFAULT '', ads_currency TEXT DEFAULT '', ads_rate REAL DEFAULT 0, ads_audience_id TEXT DEFAULT '', ads_political INTEGER DEFAULT 0);
+  d.exec(`CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT, kind TEXT DEFAULT 'club', demo INTEGER DEFAULT 0, ads_networks TEXT, score_weights TEXT DEFAULT '', propaganda_until TEXT DEFAULT '',
+      ads_creds TEXT DEFAULT '', ads_state TEXT DEFAULT '', ads_blocked TEXT DEFAULT '', ads_currency TEXT DEFAULT '', ads_rate REAL DEFAULT 0, ads_audience_id TEXT DEFAULT '', ads_political INTEGER DEFAULT 1);
     CREATE TABLE pauta (project_id INTEGER PRIMARY KEY, budget REAL, start_date TEXT DEFAULT '', end_date TEXT DEFAULT '');
     CREATE TABLE accounts (id INTEGER PRIMARY KEY, project_id INT, network TEXT, status TEXT DEFAULT 'conectada', creds TEXT DEFAULT '');
     CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INT, account_id INT, status TEXT DEFAULT 'publicado', external_id TEXT, network_video_id TEXT DEFAULT '', published_at TEXT);
     CREATE TABLE padron (project_id INT, em TEXT, ph TEXT);`);
   initMetrics(d); initAlerts(d); initMarketing(d);
-  d.prepare("INSERT INTO projects (id, name, demo, ads_networks, propaganda_until, ads_creds, ads_currency, ads_rate, ads_audience_id) VALUES (1, 'Proyecto Mock', ?, ?, ?, ?, 'ARS', 1000, ?)").run(demo, nets, until, ADS_VAULT.seal(creds), audience);
+  d.prepare("INSERT INTO projects (id, name, kind, demo, ads_networks, propaganda_until, ads_creds, ads_currency, ads_rate, ads_audience_id, ads_state) VALUES (1, 'Proyecto Mock', ?, ?, ?, ?, ?, 'ARS', 1000, ?, ?)").run(kind, demo, nets, until, ADS_VAULT.seal(creds), audience, state);
   d.prepare("INSERT INTO pauta (project_id, budget, start_date, end_date) VALUES (1, ?, '2026-11-01', '2026-12-31')").run(budget);
   const igc = ADS_VAULT.seal({ pageId: 'PAGE1', instagramBusinessId: 'IG1' });
   d.prepare("INSERT INTO accounts (id, project_id, network, creds) VALUES (1, 1, 'instagram', ?), (2, 1, 'youtube', ''), (3, 1, 'tiktok', ''), (4, 1, 'facebook', ?)").run(igc, ADS_VAULT.seal({ pageId: 'PAGE1' }));
@@ -815,6 +818,137 @@ function cases(video, sim) {
       eq([a.length, a[0].kind], [1, 'pausa_imposible'], 'un aviso pausa_imposible por día');
       yes(/1 anuncio activo/.test(a[0].text), a[0].text);
       eq(f.d.prepare("SELECT status FROM promotions").get().status, 'activa', 'no toca el anuncio');
+    }],
+    // ---- revisión final: palancas de corte, rechazos después de crear, avisos con clave y lanzamientos cortados ----
+    ['Palancas', 'El ciclo de 6 h recorre también los demos y los sin presupuesto que tienen anuncios activos o a medio lanzar', async () => {
+      const d = new DatabaseSync(':memory:');
+      d.exec('CREATE TABLE projects (id INTEGER PRIMARY KEY, demo INTEGER DEFAULT 0); CREATE TABLE pauta (project_id INTEGER PRIMARY KEY, budget REAL);');
+      initMarketing(d);
+      d.exec(`INSERT INTO projects VALUES (1, 0), (2, 1), (3, 0), (4, 1), (5, 0), (6, 0), (7, 0);
+        INSERT INTO pauta VALUES (1, 100), (2, 100), (3, 0), (4, 100), (5, 0), (7, 0);`);
+      const pr = d.prepare("INSERT INTO promotions (project_id, post_id, network, ad_id, status, started_at, updated_at) VALUES (?, 1, 'meta', 'A', ?, '2026-11-21 10:00', '2026-11-21 10:00')");
+      pr.run(2, 'activa'); pr.run(3, 'activa'); pr.run(5, 'pendiente'); pr.run(6, 'activa'); pr.run(7, 'pausada');
+      eq(projectsToCycle(d), [1, 2, 3, 5, 6], 'el normal, el demo con anuncio, sin presupuesto con anuncio, a medio lanzar y sin fila de pauta; no el demo vacío ni el que solo tiene pausados');
+    }],
+    ['Palancas', 'Presupuesto en 0 con anuncios activos: se pausa todo y avisa pauta_terminada; sin anuncios solo se saltea', async () => {
+      const f = mktFixture({ budget: 0 }); f.post(3, 1, '2026-11-18 03:00', 3000);
+      eq((await marketingCycle(1, f.deps)).skipped, 'sin presupuesto', 'sin anuncios: se saltea'); eq(f.log, [], 'sin llamadas');
+      f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 3, 'meta', 'meta-3', 5, 'activa', '2026-11-20 10:00', '2026-11-20 10:00'), (1, 4, 'youtube', 'youtube-4', 5, 'activa', '2026-11-20 10:00', '2026-11-20 10:00')");
+      const r = await marketingCycle(1, f.deps);
+      eq([r.paused, r.promoted], [2, 0], 'pausó los dos y no promocionó nada');
+      yes(f.log.includes('meta:pause:meta-3') && f.log.includes('youtube:pause:youtube-4'), 'pausas en la red');
+      eq(f.d.prepare("SELECT DISTINCT status FROM promotions").all().map((x) => x.status), ['pausada'], 'estado');
+      const a = f.d.prepare("SELECT text FROM alerts WHERE kind = 'pauta_terminada'").all(); eq(a.length, 1, 'un aviso pauta_terminada'); yes(/presupuesto/.test(a[0].text), a[0].text);
+    }],
+    ['Palancas', 'Proyecto que pasó a demo con anuncios activos: arma adaptadores solo de pausa y el ciclo pausa de verdad', async () => {
+      const m = mktFixture({ demo: 1 });
+      m.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 3, 'meta', 'meta-3', 5, 'activa', '2026-11-20 10:00', '2026-11-20 10:00')");
+      eq((await marketingCycle(1, m.deps)).paused, 1, 'demo: pausa'); eq(m.d.prepare("SELECT count(*) n FROM alerts WHERE kind = 'pauta_terminada'").get().n, 1, 'aviso');
+      const f = adsFixture({ demo: 1 });
+      eq(Object.keys(f.adapters()), [], 'demo sin anuncios: nada');
+      f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 4, 'youtube', '733:5', 5, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')");
+      const A = f.adapters(); eq(Object.keys(A), ['youtube'], 'solo la red con el anuncio'); yes(A.youtube.pauseOnly, 'solo de pausa');
+      let e; try { await A.youtube.promote({ id: 1, external_id: 'YOK', network: 'youtube' }, 5); } catch (x) { e = x; } yes(e, 'no promociona');
+      const mark = sim.log.length; const r = await f.run();
+      eq(r.paused, 1, 'pausó'); yes(sim.log.slice(mark).some((l) => l.startsWith('gads campaigns:mutate') && l.includes('campaigns/733') && l.includes('PAUSED')), 'pausa real en Google');
+      eq(f.d.prepare("SELECT status FROM promotions").get().status, 'pausada', 'estado');
+    }],
+    ['Palancas', 'Sin fecha de fin igual se pausan las redes apagadas o bloqueadas antes de saltear', async () => {
+      const f = mktFixture({ end: '', nets: '{"meta":true,"youtube":true,"tiktok":false}' });
+      f.d.prepare('UPDATE projects SET ads_blocked = ?').run(JSON.stringify({ youtube: { at: '2026-11-20 10:00', post_id: 9 } }));
+      f.d.exec(`INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES
+        (1, 7, 'tiktok', 'tiktok-7', 5, 'activa', '2026-11-20 10:00', '2026-11-20 10:00'), (1, 8, 'youtube', 'youtube-8', 5, 'activa', '2026-11-20 10:00', '2026-11-20 10:00'), (1, 3, 'meta', 'meta-3', 5, 'activa', '2026-11-20 10:00', '2026-11-20 10:00')`);
+      const r = await marketingCycle(1, f.deps);
+      eq([r.skipped, r.paused], ['sin fecha de fin de la pauta', 2], 'pausó TikTok (apagada) y YouTube (bloqueada), después salteó');
+      yes(f.log.includes('tiktok:pause:tiktok-7') && f.log.includes('youtube:pause:youtube-8') && !f.log.includes('meta:pause:meta-3'), f.log.join(' '));
+    }],
+    ['Rechazos', 'Meta, TikTok y Google desaprueban un anuncio ya creado: decisión rechazo, se pausa, la red queda bloqueada y avisa red_bloqueada', async () => {
+      for (const net of ['meta', 'tiktok', 'youtube']) {
+        const f = adsFixture(); let adId;
+        if (net === 'meta') adId = (await f.adapters().meta.promote({ id: 1, external_id: 'M1', network: 'instagram' }, 5)).adId;
+        else adId = net === 'tiktok' ? 'TTG77' : '777:5';
+        const i0 = await f.adapters()[net].insights(adId); yes(!('rejected' in i0), `${net}: aprobado no trae rejected`);
+        sim.disapproved.add(net === 'youtube' ? '777' : adId);
+        const i1 = await f.adapters()[net].insights(adId); yes(i1.rejected, `${net}: insights avisa el rechazo`);
+        f.post(5, { meta: 1, youtube: 2, tiktok: 3 }[net], 'X5', 'TV5');
+        f.d.prepare("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 5, ?, ?, 5, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')").run(net, adId);
+        const mark = sim.log.length; const r = await f.run();
+        eq(r.paused, 1, `${net}: pausó`);
+        const pausa = { meta: (l) => l.startsWith(`adset-update ${adId} `) && l.includes('PAUSED'), tiktok: (l) => l.startsWith('ttads adgroup/status/update/') && l.includes(adId), youtube: (l) => l.startsWith('gads campaigns:mutate') && l.includes('campaigns/777') && l.includes('PAUSED') }[net];
+        yes(sim.log.slice(mark).some(pausa), `${net}: pausa real en la red`);
+        eq(f.d.prepare('SELECT status FROM promotions').get().status, 'pausada', `${net}: estado`);
+        eq(f.d.prepare("SELECT target FROM decisions WHERE kind = 'rechazo'").all().map((x) => x.target), ['post 5'], `${net}: decisión rechazo`);
+        eq(Object.keys(JSON.parse(f.d.prepare('SELECT ads_blocked FROM projects').get().ads_blocked)), [net], `${net}: bloqueada solo esa red`);
+        eq(f.d.prepare("SELECT dedupe_key FROM alerts WHERE kind = 'red_bloqueada'").all().map((x) => x.dedupe_key), [`red_bloqueada:${net}`], `${net}: un aviso con clave`);
+        sim.disapproved.clear();
+      }
+    }],
+    ['Pauta real', 'TikTok y Google promocionan solo con la moneda guardada en USD; sin moneda conocida solo pausan', async () => {
+      const f = adsFixture({ state: '' });
+      eq(Object.keys(f.adapters()), ['meta'], 'sin moneda: ni TikTok ni Google promocionan');
+      eq(f.d.prepare("SELECT dedupe_key FROM alerts WHERE kind = 'moneda_no_usd' ORDER BY id").all().map((x) => x.dedupe_key), ['moneda_no_usd:tiktok', 'moneda_no_usd:youtube'], 'un aviso por red');
+      f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 3, 'tiktok', 'TTG5', 5, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')");
+      yes(f.adapters().tiktok?.pauseOnly, 'con anuncio activo: solo pausa');
+      eq(Object.keys(adsFixture().adapters()).sort(), ['meta', 'tiktok', 'youtube'], 'en USD: las tres');
+    }],
+    ['Pauta real', 'La campaña de Meta es política solo si el proyecto es político (club y comercial nunca, aunque ads_political valga 1)', async () => {
+      const cats = {};
+      for (const kind of ['club', 'comercial', 'politica']) {
+        const mark = sim.log.length; await adsFixture({ kind }).adapters().meta.ensureCampaign();
+        cats[kind] = JSON.parse(sim.log.slice(mark).find((l) => l.startsWith('campaign ')).slice(9)).sac;
+      }
+      eq(cats, { club: '[]', comercial: '[]', politica: '["ISSUES_ELECTIONS_POLITICS"]' }, 'categoría especial');
+    }],
+    ['Avisos', 'El link de aprendizajes usa la dirección pública de oauth.js: en producción sin ACM_PUBLIC_URL no queda vacío', async () => {
+      eq(publicUrl({ NODE_ENV: 'production' }), 'https://acm.punchi.dev', 'producción');
+      eq(publicUrl({ ACM_PUBLIC_URL: 'https://acm.ejemplo.com//' }), 'https://acm.ejemplo.com', 'configurada');
+      eq(publicUrl({ PORT: '4000' }), 'http://localhost:4000', 'local');
+    }],
+    ['Avisos', 'Avisos de plata con clave: dos anuncios que no se pueden pausar son dos avisos (y dos mensajes); la misma clave no se repite', async () => {
+      const f = mktFixture({ budget: 900 });
+      f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 7, 'tiktok', 'tiktok-7', 5, 'activa', '2026-11-20 10:00', '2026-11-20 10:00'), (1, 8, 'tiktok', 'tiktok-8', 5, 'activa', '2026-11-20 10:00', '2026-11-20 10:00')");
+      f.deps.adapters.tiktok.pause = async () => { throw new Error('la red no contesta'); };
+      await marketingCycle(1, f.deps); await marketingCycle(1, { ...f.deps, now: () => '2026-11-21 16:00' });
+      eq(f.d.prepare("SELECT dedupe_key FROM alerts WHERE kind = 'pausa_imposible' ORDER BY id").all().map((x) => x.dedupe_key), ['pausa_imposible:tiktok-7', 'pausa_imposible:tiktok-8'], 'uno por anuncio, sin repetir en el segundo ciclo');
+      const d = notifyFixture(), n0 = tgLog(sim).length;
+      yes(addAlert(d, 'red_bloqueada', 1, 'Meta rechazó', '2026-11-21 10:00:00', 'red_bloqueada:meta'), 'meta');
+      yes(addAlert(d, 'red_bloqueada', 1, 'TikTok rechazó', '2026-11-21 10:01:00', 'red_bloqueada:tiktok'), 'tiktok');
+      eq(addAlert(d, 'red_bloqueada', 1, 'Meta otra vez', '2026-11-21 10:02:00', 'red_bloqueada:meta'), null, 'misma clave, mismo día: no');
+      eq((await flushAlerts(d, { ...TG, now: '2026-11-21 10:05' })).sent, 2, 'dos mensajes: claves distintas no se suprimen');
+      d.prepare("INSERT INTO alerts (project_id, kind, text, at, dedupe_key) VALUES (1, 'red_bloqueada', 'Meta de nuevo', '2026-11-21 11:00:00', 'red_bloqueada:meta')").run();
+      eq((await flushAlerts(d, { ...TG, now: '2026-11-21 11:01' })).suppressed, 1, 'misma clave dentro de 6 h: se suprime');
+      eq(tgLog(sim).length - n0, 2, 'mensajes en total');
+    }],
+    ['Lanzamiento', 'Una fila pendiente de más de 10 min (corte a mitad del lanzamiento) avisa anuncio_sin_registro, queda huérfana y no traba el post', async () => {
+      const f = mktFixture({ budget: 900 }); f.post(3, 1, '2026-11-18 03:00', 3000, 600, 0.9);
+      const pend = f.d.prepare("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, ?, 'meta', '', 5, 'pendiente', ?, ?)");
+      const viejo = pend.run(3, '2026-11-21 09:30', '2026-11-21 09:30').lastInsertRowid, nuevo = pend.run(4, '2026-11-21 09:55', '2026-11-21 09:55').lastInsertRowid;
+      const r = await marketingCycle(1, f.deps);
+      eq(f.d.prepare('SELECT status FROM promotions WHERE id = ?').get(viejo).status, 'huerfana', 'la vieja queda huérfana');
+      eq(f.d.prepare('SELECT status FROM promotions WHERE id = ?').get(nuevo).status, 'pendiente', 'la de 5 min no se toca');
+      const a = f.d.prepare("SELECT text, dedupe_key FROM alerts WHERE kind = 'anuncio_sin_registro'").all();
+      eq(a.length, 1, 'un aviso'); yes(a[0].text.includes('meta') && a[0].text.includes('post 3') && a[0].text.includes(`fila ${viejo}`), a[0].text);
+      eq(a[0].dedupe_key, 'anuncio_sin_registro:3', 'clave por post');
+      eq(r.promoted, 1, 'el post vuelve a ser candidato'); yes(f.log.some((l) => l.startsWith('meta:promote:3:')), 'se promociona');
+    }],
+    ['Lanzamiento', 'El nombre del anuncio en las 3 redes lleva el post y la fila de promotions («ACM · post X · fila N»)', async () => {
+      const f = adsFixture(); f.post(1, 1, 'M1'); f.post(2, 2, 'YOK'); f.post(3, 3, 'PUB', 'TVOK');
+      const mark = sim.log.length; const r = await f.run(); eq(r.promoted, 3, 'las tres');
+      const filas = Object.fromEntries(f.d.prepare('SELECT network, id FROM promotions').all().map((x) => [x.network, x.id]));
+      const L = sim.log.slice(mark);
+      yes(L.some((l) => l.startsWith('ad ') && l.includes(`ACM · post 1 · fila ${filas.meta}`)), 'Meta');
+      yes(L.some((l) => l.startsWith('ttads adgroup/create/') && l.includes(`ACM · post 3 · fila ${filas.tiktok}`)), 'TikTok');
+      yes(L.some((l) => l.startsWith('gads campaigns:mutate') && l.includes(`post 2 · fila ${filas.youtube}`)), 'Google');
+    }],
+    ['Editor', 'El vencimiento ISO en UTC se pasa a hora local; lo ya local, solo fecha o vacío queda igual', async () => {
+      const BA = 'America/Argentina/Buenos_Aires';
+      eq([localExpiry('2026-12-01T15:00:00.000Z', BA), localExpiry('2026-12-01T15:00:00+00:00', BA), localExpiry('2026-12-02T01:30Z', BA)], ['2026-12-01 12:00', '2026-12-01 12:00', '2026-12-01 22:30'], 'UTC a local');
+      eq([localExpiry('2026-12-01 12:00', BA), localExpiry('2026-12-01', BA), localExpiry('', BA), localExpiry(undefined, BA)], ['2026-12-01 12:00', '2026-12-01', '', ''], 'sin zona queda igual');
+    }],
+    ['Seguridad', 'mask tapa la firma, la credencial y el token de sesión de los links firmados', async () => {
+      const t = mask('No se pudo: https://r2.ejemplo/acm/v.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEJEMPLO%2F20261109%2Fauto%2Fs3&X-Amz-Date=20261109T000000Z&X-Amz-Expires=600&X-Amz-Security-Token=FQoGZXIvYXdzEJr&X-Amz-Signature=deadbeefcafe&X-Amz-SignedHeaders=host');
+      yes(!/AKIAEJEMPLO|FQoGZXIvYXdzEJr|deadbeefcafe/.test(t), t);
+      yes(t.includes('X-Amz-Credential=••••') && t.includes('X-Amz-Signature=••••') && t.includes('X-Amz-Security-Token=••••') && t.includes('X-Amz-Expires=600'), t);
     }],
     ['Circuito', 'Planificador: YouTube respeta su cuota por proyecto y usa el mejor horario aprendido', async () => {
       const yt = [{ id: 1, network: 'youtube', status: 'conectada', posts_per_day: 3 }];

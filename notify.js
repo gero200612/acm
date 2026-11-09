@@ -1,7 +1,7 @@
 // Avisos a Gero por Telegram: manda los avisos anotados en `alerts` y el resumen diario.
 // Sin TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID no hace nada (los avisos quedan anotados y se mandan cuando se configure, si tienen menos de 24 h).
-// Dedupe, de lo más estricto a lo más suelto: addAlert anota un solo aviso por proyecto, tipo y día; y acá, además, un aviso del mismo tipo y
-// proyecto no se manda si ya salió otro hace menos de 6 h (cruzando la medianoche el segundo se anota pero no se manda: queda sent_at = 'suprimida').
+// Dedupe, de lo más estricto a lo más suelto: addAlert anota un solo aviso por proyecto, tipo, clave y día; y acá, además, un aviso del mismo tipo,
+// clave y proyecto no se manda si ya salió otro hace menos de 6 h (cruzando la medianoche el segundo se anota pero no se manda: queda sent_at = 'suprimida').
 import { bases } from './connections.js';
 import { mask } from './trace.js';
 import { addAlert } from './alerts.js';
@@ -33,12 +33,12 @@ export async function flushAlerts(db, deps = {}) {
   const { token, chat } = creds(deps);
   if (!token || !chat) return out;
   const now = (typeof deps.now === 'function' ? deps.now() : deps.now) || stamp();
-  const rows = db.prepare('SELECT a.id, a.project_id, a.kind, a.text, p.name FROM alerts a LEFT JOIN projects p ON p.id = a.project_id WHERE a.sent_at IS NULL AND a.at >= ? ORDER BY a.id')
+  const rows = db.prepare('SELECT a.id, a.project_id, a.kind, a.text, a.dedupe_key, p.name FROM alerts a LEFT JOIN projects p ON p.id = a.project_id WHERE a.sent_at IS NULL AND a.at >= ? ORDER BY a.id')
     .all(shift(now, -MAX_AGE_HOURS));
-  const recent = db.prepare("SELECT 1 FROM alerts WHERE project_id IS ? AND kind = ? AND sent_at GLOB '2*' AND sent_at >= ? AND id != ?");
+  const recent = db.prepare("SELECT 1 FROM alerts WHERE project_id IS ? AND kind = ? AND dedupe_key = ? AND sent_at GLOB '2*' AND sent_at >= ? AND id != ?");
   const mark = db.prepare('UPDATE alerts SET sent_at = ? WHERE id = ?');
   for (const a of rows) {
-    if (recent.get(a.project_id ?? null, a.kind, shift(now, -DEDUPE_HOURS), a.id)) { mark.run('suprimida', a.id); out.suppressed++; continue; }
+    if (recent.get(a.project_id ?? null, a.kind, a.dedupe_key || '', shift(now, -DEDUPE_HOURS), a.id)) { mark.run('suprimida', a.id); out.suppressed++; continue; }
     try {
       await sendTelegram(token, chat, `${a.name ? `[${a.name}] ` : ''}${a.text}`);
       mark.run(now.length === 16 ? now + ':00' : now, a.id); out.sent++;

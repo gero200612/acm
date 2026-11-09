@@ -21,12 +21,12 @@ import { probe, review } from './mp4probe.js';
 import { r2Ready, putUrl, getUrl, head as r2Head, remove as r2Remove, download as r2Download, MAX_UPLOAD } from './storage.js';
 import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, withinWindow, NETWORK_CAPS, reviewMode } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
-import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
+import { makeState, readState, authUrl, exchange, oauthReady, redirectUri, PUBLIC_URL } from './oauth.js';
 import { initAlerts, addAlert } from './alerts.js';
 import { flushAlerts, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR } from './notify.js';
-import { initPlanner, planProject, expiredBlocked } from './planner.js';
+import { initPlanner, planProject, expiredBlocked, localExpiry } from './planner.js';
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
-import { initMarketing, marketingCycle } from './marketing.js';
+import { initMarketing, marketingCycle, projectsToCycle } from './marketing.js';
 import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars } from './memory.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
 
@@ -277,7 +277,7 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
   try {
   r = run("INSERT INTO reels (project_id, title, caption, hashtags, file, original_name, size, duration, width, height, kind, source_id, storage, clip_id, moment, recipe, review, expires_at, cover, editor_edition_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'borrador')",
     crudo.project_id, title, String(b.caption || ''), tags(b.hashtags), file, `${title}.mp4`, size, dur, m.width ?? null, m.height ?? null, crudo.id, storage,
-    String(b.clip_id), json(b.moment), json(b.recipe), review, String(b.expires_at || ''), cover, eid);
+    String(b.clip_id), json(b.moment), json(b.recipe), review, localExpiry(b.expires_at || '', TZ), cover, eid);
   } catch (e) {
     // dos reintentos a la vez: el segundo pierde contra el índice único, borra lo que subió y devuelve el reel del primero
     const ya = eid && get('SELECT *, 0 AS posts FROM reels WHERE editor_edition_id = ? AND source_id = ?', eid, crudo.id);
@@ -435,6 +435,9 @@ app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
 app.delete('/api/projects/:id', (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe' });
+  // con anuncios corriendo, borrar el proyecto los dejaría gastando sin nadie que los controle
+  const vivos = get("SELECT count(*) n FROM promotions WHERE project_id = ? AND status IN ('activa', 'pendiente')", p.id).n;
+  if (vivos) return res.status(409).json({ error: `El proyecto tiene ${vivos} ${vivos === 1 ? 'anuncio activo' : 'anuncios activos'}: pausá la pauta primero (apagá las redes o dejá el presupuesto en 0 y esperá al próximo ciclo).` });
   all('SELECT file, storage FROM reels WHERE project_id = ?', p.id).forEach((r) => dropFile(r));
   rmFile(p.photo);
   run('DELETE FROM projects WHERE id = ?', p.id);
@@ -595,10 +598,9 @@ async function sendToEditor(r) {
   const base = (process.env.EDITOR_URL || '').replace(/\/+$/, '');
   if (!base) return;
   try {
-    const pub = (process.env.ACM_PUBLIC_URL || '').replace(/\/+$/, '');
     const resp = await fetch(`${base}/trabajos`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.EDITOR_TOKEN || ''}` }, signal: AbortSignal.timeout(20000),
-      body: JSON.stringify({ project_id: r.project_id, reel_id: r.id, url: await getUrl(r.file, 6 * 86400), duracion_s: r.duration, aprendizajes_url: pub ? `${pub}/api/editor/aprendizajes/${r.project_id}` : '' }),
+      body: JSON.stringify({ project_id: r.project_id, reel_id: r.id, url: await getUrl(r.file, 6 * 86400), duracion_s: r.duration, aprendizajes_url: `${PUBLIC_URL}/api/editor/aprendizajes/${r.project_id}` }),
     });
     if (!resp.ok) throw new Error(`el editor respondió ${resp.status}`);
   } catch (e) {
@@ -1149,15 +1151,17 @@ async function leerMetricas() {
 if (process.env.ACM_SCHEDULER !== 'off') { setInterval(leerMetricas, 6 * 3600e3); setTimeout(leerMetricas, 60e3); }
 
 // pauta: cada 6 h el ciclo de marketing decide qué promocionar y mueve o corta la plata (ACM_MARKETING_CYCLE=off lo apaga).
-// Los adaptadores se arman por proyecto con sus credenciales de pauta; sin credenciales (o en demos) el ciclo avisa "sin adaptadores" y no toca nada.
+// Los adaptadores se arman por proyecto con sus credenciales de pauta; sin credenciales el ciclo avisa "sin adaptadores" y no toca nada.
+// Un demo o un proyecto sin presupuesto con anuncios activos también entra: arma adaptadores solo de pausa y el ciclo frena todo.
 let marketingCorriendo = false;
 async function cicloDeMarketing() {
   if (marketingCorriendo) return; marketingCorriendo = true;
   try {
-    for (const p of all("SELECT p.id FROM projects p JOIN pauta pa ON pa.project_id = p.id WHERE p.demo = 0 AND pa.budget > 0")) {
+    // también los demos y los sin presupuesto que tengan anuncios activos: el ciclo los pausa
+    for (const id of projectsToCycle(db)) {
       try {
-        const r = await marketingCycle(p.id, { db, adapters: buildAdapters(db, vault, p.id, () => localNow().slice(0, 10)), now: () => localNow() });
-        if (r.skipped === 'sin adaptadores') console.log(`marketing: sin adaptadores (proyecto ${p.id})`);
+        const r = await marketingCycle(id, { db, adapters: buildAdapters(db, vault, id, () => localNow().slice(0, 10)), now: () => localNow() });
+        if (r.skipped === 'sin adaptadores') console.log(`marketing: sin adaptadores (proyecto ${id})`);
       } catch (e) { console.error('marketing:', e.message); }
     }
   } finally { marketingCorriendo = false; }

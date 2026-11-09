@@ -4,7 +4,7 @@
 // Diferencia con Meta/TikTok: el presupuesto diario de Google vive en la campaña, así que cada Short promocionado tiene su propia campaña
 // (con su presupuesto y su end_date). Lo único que se reusa por proyecto ("ensureCampaign") es la lista de Customer Match.
 import { bases, getGoogleToken } from './connections.js';
-import { AdRejected, callJson } from './ads-iface.js';
+import { AdRejected, callJson, adName } from './ads-iface.js';
 
 // solo el pedido que crea el anuncio puede ser un rechazo de política: cualquier otro error nunca bloquea la red
 export const isPolicyReject = (path, txt) => path === 'adGroupAds:mutate' && /policyViolationError|policyFindingError|POLICY_/i.test(txt);
@@ -65,19 +65,19 @@ export function googleAdapter(ctx) {
       const st = ctx.state.get('youtube'), end = ctx.endDate(), p = ctx.project();
       if (!end) throw new Error('Falta la fecha de fin de la pauta.');
       const videoId = post.external_id;
-      const budget = await mutate('campaignBudgets', { create: { name: `ACM · post ${post.id} · ${Date.now()}`, amountMicros: micros(dailyUsd), deliveryMethod: 'STANDARD', explicitlyShared: false } });
+      const budget = await mutate('campaignBudgets', { create: { name: `${adName(post)} · ${Date.now()}`, amountMicros: micros(dailyUsd), deliveryMethod: 'STANDARD', explicitlyShared: false } });
       const campaign = await mutate('campaigns', { create: {
-        name: `ACM · ${p.name} · post ${post.id}`, advertisingChannelType: 'VIDEO', advertisingChannelSubType: SUBTYPE, status: 'ENABLED',
+        name: `ACM · ${p.name} · ${adName(post).slice('ACM · '.length)}`, advertisingChannelType: 'VIDEO', advertisingChannelSubType: SUBTYPE, status: 'ENABLED',
         campaignBudget: budget, startDate: ctx.today(), endDate: dash(end),
         // con lista, los anuncios salen SOLO para el padrón
         ...(st.userList ? { targetingSetting: { targetRestrictions: [{ targetingDimension: 'AUDIENCE', bidOnly: false }] } } : {}),
       } });
       try {
         await mutate('campaignCriteria', { create: { campaign, location: { geoTargetConstant: 'geoTargetConstants/2032' } } });  // Argentina
-        const group = await mutate('adGroups', { create: { name: `ACM · post ${post.id}`, campaign, status: 'ENABLED', type: 'VIDEO_RESPONSIVE' } });
+        const group = await mutate('adGroups', { create: { name: adName(post), campaign, status: 'ENABLED', type: 'VIDEO_RESPONSIVE' } });
         if (st.userList) await mutate('adGroupCriteria', { create: { adGroup: group, userList: { userList: st.userList } } });
         const asset = await mutate('assets', { create: { youtubeVideoAsset: { youtubeVideoId: videoId } } });
-        await mutate('adGroupAds', { create: { adGroup: group, status: 'ENABLED', ad: { name: `ACM · post ${post.id}`, videoResponsiveAd: { videos: [{ asset }] } } } });
+        await mutate('adGroupAds', { create: { adGroup: group, status: 'ENABLED', ad: { name: adName(post), videoResponsiveAd: { videos: [{ asset }] } } } });
       } catch (e) { try { await mutate('campaigns', { update: { resourceName: campaign, status: 'PAUSED' }, updateMask: 'status' }); } catch {} throw e; }
       return { adId: `${idOf(campaign)}:${idOf(budget)}` };
     },
@@ -93,7 +93,13 @@ export function googleAdapter(ctx) {
       const [campaign] = adId.split(':');
       const r = await call('googleAds:search', { query: `SELECT metrics.cost_micros, metrics.impressions, metrics.unique_users FROM campaign WHERE campaign.id = ${Number(campaign)}` });
       const m = r.results?.[0]?.metrics || {}, reach = Number(m.uniqueUsers) || 0;
-      return { spend: (Number(m.costMicros) || 0) / 1e6, impressions: Number(m.impressions) || 0, reach, target_reach: ctx.state.get('youtube').userList ? reach : null };
+      const out = { spend: (Number(m.costMicros) || 0) / 1e6, impressions: Number(m.impressions) || 0, reach, target_reach: ctx.state.get('youtube').userList ? reach : null };
+      // la revisión de políticas es asincrónica: el anuncio puede quedar DISAPPROVED después de creado
+      try {
+        const a = await call('googleAds:search', { query: `SELECT ad_group_ad.policy_summary.approval_status FROM ad_group_ad WHERE campaign.id = ${Number(campaign)}` });
+        if ((a.results || []).some((x) => x.adGroupAd?.policySummary?.approvalStatus === 'DISAPPROVED')) out.rejected = 'Google Ads desaprobó el anuncio (DISAPPROVED)';
+      } catch (e) { out.status_error = e.message; }
+      return out;
     },
   };
 }

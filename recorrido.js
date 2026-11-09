@@ -532,7 +532,8 @@ export function recorridoCases(sb) {
       eq(job.auth, `Bearer ${EDITOR_TOKEN}`, 'token');
       eq([job.body.project_id, job.body.reel_id, job.body.duracion_s], [c.p, c.crudo, 30], 'datos del trabajo');
       yes(/X-Amz-Signature=/.test(job.body.url), 'el link del crudo no está firmado');
-      yes(/\/api\/editor\/aprendizajes\/\d+$/.test(job.body.aprendizajes_url), `aprendizajes_url: ${job.body.aprendizajes_url}`);
+      // se arma con PUBLIC_URL de oauth.js (en producción, aunque falte ACM_PUBLIC_URL, nunca queda vacío)
+      eq(job.body.aprendizajes_url, `${sb.box.base}/api/editor/aprendizajes/${c.p}`, 'aprendizajes_url con la dirección pública de ACM');
     }],
     [G('editor'), 'El estado del crudo avanza con los avisos del editor y rechaza uno inventado', async () => {
       const post = (b) => sb.box.editorApi('/api/editor/estado', b);
@@ -556,6 +557,14 @@ export function recorridoCases(sb) {
       eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, crudo_id: 999999 })).status, 404, 'crudo inexistente');
       eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, clip_id: '' })).status, 400, 'sin clip_id');
       eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, review: 'x' })).status, 400, 'revisión inválida');
+    }],
+    [G('editor'), 'El vencimiento que manda el editor en UTC (ISO con Z) se guarda en hora local; uno ya local queda igual', async () => {
+      const b = { crudo_id: c.crudo, clip_id: 'clip-utc', review: 'pendiente', file_url: `${sb.editor.base}/video.mp4` };
+      const r = await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: '0a1b2c3d-0000-4000-8000-000000000601', expires_at: '2026-12-01T15:00:00.000Z' });
+      eq([r.status, r.j?.expires_at], [200, '2026-12-01 12:00'], 'UTC 15:00 = 12:00 en Buenos Aires');
+      const r2 = await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: '0a1b2c3d-0000-4000-8000-000000000602', expires_at: '2026-12-01 12:00' });
+      eq(r2.j?.expires_at, '2026-12-01 12:00', 'ya local: igual');
+      for (const x of [r.j, r2.j]) await api('DELETE', `/api/reels/${x.id}`);
     }],
     [G('editor'), 'Un reintento con el mismo edicion_id devuelve el reel ya creado (200), sin duplicar', async () => {
       const b = { crudo_id: c.crudo, clip_id: 'clip-abc', file_url: `${sb.editor.base}/video.mp4`, edicion_id: "0a1b2c3d-0000-4000-8000-000000000501" };
@@ -638,6 +647,16 @@ export function recorridoCases(sb) {
       let q; for (let i = 0; i < 20; i++) { await sleep(500); q = (await api('GET', `/api/projects/${c.p}/posts`)).j.find((x) => x.id === p.id); if (q.status !== 'programado') break; }
       if (inside) yes(q.status === 'bloqueado' && /venci/.test(q.note), `estado ${q.status}, nota ${q.note}`);
       else eq(q.status, 'programado', 'fuera de horario espera');
+    }],
+    [G('proyecto'), 'Con anuncios activos no se puede borrar el proyecto (409, pausá la pauta primero); pausados, sí', async () => {
+      if (!sb.box) throw new Error(sb.error || 'no hay copia aislada');
+      const id = sb.box.write("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (?, 1, 'meta', 'SET-vivo', 5, 'activa', '2026-11-21 10:00', '2026-11-21 10:00')", c.p).lastInsertRowid;
+      const r = await api('DELETE', `/api/projects/${c.p}`);
+      eq(r.status, 409, 'con un anuncio activo'); yes(/paus[aá] la pauta primero/i.test(r.j?.error || ''), r.j?.error);
+      eq((await api('GET', `/api/projects/${c.p}`)).status, 200, 'el proyecto sigue');
+      sb.box.write("UPDATE promotions SET status = 'pendiente' WHERE id = ?", id);
+      eq((await api('DELETE', `/api/projects/${c.p}`)).status, 409, 'uno a medio lanzar también frena');
+      sb.box.write("UPDATE promotions SET status = 'pausada' WHERE id = ?", id);
     }],
     [G('proyecto'), 'Borrar el proyecto se lleva todo lo suyo', async () => {
       eq((await api('DELETE', `/api/projects/${c.p}`)).j?.ok, true, 'borrar');

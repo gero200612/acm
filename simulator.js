@@ -8,6 +8,8 @@ export function startSimulator(port = 0) {
   const log = [];
   const adsets = new Map(), tt = { groups: 0 }, g = { campaigns: 0, budgets: 0, lists: 0 }; // anuncios de mentira
   const objects = new Map(); // R2 de mentira: bucket acm-test
+  // modo desaprobación: IDs de anuncio (conjunto de Meta, grupo de TikTok, campaña de Google) que la red desaprueba DESPUÉS de crearlos
+  const disapproved = new Set();
   let B = '';
   const server = http.createServer((req, res) => {
   const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
@@ -88,6 +90,7 @@ export function startSimulator(port = 0) {
     if (p === '/graph/act_999' && req.method === 'GET') return send(res, 200, { name: 'Cuenta Mock', currency: 'ARS', account_status: 1 });
     if (p === '/graph/act_999/customaudiences') return send(res, 200, { id: 'AUD1' });
     if (p === '/graph/AUD1/usersreplace') { const j = JSON.parse(body); return send(res, 200, { num_received: j.payload.data.length, session_id: j.session.session_id }); }
+    if (p === '/graph/act_999/campaigns' && req.method === 'POST') log.push('campaign ' + JSON.stringify({ name: params.name, sac: params.special_ad_categories }));
     if (p === '/graph/act_999/campaigns') return ['PAUSED', 'ACTIVE'].includes(params.status) ? send(res, 200, { id: 'CAMP1' }) : send(res, 400, { error: { message: 'estado inválido' } });
     if (p === '/graph/act_999/adsets') {
       log.push('adset ' + JSON.stringify({ b: params.lifetime_budget, db: params.daily_budget, s: params.start_time, e: params.end_time, f: params.frequency_control_specs, t: params.targeting }));
@@ -95,7 +98,8 @@ export function startSimulator(port = 0) {
     }
     if (p === '/graph/act_999/adcreatives') return params.source_instagram_media_id === 'MBAD' ? send(res, 400, { error: { code: 368, message: 'El anuncio infringe las políticas (policy)' } })
       : params.source_instagram_media_id || params.object_story_id ? send(res, 200, { id: 'CR1' }) : send(res, 400, { error: { message: 'sin media' } });
-    if (p === '/graph/act_999/ads') return send(res, 200, { id: 'AD1' });
+    if (p === '/graph/act_999/ads') { log.push('ad ' + JSON.stringify({ name: params.name })); return send(res, 200, { id: 'AD1' }); }
+    if (/^\/graph\/SET\d+\/ads$/.test(p) && req.method === 'GET') { const id = p.slice(7, -4); return send(res, 200, { data: [{ id: 'AD1', effective_status: disapproved.has(id) ? 'DISAPPROVED' : 'ACTIVE' }] }); }
     if (/^\/graph\/SET\d+$/.test(p) && req.method === 'POST') { const a = adsets.get(p.slice(7)); if (!a) return send(res, 404, { error: { message: 'no existe el conjunto' } }); Object.assign(a, params); log.push(`adset-update ${p.slice(7)} ${JSON.stringify(params)}`); return send(res, 200, { success: true }); }
     if (/^\/graph\/SET\d+\/insights$/.test(p)) return send(res, 200, { data: [{ spend: '30000', impressions: '8000', reach: '5000' }] });
     if (p === '/graph/CAMP1/insights') return send(res, 200, { data: [{ spend: '121000', impressions: '34000', reach: '21000' }] });
@@ -110,6 +114,7 @@ export function startSimulator(port = 0) {
       if (route === 'adgroup/create/') return j.budget > 0 && j.schedule_end_time ? ok0({ adgroup_id: 'TTG' + (++tt.groups) }) : send(res, 200, { code: 40002, message: 'falta presupuesto o fin de programación' });
       if (route === 'ad/create/') return j.creatives?.[0]?.tiktok_item_id === 'TVBAD' ? send(res, 200, { code: 40911, message: 'Ad rejected: violates advertising policy' }) : ok0({ ad_ids: ['TTA1'] });
       if (route === 'adgroup/budget/update/' || route === 'adgroup/status/update/') return ok0({});
+      if (route === 'ad/get/') { const ids = JSON.parse(u.searchParams.get('filtering') || '{}').adgroup_ids || []; return ok0({ list: ids.map((id) => ({ ad_id: 'TTA1', adgroup_id: id, secondary_status: disapproved.has(id) ? 'AD_STATUS_REJECT' : 'AD_STATUS_DELIVERY_OK' })) }); }
       if (route === 'report/integrated/get/') return ok0({ list: [{ dimensions: { adgroup_id: 'TTG1' }, metrics: { spend: '7.50', impressions: '3000', reach: '2100' } }] });
       return send(res, 200, { code: 40001, message: 'mock: no conozco ' + route });
     }
@@ -120,6 +125,7 @@ export function startSimulator(port = 0) {
       log.push(`gads ${route} ${JSON.stringify(j).slice(0, 600)}`);
       const rn = (kind, n) => `customers/${cid}/${kind}/${n}`;
       const op = j.operations?.[0] || {};
+      if (route === 'googleAds:search' && /FROM ad_group_ad/.test(j.query)) { const camp = (j.query.match(/campaign\.id = (\d+)/) || [])[1]; return send(res, 200, { results: [{ adGroupAd: { policySummary: { approvalStatus: disapproved.has(camp) ? 'DISAPPROVED' : 'APPROVED' } } }] }); }
       if (route === 'googleAds:search') return /FROM customer/.test(j.query) ? send(res, 200, { results: [{ customer: { descriptiveName: 'Cuenta Google Mock', currencyCode: 'USD' } }] })
         : send(res, 200, { results: [{ metrics: { costMicros: '12500000', impressions: '4000', uniqueUsers: '2500' } }] });
       if (route === 'userLists:mutate') return send(res, 200, { results: [{ resourceName: rn('userLists', ++g.lists) }] });
@@ -148,7 +154,7 @@ export function startSimulator(port = 0) {
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => {
     B = `http://127.0.0.1:${server.address().port}`;
     resolve({
-      url: B, log,
+      url: B, log, disapproved,
       bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, youtubeAnalytics: `${B}/ytan`, ytUpload: `${B}/ytup`, tiktokAds: `${B}/ttads`, googleAds: `${B}/gads`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, telegram: `${B}/telegram`, r2: B },
       close: () => new Promise((r) => server.close(r)),
     });

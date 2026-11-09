@@ -2,11 +2,13 @@ import { mask } from './trace.js';
 // Interfaz de los adaptadores de pauta (los reales llegan con la Tarea 11; el banco usa falsos).
 // Un adaptador por red de pauta: 'meta' (cubre publicaciones de Instagram y Facebook), 'youtube' y 'tiktok'.
 //   ensureCampaign(project) -> { campaignId | null, listId? }   (Google: sin campaña por proyecto, solo la lista de Customer Match)
-//   promote(post, dailyUsd) -> { adId }         (lanza AdRejected si la red rechaza el anuncio)
+//   promote(post, dailyUsd) -> { adId }         (lanza AdRejected si la red rechaza el anuncio; post.row = fila de promotions, va en el nombre)
 //   setBudget(adId, dailyUsd)
 //   pause(adId)
 //   (opcional) pauseOnly: true -> el adaptador solo pausa y lee; el ciclo no promociona ni cambia presupuestos con él
-//   insights(adId) -> { spend, impressions, reach, target_reach | null }   (acumulados desde que arrancó)
+//   insights(adId) -> { spend, impressions, reach, target_reach | null, rejected? }   (acumulados desde que arrancó)
+//     rejected: motivo (texto) si la red desaprobó el anuncio DESPUÉS de crearlo (la revisión es asincrónica); solo aparece si lo está.
+//     status_error: si no se pudo leer el estado de revisión (el gasto sí se leyó)
 export class AdRejected extends Error {}
 // la red no puede promocionar ESTE post todavía (p. ej. falta el ID del video): se saltea en este ciclo, sin bloquear la red
 export class AdSkip extends Error {}
@@ -22,6 +24,9 @@ export const adNetworkOf = (accountNetwork) => ({ instagram: 'meta', facebook: '
 // Corte del lado de la red: el fin (end_time / schedule_end_time / end_date) y el presupuesto diario viajan SIEMPRE con el anuncio,
 // así el gasto se detiene aunque un ciclo de 6 h llegue tarde.
 export const endOfDay = (d) => `${d}T23:59:00-03:00`;
+// Nombre del anuncio en la red: lleva el post y la fila de promotions, así un anuncio que quedó sin registrar (corte a mitad del lanzamiento)
+// se encuentra a mano buscando «ACM · post X · fila N».
+export const adName = (post) => `ACM · post ${post.id}${post.row ? ` · fila ${post.row}` : ''}`;
 
 // fetch con tiempo máximo; los errores nunca llevan tokens
 export async function callJson(who, url, opt = {}, secrets = []) {

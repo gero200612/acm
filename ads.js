@@ -1,6 +1,6 @@
 // Meta Ads: público personalizado con el padrón (solo huellas SHA-256) y campaña creada EN PAUSA para revisar.
 import { bases } from './connections.js';
-import { AdRejected, endOfDay, usdToLocal, localToUsd } from './ads-iface.js';
+import { AdRejected, endOfDay, usdToLocal, localToUsd, adName } from './ads-iface.js';
 import { mask } from './trace.js';
 
 async function g(method, path, token, params = {}, json) {
@@ -85,6 +85,9 @@ export async function campaignInsights(c, id) {
 // creativo o el anuncio, por el texto del mensaje. Cualquier otro error nunca bloquea la red.
 export const isPolicyReject = (e, creating) => e.metaCode === 368 || (!!creating && /\bpolicy\b|pol[ií]ticas de (anuncios|publicidad)/i.test(e.message || ''));
 
+// Estados efectivos de un anuncio de Meta que cuentan como rechazo después de crearlo
+export const META_DISAPPROVED = new Set(['DISAPPROVED', 'WITH_ISSUES']);
+
 export function metaAdapter(ctx) {
   const c = ctx.creds, secrets = [c.accessToken];
   const call = async (...a) => {
@@ -98,7 +101,8 @@ export function metaAdapter(ctx) {
   const ensureCampaign = async (project) => {
     const st = ctx.state.get('meta');
     if (st.campaignId) return { campaignId: st.campaignId };
-    const p = project || ctx.project(), pol = !!p.ads_political;
+    // categoría política solo para proyectos políticos (el tipo manda; club y comercial nunca salen como política)
+    const p = project || ctx.project(), pol = p.kind === 'politica';
     const r = await call('POST', `${act(c.adAccountId)}/campaigns`, c.accessToken, {
       name: `ACM · ${p.name}`, objective: 'OUTCOME_AWARENESS', status: 'ACTIVE',
       special_ad_categories: pol ? ['ISSUES_ELECTIONS_POLITICS'] : [], special_ad_category_country: pol ? ['AR'] : [],
@@ -117,14 +121,14 @@ export function metaAdapter(ctx) {
         : { object_id: acc.pageId, instagram_user_id: acc.instagramBusinessId, source_instagram_media_id: post.external_id };
       const end = ctx.endDate();
       if (!end) throw new Error('Falta la fecha de fin de la pauta.');
-      const cr = await call('POST', `${act(c.adAccountId)}/adcreatives`, c.accessToken, { name: `ACM · post ${post.id}`, ...creative });
+      const cr = await call('POST', `${act(c.adAccountId)}/adcreatives`, c.accessToken, { name: adName(post), ...creative });
       const targeting = { geo_locations: { countries: ['AR'] }, age_min: 18, ...(p.ads_audience_id ? { custom_audiences: [{ id: p.ads_audience_id }] } : {}) };
       const set = await call('POST', `${act(c.adAccountId)}/adsets`, c.accessToken, {
-        name: `ACM · post ${post.id}`, campaign_id: campaignId, status: 'ACTIVE',
+        name: adName(post), campaign_id: campaignId, status: 'ACTIVE',
         daily_budget: Math.round(usdToLocal(p, dailyUsd) * 100), end_time: endOfDay(end),
         billing_event: 'IMPRESSIONS', optimization_goal: 'REACH', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', targeting,
       });
-      try { await call('POST', `${act(c.adAccountId)}/ads`, c.accessToken, { name: `ACM · post ${post.id}`, adset_id: set.id, creative: { creative_id: cr.id }, status: 'ACTIVE' }); }
+      try { await call('POST', `${act(c.adAccountId)}/ads`, c.accessToken, { name: adName(post), adset_id: set.id, creative: { creative_id: cr.id }, status: 'ACTIVE' }); }
       catch (e) { try { await call('POST', set.id, c.accessToken, { status: 'PAUSED' }); } catch {} throw e; }
       return { adId: set.id };
     },
@@ -135,7 +139,14 @@ export function metaAdapter(ctx) {
       const r = await call('GET', `${adId}/insights`, c.accessToken, { fields: 'spend,impressions,reach', date_preset: 'maximum' });
       const d = r.data?.[0] || {}, reach = Number(d.reach) || 0;
       // con el público del padrón en la segmentación, todo el alcance cae dentro del padrón; sin él, no hay forma de saberlo
-      return { spend: localToUsd(p, d.spend), impressions: Number(d.impressions) || 0, reach, target_reach: p.ads_audience_id ? reach : null };
+      const out = { spend: localToUsd(p, d.spend), impressions: Number(d.impressions) || 0, reach, target_reach: p.ads_audience_id ? reach : null };
+      // la revisión de Meta es asincrónica: un anuncio aprobado al crearlo puede quedar desaprobado después
+      try {
+        const a = await call('GET', `${adId}/ads`, c.accessToken, { fields: 'effective_status' });
+        const bad = (a.data || []).find((x) => META_DISAPPROVED.has(x.effective_status));
+        if (bad) out.rejected = `Meta marcó el anuncio como ${bad.effective_status}`;
+      } catch (e) { out.status_error = e.message; }
+      return out;
     },
   };
 }
