@@ -18,14 +18,17 @@ export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn 
     throw ultimo;
   }
   return {
-    // lo aprendido del proyecto (lo llena la fase del analista); si no se puede traer, el trabajo sigue sin eso
-    async aprendizajes(urlAprendizajes) {
-      if (!urlAprendizajes) return [];
+    // lo que ACM sabe del proyecto: lo aprendido (variables ganadoras) y su investigación; si no se puede traer, el trabajo sigue sin eso
+    async contexto(urlAprendizajes) {
+      if (!urlAprendizajes) return { aprendizajes: [], investigacion: [] };
       try {
         const r = await fetchFn(urlAprendizajes, { headers: { authorization: `Bearer ${token || ''}` }, signal: AbortSignal.timeout(20000) });
-        return r.ok ? ((await r.json()).aprendizajes || []) : [];
-      } catch { return []; }
+        if (!r.ok) return { aprendizajes: [], investigacion: [] };
+        const j = await r.json();
+        return { aprendizajes: j.aprendizajes || [], investigacion: Array.isArray(j.investigacion) ? j.investigacion : [] };
+      } catch { return { aprendizajes: [], investigacion: [] }; }
     },
+    async aprendizajes(urlAprendizajes) { return (await this.contexto(urlAprendizajes)).aprendizajes; },
     estado: (reel_id, estado, detalle = '') => post('/api/editor/estado', { reel_id, estado, detalle }),
     // {crudo_id, clip_id, moment, recipe, caption, hashtags, file_url, cover_url, duration, review, expires_at?}
     edicion: (payload) => post('/api/editor/edicion', payload),

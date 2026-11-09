@@ -46,11 +46,11 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     return tr;
   }
 
-  async function momentos(t, transcripcion, aprendizajes) {
+  async function momentos(t, transcripcion, aprendizajes, investigacion = []) {
     let ms = R.momentos(t.id);
     if (ms.length) return ms; // retomado: se reusan (el clip_id no cambia)
     await etapa(t, 'buscando_momentos');
-    const res = (await elegirMomentos({ trabajo: t, transcripcion, aprendizajes })) || [];
+    const res = (await elegirMomentos({ trabajo: t, transcripcion, aprendizajes, investigacion })) || [];
     const elegidos = Array.isArray(res) ? res : res.momentos || [];
     if (!Array.isArray(res) && !elegidos.length && res.motivo) motivoSinMomentos = res.motivo;
     elegidos.forEach((m, i) => {
@@ -152,10 +152,11 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     if (!t || TERMINALES.includes(t.estado)) return t;
     try {
       motivoSinMomentos = '';
-      const aprendizajes = await acm.aprendizajes?.(t.aprendizajes_url) ?? [];
+      const ctx = acm.contexto ? await acm.contexto(t.aprendizajes_url) : { aprendizajes: (await acm.aprendizajes?.(t.aprendizajes_url)) ?? [] };
+      const aprendizajes = ctx.aprendizajes ?? [], investigacion = ctx.investigacion ?? [];
       const transcripcion = await transcribir(t);
       t = R.trabajo(id);
-      const ms = await momentos(t, transcripcion, aprendizajes);
+      const ms = await momentos(t, transcripcion, aprendizajes, investigacion);
       if (!ms.length) { await etapa(t, 'sin_momentos', motivoSinMomentos || 'No encontramos momentos para recortar en este video'); return R.trabajo(id); }
       await armar(t, ms, transcripcion, aprendizajes);
       if (!R.ediciones(t.id).length) { await etapa(t, 'sin_momentos', 'Hay momentos pero ninguna receta para editarlos'); return R.trabajo(id); }

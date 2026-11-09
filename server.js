@@ -26,6 +26,7 @@ import { initAlerts } from './alerts.js';
 import { initPlanner, planProject, expiredBlocked } from './planner.js';
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initMarketing, marketingCycle } from './marketing.js';
+import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars } from './memory.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -121,6 +122,7 @@ initAlerts(db);
 initPlanner(db);
 initMetrics(db);
 initMarketing(db);
+initMemory(db);
 // pesos del puntaje de cada publicación (JSON); el agente nunca los cambia
 if (!cols('projects').includes('score_weights')) db.exec("ALTER TABLE projects ADD COLUMN score_weights TEXT DEFAULT ''");
 // campañas: el presupuesto total del proyecto (pauta.budget) se reparte en campañas con sus cuentas y su contenido
@@ -208,8 +210,17 @@ app.post('/api/editor/estado', requireEditor, (req, res) => {
   run('UPDATE reels SET status = ?, status_detail = ? WHERE id = ?', b.estado, String(b.detalle || '').slice(0, 500), r.id);
   res.json({ ok: true });
 });
-// lo que el editor aprendió de lo publicado: lo llena la fase del analista; por ahora devuelve la lista vacía
-app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => res.json({ project_id: Number(req.params.pid), aprendizajes: [] }));
+// lo que el editor necesita del proyecto: las variables ganadoras (memoria) y la investigación; solo del proyecto pedido
+app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
+  const pid = Number(req.params.pid);
+  if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe el proyecto' });
+  const w = winningVariables(db, pid);
+  res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid) });
+});
+app.get('/api/projects/:id/memory', (req, res) => {
+  if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe el proyecto' });
+  res.json(memoryOf(db, Number(req.params.id)));
+});
 // el editor entrega una edición lista: ACM baja el archivo (y la portada), lo guarda donde guarda todo y crea el reel
 // solo se baja de la dirección pública del editor (nada de URLs ajenas), sin seguir redirecciones y con tope de tamaño
 const editorOrigin = () => { try { return new URL(process.env.EDITOR_PUBLIC_URL || '').origin; } catch { return ''; } };
@@ -1006,14 +1017,6 @@ app.put('/api/projects/:id/pauta', (req, res) => {
 
 // ---------- Para aprobar: Gero revisa cada recorte (las 3 ediciones hermanas juntas) ----------
 const parseJson = (v) => { try { return v ? JSON.parse(v) : null; } catch { return null; } };
-const REVIEW_VARS = ['gancho', 'subtitulos', 'musica', 'ritmo', 'largo'];
-// las variables de la receta (el editor las manda en recipe.variables; si faltan, se leen de los campos sueltos)
-function recipeVars(recipe) {
-  const r = recipe || {}, v = r.variables || {}, out = {};
-  const fallback = { subtitulos: r.subtitulos, musica: r.musica === null ? 'sin' : r.musica?.clima, ritmo: r.ritmo };
-  for (const k of REVIEW_VARS) { const x = v[k] ?? fallback[k]; if (typeof x === 'string' && x) out[k] = x; }
-  return out;
-}
 app.get('/api/projects/:id/review', (req, res) => {
   const p = get('SELECT id, review_mode FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe el proyecto' });
@@ -1134,6 +1137,7 @@ let leyendoMetricas = false;
 async function leerMetricas() {
   if (leyendoMetricas) return; leyendoMetricas = true;
   try { await readDue(db, vault, { since: localNow(-7 * 24 * 60).slice(0, 16) }); } catch (e) { console.error('métricas:', e.message); }
+  try { await memoryCycle(db, { now: localNow() }); } catch (e) { console.error('memoria:', e.message); }
   finally { leyendoMetricas = false; }
 }
 if (process.env.ACM_SCHEDULER !== 'off') { setInterval(leerMetricas, 6 * 3600e3); setTimeout(leerMetricas, 60e3); }

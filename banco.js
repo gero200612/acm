@@ -25,6 +25,7 @@ import { isPolicyReject as gPolicy } from './ads-google.js';
 import { tiktokAdapter } from './ads-tiktok.js';
 import { googleAdapter } from './ads-google.js';
 import { buildAdapters } from './ads-factory.js';
+import { initMemory, compareSiblings, winningVariables, memoryCycle } from './memory.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -70,6 +71,33 @@ function mktFixture({ budget = 100, end = '2026-11-30', until = '', nets = '{"me
   return { d, log, spend, deps, post };
 }
 
+// proyecto con un recorte de 3 hermanas publicadas hace 3 días en Instagram, a distinta hora y con distinto rendimiento
+const RECIPES = [
+  { variables: { gancho: 'directo', subtitulos: 'karaoke', musica: 'sin', ritmo: 'rapido', largo: 'corto' } },
+  { variables: { gancho: 'pregunta', subtitulos: 'placa', musica: 'calido', ritmo: 'normal', largo: 'completo' } },
+  { variables: { gancho: 'directo', subtitulos: 'minimo', musica: 'calido', ritmo: 'lento', largo: 'medio' } },
+];
+function memFixture({ demo = 0, hoursOld = 72 } = {}) {
+  const d = new DatabaseSync(':memory:');
+  d.exec(`PRAGMA foreign_keys = ON; CREATE TABLE projects (id INTEGER PRIMARY KEY, demo INTEGER DEFAULT 0, score_weights TEXT DEFAULT '');
+    CREATE TABLE accounts (id INTEGER PRIMARY KEY, project_id INT, network TEXT);
+    CREATE TABLE reels (id INTEGER PRIMARY KEY, project_id INT, kind TEXT, clip_id TEXT, recipe TEXT);
+    CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INT, reel_id INT, account_id INT, scheduled_at TEXT, published_at TEXT DEFAULT '');
+    CREATE TABLE learnings (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, variable TEXT NOT NULL, value TEXT NOT NULL, network TEXT, wins REAL DEFAULT 0, trials REAL DEFAULT 0, origin TEXT NOT NULL DEFAULT 'opinion_dueno', updated_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE decisions (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, at TEXT NOT NULL, kind TEXT NOT NULL, target TEXT DEFAULT '', data TEXT DEFAULT '{}', reason TEXT DEFAULT '');
+    CREATE TABLE knowledge (id INTEGER PRIMARY KEY, project_id INT, kind TEXT, title TEXT, text TEXT);`);
+  initMetrics(d); initMemory(d);
+  d.exec(`INSERT INTO projects (id, demo) VALUES (1, ${demo}), (2, 0); INSERT INTO accounts VALUES (1, 1, 'instagram'), (2, 2, 'instagram')`);
+  const at = (h) => { const t = new Date(Date.UTC(2026, 10, 20, 12, 0) - h * 3600e3); return t.toISOString().slice(0, 16).replace('T', ' '); };
+  const clip = (clipId, project, base, views) => RECIPES.forEach((rc, i) => {
+    const rid = base + i;
+    d.prepare("INSERT INTO reels (id, project_id, kind, clip_id, recipe) VALUES (?, ?, 'listo', ?, ?)").run(rid, project, clipId, JSON.stringify(rc));
+    d.prepare('INSERT INTO posts (id, project_id, reel_id, account_id, scheduled_at, published_at) VALUES (?, ?, ?, ?, ?, ?)').run(rid, project, rid, project, at(hoursOld).slice(0, 11) + `${10 + i * 4}:00`, at(hoursOld));
+    d.prepare('INSERT INTO post_metrics (post_id, views, completion, likes, comments, shares) VALUES (?, ?, ?, ?, 0, 0)').run(rid, views[i], 0.2 + i * 0.1 * (i === 1 ? 3 : 1), views[i] / 10);
+  });
+  return { d, clip, now: () => at(0) };
+}
+const hypo = async ({ winner }) => `hipótesis de prueba: ganó la versión ${winner.n}`;
 
 // proyecto con credenciales de pauta reales (selladas) y adaptadores reales contra el simulador
 const ADS_VAULT = makeVault('banco-pauta');
@@ -101,6 +129,68 @@ function adsFixture({ nets = '{"meta":true,"youtube":true,"tiktok":true}', demo 
 function cases(video, sim) {
   const IG = { pageId: 'PAGE1', pageAccessToken: 'EAAprueba1234567', instagramBusinessId: 'IG1' };
   return [
+    ['Memoria', 'Con 3 hermanas y datos simulados compareSiblings elige la de mayor score, guarda la comparación una sola vez y actualiza learnings', async () => {
+      const f = memFixture(); f.clip('c1', 1, 10, [1000, 5000, 2000]);
+      let calls = 0;
+      const r = await compareSiblings('c1', { db: f.d, now: f.now, hypothesize: async (i) => { calls++; return hypo(i); } });
+      eq([r.compared, r.winner_reel_id], [true, 11], 'ganadora = la de mayor score');
+      const cmp = f.d.prepare('SELECT * FROM comparisons').all();
+      eq([cmp.length, cmp[0].winner_reel_id, cmp[0].hypothesis, cmp[0].diff > 0], [1, 11, 'hipótesis de prueba: ganó la versión 2', true], 'comparación guardada');
+      eq(JSON.parse(cmp[0].winner_recipe).variables.gancho, 'pregunta', 'receta ganadora');
+      const gan = f.d.prepare("SELECT variable, value, wins, trials FROM learnings WHERE origin = 'comparacion' AND variable = 'gancho' ORDER BY value, wins").all();
+      eq(gan, [{ variable: 'gancho', value: 'directo', wins: 0, trials: 1 }, { variable: 'gancho', value: 'directo', wins: 0, trials: 1 }, { variable: 'gancho', value: 'pregunta', wins: 1, trials: 1 }], 'trials a las 3, wins a la ganadora');
+      const hor = f.d.prepare("SELECT value, network, wins FROM learnings WHERE variable = 'horario' ORDER BY value").all();
+      eq(hor, [{ value: '10:00', network: 'instagram', wins: 0 }, { value: '14:00', network: 'instagram', wins: 1 }, { value: '18:00', network: 'instagram', wins: 0 }], 'horario por red');
+      const otra = await compareSiblings('c1', { db: f.d, now: f.now, hypothesize: hypo });
+      eq([otra.skipped, calls, f.d.prepare('SELECT count(*) n FROM learnings').get().n], ['ya comparado', 1, 3 * 5 + 3], 'una sola vez por recorte');
+    }],
+    ['Memoria', 'No compara si falta alguna hermana con 48 h de datos, en proyectos de demostración, y sin clave de Anthropic arma la hipótesis con los números', async () => {
+      const joven = memFixture({ hoursOld: 30 }); joven.clip('c1', 1, 10, [1, 2, 3]);
+      yes(/48 h/.test((await compareSiblings('c1', { db: joven.d, now: joven.now, hypothesize: hypo })).skipped), 'con 30 h no compara');
+      const demo = memFixture({ demo: 1 }); demo.clip('c1', 1, 10, [1, 2, 3]);
+      eq((await compareSiblings('c1', { db: demo.d, now: demo.now, hypothesize: hypo })).skipped, 'proyecto de demostración', 'demo');
+      eq((await memoryCycle(demo.d, { now: demo.now, hypothesize: hypo })).compared, 0, 'el ciclo saltea demos');
+      const f = memFixture(); f.clip('c1', 1, 10, [1000, 5000, 2000]);
+      const k = [process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_AUTH_TOKEN]; delete process.env.ANTHROPIC_API_KEY; delete process.env.ANTHROPIC_AUTH_TOKEN;
+      try { await compareSiblings('c1', { db: f.d, now: f.now }); } finally { if (k[0]) process.env.ANTHROPIC_API_KEY = k[0]; if (k[1]) process.env.ANTHROPIC_AUTH_TOKEN = k[1]; }
+      const h = f.d.prepare('SELECT hypothesis FROM comparisons').get().hypothesis;
+      yes(/^La versión 2 ganó con un puntaje de/.test(h) && /gancho/.test(h), `hipótesis sin clave: ${h}`);
+      const roto = memFixture(); roto.clip('c1', 1, 10, [1000, 5000, 2000]);
+      await compareSiblings('c1', { db: roto.d, now: roto.now, hypothesize: async () => { throw new Error('caído'); } });
+      yes(/^La versión 2 ganó/.test(roto.d.prepare('SELECT hypothesis FROM comparisons').get().hypothesis), 'si Sonnet falla queda el texto armado con los números');
+    }],
+    ['Memoria', 'Un 👎 de Gero cuenta 3×; winningVariables no devuelve nada con menos de 5 intentos, elige la mayor tasa y no mezcla proyectos', async () => {
+      const f = memFixture(); const d = f.d;
+      const L = (p, variable, value, wins, trials, origin, network = null) => d.prepare('INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, ?, ?, ?, ?)').run(p, variable, value, network, wins, trials, origin);
+      eq(winningVariables(d, 1), {}, 'sin datos');
+      for (let i = 0; i < 4; i++) L(1, 'gancho', 'directo', 1, 1, 'comparacion');
+      eq(winningVariables(d, 1), {}, '4 intentos no alcanzan');
+      L(1, 'gancho', 'directo', 1, 1, 'comparacion');
+      eq(winningVariables(d, 1), { gancho: 'directo' }, '5 intentos');
+      L(1, 'ritmo', 'lento', 0, 1, 'opinion_dueno');
+      eq(winningVariables(d, 1).ritmo, undefined, 'un 👎 solo son 3 intentos');
+      L(1, 'ritmo', 'lento', 0, 1, 'opinion_dueno');
+      eq(winningVariables(d, 1).ritmo, 'lento', 'dos 👎 son 6 intentos ponderados (único valor con intentos)');
+      for (let i = 0; i < 5; i++) L(1, 'ritmo', 'rapido', i < 4 ? 1 : 0, 1, 'comparacion');
+      eq(winningVariables(d, 1).ritmo, 'rapido', 'gana la mayor tasa (4/5 contra 0/6)');
+      for (let i = 0; i < 6; i++) L(1, 'horario', '20:00', i < 5 ? 1 : 0, 1, 'comparacion', 'instagram');
+      for (let i = 0; i < 5; i++) L(1, 'horario', '09:00', 0, 1, 'comparacion', 'instagram');
+      L(1, 'horario', '12:00', 1, 1, 'comparacion', 'tiktok');
+      eq(winningVariables(d, 1).horario, { instagram: '20:00' }, 'horario por red (tiktok sin intentos suficientes)');
+      for (let i = 0; i < 5; i++) L(2, 'largo', 'corto', 1, 1, 'comparacion');
+      eq([winningVariables(d, 1).largo, winningVariables(d, 2)], [undefined, { largo: 'corto' }], 'cada proyecto ve solo lo suyo');
+      // el planificador recibe el horario aprendido desde las variables ganadoras
+      const db = new DatabaseSync(':memory:'); db.exec(`CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT, demo INTEGER DEFAULT 0, kind TEXT DEFAULT 'club');
+        CREATE TABLE accounts (id INTEGER PRIMARY KEY, project_id INTEGER, network TEXT, status TEXT, posts_per_day INTEGER DEFAULT 3);
+        CREATE TABLE reels (id INTEGER PRIMARY KEY, project_id INTEGER, kind TEXT, clip_id TEXT, review TEXT, expires_at TEXT DEFAULT '', recipe TEXT, archived_at TEXT DEFAULT '');
+        CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INTEGER, reel_id INTEGER, account_id INTEGER, scheduled_at TEXT, status TEXT DEFAULT 'programado');
+        CREATE TABLE learnings (project_id INTEGER, variable TEXT, value TEXT, network TEXT, wins REAL, trials REAL, origin TEXT DEFAULT 'comparacion');
+        INSERT INTO projects (id, name) VALUES (1, 'Club'); INSERT INTO accounts (project_id, network, status, posts_per_day) VALUES (1, 'instagram', 'conectada', 1);
+        INSERT INTO reels (id, project_id, kind, clip_id, review) VALUES (1, 1, 'listo', 'c', 'aprobado');`);
+      initPlanner(db); initAlerts(db);
+      for (let i = 0; i < 5; i++) db.prepare("INSERT INTO learnings (project_id, variable, value, network, wins, trials) VALUES (1, 'horario', '20:00', 'instagram', 1, 1)").run();
+      eq(planProject(db, 1, { now: '2026-12-01 07:30', date: '2026-12-01' }).map((p) => p.scheduled_at), ['2026-12-01 20:00'], 'el planificador usa el horario ganador');
+    }],
     ['Conexiones', 'Instagram: trae el usuario y los seguidores', async () => { const r = await testConnection('instagram', { pageId: 'PAGE1', pageAccessToken: IG.pageAccessToken }); eq(r.connectedAs, '@mock.ig', 'usuario'); eq(r.extra.instagramBusinessId, 'IG1', 'ID de Instagram'); }],
     ['Conexiones', 'Facebook: trae el nombre de la Página', async () => { const r = await testConnection('facebook', { pageId: 'PAGE1', pageAccessToken: IG.pageAccessToken }); eq(r.connectedAs, 'Página Mock', 'nombre'); }],
     ['Conexiones', 'TikTok: renueva solo el token vencido', async () => { const r = await testConnection('tiktok', { accessToken: 'TT_VIEJO', refreshToken: 'R', clientKey: 'k', clientSecret: 's' }); eq(r.connectedAs, '@mock.tt', 'usuario'); eq(r.extra.accessToken, 'TT_OK', 'token nuevo'); }],
@@ -294,7 +384,7 @@ function cases(video, sim) {
         CREATE TABLE accounts (id INTEGER PRIMARY KEY, project_id INTEGER, network TEXT, status TEXT, posts_per_day INTEGER DEFAULT 3);
         CREATE TABLE reels (id INTEGER PRIMARY KEY, project_id INTEGER, kind TEXT, clip_id TEXT, review TEXT, expires_at TEXT DEFAULT '', recipe TEXT, archived_at TEXT DEFAULT '');
         CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INTEGER, reel_id INTEGER, account_id INTEGER, scheduled_at TEXT, status TEXT DEFAULT 'programado');
-        CREATE TABLE learnings (project_id INTEGER, variable TEXT, value TEXT, network TEXT, wins REAL, trials REAL);
+        CREATE TABLE learnings (project_id INTEGER, variable TEXT, value TEXT, network TEXT, wins REAL, trials REAL, origin TEXT DEFAULT 'comparacion');
         INSERT INTO projects (id, name) VALUES (1, 'Club'); INSERT INTO accounts (project_id, network, status) VALUES (1, 'instagram', 'conectada');`);
       initPlanner(db); initAlerts(db);
       const alertas = () => db.prepare("SELECT count(*) n FROM alerts WHERE kind = 'falta_material'").get().n;

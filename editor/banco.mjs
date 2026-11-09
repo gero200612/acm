@@ -11,7 +11,7 @@ import { crearEditor } from './server.js';
 import { crearRunner } from './runner.js';
 import { repo } from './db.js';
 import { validarMomentos, crearElegirMomentos } from './momentos.js';
-import { crearArmarRecetas, elegirVariables } from './recetas.js';
+import { crearArmarRecetas, elegirVariables, normalizarAprendizajes } from './recetas.js';
 import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
@@ -70,6 +70,7 @@ async function acmFalso() {
       if (o.cover_url) o.portada_bajada = (await fetch(o.cover_url)).ok;
       ediciones.push(o); return json(res, 200, { id: ediciones.length });
     }
+    if (req.method === 'GET' && req.url === '/api/editor/aprendizajes/7') return json(res, 200, { project_id: 7, aprendizajes: [{ ritmo: 'rapido', horario: { instagram: '20:00' } }], investigacion: ['Candidato X: pide más seguridad'] });
     json(res, 404, {});
   });
   return { ...srv, estados, ediciones };
@@ -112,6 +113,21 @@ const casos = [
       eq((await post(m, '/trabajos', { reel_id: 1 })).status, 400, 'datos incompletos');
       const r = await post(m, '/trabajos', TRABAJO); eq(r.status, 202, 'con token'); yes((await r.json()).id, 'sin id');
       const r2 = await post(m, '/trabajos', TRABAJO); eq((await r2.json()).id, 1, 'el mismo crudo en marcha no se duplica');
+    } finally { await m.fin(); }
+  }],
+  ['Tubería', 'El editor trae de ACM lo aprendido y la investigación del proyecto y se los pasa a elegirMomentos y armarRecetas', async () => {
+    const vistos = {};
+    const m = await montar({ hooks: { ...hooksDePrueba,
+      elegirMomentos: async (a) => { vistos.momentos = { aprendizajes: a.aprendizajes, investigacion: a.investigacion }; return [{ inicio_s: 0, fin_s: 12 }]; },
+      armarRecetas: async (a) => { vistos.recetas = a.aprendizajes; return [{ id: 'rapido' }]; } } });
+    try {
+      m.editor.runner.arrancar({ cadaMs: 20 });
+      const id = (await (await post(m, '/trabajos', { ...TRABAJO, aprendizajes_url: `${m.acm.base}/api/editor/aprendizajes/7` })).json()).id;
+      await esperarEstado(m, id, ['listo', 'error']);
+      eq(vistos.momentos.investigacion, ['Candidato X: pide más seguridad'], 'investigación a elegirMomentos');
+      eq(vistos.momentos.aprendizajes[0].ritmo, 'rapido', 'aprendizajes a elegirMomentos');
+      eq(vistos.recetas[0].ritmo, 'rapido', 'aprendizajes a armarRecetas');
+      eq(normalizarAprendizajes(vistos.recetas).horario, { instagram: '20:00' }, 'el horario por red se conserva');
     } finally { await m.fin(); }
   }],
   ['Tubería', 'Un trabajo completo avisa cada etapa a ACM, entrega las ediciones y termina en listo', async () => {

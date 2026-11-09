@@ -85,7 +85,9 @@ export async function startSandbox(bases) {
   const raw = (url, withCookie = true) => als.exit(() => fetch(url.startsWith('http') ? url : base + url, { redirect: 'manual', headers: withCookie ? { cookie } : {}, signal: AbortSignal.timeout(20000) }));
   const stop = async () => { child.kill(); await sleep(300); fs.rmSync(data, { recursive: true, force: true }); };
   const editorApi = (url, body) => als.exit(async () => { const r = await fetch(base + url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${EDITOR_TOKEN}` }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, j }; });
-  return { api, raw, editorApi, password, stop, base, sql: (q, ...a) => { const d = new DatabaseSync(path.join(data, 'acm.db'), { readOnly: true }); try { return d.prepare(q).all(...a); } finally { d.close(); } }, simLog: () => bases.__log || [] };
+  const editorGet = (url, token = EDITOR_TOKEN) => als.exit(async () => { const r = await fetch(base + url, { headers: token ? { authorization: `Bearer ${token}` } : {} }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, j }; });
+  const write = (q, ...a) => { const d = new DatabaseSync(path.join(data, 'acm.db')); try { return d.prepare(q).run(...a); } finally { d.close(); } };
+  return { api, raw, editorApi, editorGet, write, password, stop, base, sql: (q, ...a) => { const d = new DatabaseSync(path.join(data, 'acm.db'), { readOnly: true }); try { return d.prepare(q).all(...a); } finally { d.close(); } }, simLog: () => bases.__log || [] };
 }
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -163,6 +165,23 @@ export function recorridoCases(sb) {
         if (inside) yes(q.status === 'bloqueado' && /aprobado/.test(q.note), `estado ${q.status}, nota ${q.note}`);
         else eq([q.status, q.note], ['programado', ''], 'fuera de horario no se publica ni se bloquea');
       } finally { await api('DELETE', `/api/projects/${c.pol}`); } // que no queden publicaciones de este recorrido para el caso de borrar
+    }],
+    [G('memoria'), 'GET /api/editor/aprendizajes sin token da 401 y con token trae solo lo del proyecto pedido (variables ganadoras e investigación)', async () => {
+      const A = (await api('POST', '/api/projects', { name: 'Memoria A' })).j.id, B = (await api('POST', '/api/projects', { name: 'Memoria B' })).j.id;
+      const W = (p, variable, value, wins, trials, origin = 'comparacion', network = null) => sb.box.write('INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, ?, ?, ?, ?)', p, variable, value, network, wins, trials, origin);
+      for (let i = 0; i < 5; i++) { W(A, 'gancho', 'directo', 1, 1); W(B, 'gancho', 'pregunta', 1, 1); W(A, 'horario', '20:00', 1, 1, 'comparacion', 'instagram'); }
+      sb.box.write("INSERT INTO knowledge (project_id, kind, title, text) VALUES (?, 'tema', 'Ficha de A', 'texto de A')", A);
+      sb.box.write("INSERT INTO knowledge (project_id, kind, title, text) VALUES (?, 'tema', 'Ficha de B', 'texto de B')", B);
+      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${A}`, '')).status, 401, 'sin token');
+      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${A}`, 'otro')).status, 401, 'token malo');
+      const a = await sb.box.editorGet(`/api/editor/aprendizajes/${A}`);
+      eq([a.status, a.j.project_id, a.j.aprendizajes, a.j.investigacion], [200, A, [{ gancho: 'directo', horario: { instagram: '20:00' } }], ['Ficha de A: texto de A']], 'solo lo de A');
+      const b = await sb.box.editorGet(`/api/editor/aprendizajes/${B}`);
+      eq([b.j.aprendizajes, b.j.investigacion], [[{ gancho: 'pregunta' }], ['Ficha de B: texto de B']], 'solo lo de B');
+      eq((await sb.box.editorGet('/api/editor/aprendizajes/99999')).status, 404, 'proyecto inexistente');
+      const m = (await api('GET', `/api/projects/${A}/memory`)).j;
+      eq([m.ganadoras.gancho, m.aprendizajes.some((x) => x.value === 'pregunta'), Array.isArray(m.decisions), Array.isArray(m.comparisons)], ['directo', false, true, true], 'pestaña Memoria');
+      eq((await api('GET', '/api/projects/99999/memory')).status, 404, 'memoria de un proyecto inexistente');
     }],
     [G('aprobar'), 'Modo de revisión: 19 de 20 aprobados pasa a automático; con 18 de 20 sigue manual; un rechazo en automático vuelve a manual', async () => {
       const lista = (ok, mal) => [...Array(mal).fill('rechazar'), ...Array(ok).fill('aprobar')];

@@ -94,7 +94,7 @@ async function render() {
   try {
     await loadProjects();
     if (state.storage == null) state.storage = await api('/api/storage').catch(() => ({ r2: false }));
-    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
+    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
     else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
@@ -274,13 +274,13 @@ function projectHead(p) {
   return `<div class="who">${avatar(p, true)}<div style="min-width:0"><h1 class="page-title">${esc(p.name)}</h1><p class="lead">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Proyecto')}</p></div></div>
   <div class="row">${p.demo ? '<span class="chip s-pausada" title="No publica ni pauta nada">Demo · no publica</span>' : ''}${countdown(p)}${p.padron ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
 }
-const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']];
+const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['memoria', 'Memoria'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']];
 function projectView(tab) {
   const p = state.project;
   const counts = { cuentas: state.accounts.length, reels: state.reels.length, aprobar: p.review_pending, calendario: state.posts.filter((x) => x.status === 'programado').length };
   const on = tab === 'reel' ? 'reels' : tab;
   const tabs = `<nav class="tabs">${TABS.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
-  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, reel: reelDetailView, investigacion: investigacionView, ajustes: ajustesView };
+  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, memoria: memoriaView, reel: reelDetailView, investigacion: investigacionView, ajustes: ajustesView };
   return tabs + (views[tab] || resumenView)();
 }
 
@@ -321,6 +321,28 @@ function aprobarView() {
     <label class="field">Comentario <span class="small muted">(obligatorio para rechazar; sirve para aprender qué te gusta)</span><textarea class="input ap-note" rows="2" maxlength="2000" placeholder="Por ejemplo: los subtítulos tapan la cara"></textarea></label>
     <div class="row"><button class="btn primary" data-act="ap-ok">Aprobar las 3</button><button class="btn" data-act="ap-no">Rechazar lo marcado</button><button class="btn" data-act="ap-no-all">Rechazar las 3</button></div>
   </section>`).join('')}${rec}</div>`;
+}
+
+// ---------- Memoria: lo que el proyecto va aprendiendo ----------
+const MEM_VARS = { gancho: 'Gancho', subtitulos: 'Subtítulos', musica: 'Música', ritmo: 'Ritmo', largo: 'Largo', horario: 'Horario' };
+const MEM_KINDS = { promover: 'Promover', corte: 'Corte', pausa_total: 'Pausa total', rechazo: 'Rechazo', espera: 'Espera', mover: 'Mover plata' };
+function memoriaView() {
+  const M = state.memory || { decisions: [], comparisons: [], aprendizajes: [], ganadoras: {} };
+  const g = M.ganadoras || {};
+  const gan = Object.entries(g).map(([k, v]) => `<li><b>${esc(MEM_VARS[k] || k)}</b>: ${k === 'horario' ? Object.entries(v).map(([n, h]) => `${esc(n)} ${esc(h)}`).join(', ') : esc(v)}</li>`).join('');
+  const rows = (M.aprendizajes || []).map((a) => `<tr><td>${esc(MEM_VARS[a.variable] || a.variable)}</td><td>${esc(a.value)}${a.network ? ` <span class="muted small">(${esc(a.network)})</span>` : ''}</td><td>${fmt(a.wins, 1)} de ${fmt(a.trials, 1)}</td><td>${fmt(a.rate * 100)} %</td></tr>`).join('');
+  const cmp = (M.comparisons || []).map((c) => `<article class="card"><div class="card-head"><h3 class="h2">Recorte ${esc(c.clip_id)}</h3><span class="small muted">${esc(String(c.created_at).slice(0, 16))}</span></div>
+    <p class="small">Ganó la edición #${c.winner_reel_id} por ${fmt(c.diff, 3)} de puntaje. Receta: ${Object.entries(c.winner_recipe?.variables || {}).map(([k, v]) => `${esc(k)} ${esc(v)}`).join(' · ') || 'sin datos'}</p>
+    <p>${esc(c.hypothesis)}</p></article>`).join('');
+  const dec = (M.decisions || []).map((d) => `<tr><td class="small muted">${esc(d.at)}</td><td>${esc(MEM_KINDS[d.kind] || d.kind)}</td><td>${esc(d.target)}</td><td>${esc(d.reason)}</td></tr>`).join('');
+  return `<div class="ap">
+    <section class="card"><h2 class="h2">Lo que está ganando</h2>
+      ${gan ? `<ul>${gan}</ul><p class="muted small">Esto es lo que el editor usa al armar las próximas ediciones. Una variable entra con 5 intentos o más.</p>` : '<p class="muted">Todavía no hay nada ganador: una variable necesita 5 intentos. Se junta a medida que Gero aprueba o rechaza recortes y las 3 versiones de cada uno se comparan.</p>'}
+    </section>
+    <section class="card"><h2 class="h2">Aprendizajes</h2>${rows ? `<table class="list"><thead><tr><th>Variable</th><th>Valor</th><th>Victorias</th><th>Tasa</th></tr></thead><tbody>${rows}</tbody></table><p class="muted small">La opinión de Gero pesa 3 veces.</p>` : '<p class="muted">Sin aprendizajes todavía.</p>'}</section>
+    <section><h2 class="h2">Comparaciones de recortes</h2>${cmp || '<p class="muted">Cuando las 3 versiones de un recorte tienen 48 horas de datos, se comparan acá.</p>'}</section>
+    <section class="card"><h2 class="h2">Decisiones del agente</h2>${dec ? `<table class="list"><tbody>${dec}</tbody></table>` : '<p class="muted">El agente de marketing todavía no tomó decisiones.</p>'}</section>
+  </div>`;
 }
 
 // Datos fijos del cálculo (no se tocan desde la pantalla): CPM de Meta en Argentina en campaña con públicos chicos,

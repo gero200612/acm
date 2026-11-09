@@ -20,6 +20,8 @@ export function normalizarAprendizajes(a) {
   const lista = Array.isArray(a) ? a : a && typeof a === 'object' ? [a] : [];
   const out = {};
   for (const o of lista) for (const k of [...DIMS, 'horario']) if (o && typeof o[k] === 'string' && o[k].trim()) out[k] = o[k].trim();
+  // el horario viene por red ({instagram: '20:00'}); no sirve para armar recetas, pero el elector de momentos lo lee
+  for (const o of lista) if (o && o.horario && typeof o.horario === 'object' && Object.keys(o.horario).length) out.horario = { ...o.horario };
   return out;
 }
 

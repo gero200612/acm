@@ -266,10 +266,10 @@
 - `learnings(project_id, variable, value, network, wins, trials, origin, updated_at)`: cada comparación suma `trials` a las variables de las 3 y `wins` a las de la ganadora. `origin='opinion_dueno'` pesa 3×.
 - `winningVariables(projectId) -> {gancho?, subtitulos?, musica?, ritmo?, largo?, horario?:{[network]:hora}}`: se considera ganadora una variable con `trials ≥ 5` y la mayor tasa de victorias. Esto es lo que lee el editor.
 
-- [ ] Caso: con 3 hermanas y datos simulados, `compareSiblings` elige la de mayor score y actualiza `learnings`.
-- [ ] Caso: un 👎 de Gero cuenta 3×. `winningVariables` no devuelve nada con menos de 5 intentos.
-- [ ] Caso: `GET /api/editor/aprendizajes/:id` sin token da 401, y con token devuelve solo los del proyecto pedido.
-- [ ] Implementar. Commit.
+- [x] Caso: con 3 hermanas y datos simulados, `compareSiblings` elige la de mayor score y actualiza `learnings`.
+- [x] Caso: un 👎 de Gero cuenta 3×. `winningVariables` no devuelve nada con menos de 5 intentos.
+- [x] Caso: `GET /api/editor/aprendizajes/:id` sin token da 401, y con token devuelve solo los del proyecto pedido.
+- [x] Implementar. Commit.
 
 ### Task 13: Telegram y despliegue
 
@@ -282,7 +282,7 @@
 - `alert(kind, projectId, text)`: tipos `falla|tope|falta_material|cuenta|editor_atrasado|red_bloqueada`. Deduplica el mismo tipo y proyecto durante 6 h.
 - `dailySummary(projectId) -> string`: lo publicado, lo gastado y lo que queda, el ganador y por qué, y lo aprendido.
 
-- [ ] Caso: dos alertas iguales seguidas mandan 1 mensaje (el simulador cuenta los envíos a Telegram). El resumen tiene los 5 bloques.
-- [ ] Caso: una cola del editor con un trabajo de más de 24 h genera `editor_atrasado`.
-- [ ] Documentar cómo levantar el Estudio y el orquestador en Contabo. Desplegarlos queda a cargo de Gero (el servidor todavía no está). Commit y push.
+- [x] Caso: dos alertas iguales seguidas mandan 1 mensaje (el simulador cuenta los envíos a Telegram). El resumen tiene los 5 bloques.
+- [x] Caso: una cola del editor con un trabajo de más de 24 h genera `editor_atrasado`.
+- [x] Documentar cómo levantar el Estudio y el orquestador en Contabo. Desplegarlos queda a cargo de Gero (el servidor todavía no está). Commit y push.
 

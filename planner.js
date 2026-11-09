@@ -2,6 +2,7 @@
 // planDay es puro (se prueba en el banco); planProject lo conecta con la base. Las reglas duras viven en rules.js (scheduleBlocked).
 import { scheduleBlocked, NETWORK_CAPS, youtubeShare, WINDOW } from './rules.js';
 import { addAlert } from './alerts.js';
+import { winningVariables } from './memory.js';
 
 const LIVE = new Set(['programado', 'publicando', 'publicado']);
 const GRID = 15; // minutos
@@ -128,14 +129,13 @@ export function initPlanner(db) {
 // lo que dicen los aprendizajes del proyecto: mejor horario por red y puntaje (0..1) por valor de cada variable
 function learningsOf(db, projectId) {
   const rows = db.prepare('SELECT variable, value, network, wins, trials FROM learnings WHERE project_id = ?').all(projectId);
-  const horario = {}, best = {}, valores = {};
+  const valores = {};
   for (const r of rows) {
-    const rate = r.trials > 0 ? r.wins / r.trials : 0;
-    if (r.variable === 'horario' && r.network && /^\d{2}:\d{2}$/.test(r.value)) { if (!(r.network in best) || rate > best[r.network]) { best[r.network] = rate; horario[r.network] = r.value; } continue; }
+    if (r.variable === 'horario') continue; // el horario sale de las variables ganadoras (memoria)
     const v = (valores[r.variable] ||= {}); const t = (v[r.value] ||= { w: 0, n: 0 }); t.w += r.wins; t.n += r.trials;
   }
   for (const k of Object.keys(valores)) for (const x of Object.keys(valores[k])) valores[k][x] = (valores[k][x].w + 1) / (valores[k][x].n + 2); // suavizado: sin datos vale 0,5
-  return { horario, valores };
+  return { horario: winningVariables(db, projectId).horario || {}, valores };
 }
 
 // Reparte el día de un proyecto y guarda las publicaciones. now = 'YYYY-MM-DD HH:MM' local. Devuelve lo programado.
