@@ -18,6 +18,8 @@ import { r2Ready, putUrl, getUrl, head as r2Head, remove as r2Remove, download a
 import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, withinWindow, NETWORK_CAPS, reviewMode } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
+import { initAlerts } from './alerts.js';
+import { initPlanner, planProject } from './planner.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -30,6 +32,10 @@ if (!PASSWORD) { console.error('Falta ACM_PASSWORD'); process.exit(1); }
 const TZ = process.env.ACM_TZ || 'America/Argentina/Buenos_Aires';
 const tzFmt = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 const localNow = (offsetMin = 0) => tzFmt.format(new Date(Date.now() + offsetMin * 6e4)).replace(',', '');
+// planificador del día: idempotente, así que se puede llamar cuantas veces haga falta (nunca rompe quien lo llama)
+function replanificar(projectId) {
+  try { return planProject(db, projectId, { now: localNow(), tz: TZ }); } catch (e) { console.error('planificador:', e.message); return []; }
+}
 const SECRET = process.env.ACM_SECRET || crypto.createHash('sha256').update('acm:' + PASSWORD).digest('hex');
 const vault = makeVault(SECRET);
 
@@ -102,6 +108,8 @@ CREATE TABLE IF NOT EXISTS clip_reviews (
 CREATE INDEX IF NOT EXISTS clip_reviews_project ON clip_reviews(project_id, id);`);
 initTrace(db);
 initKnowledge(db);
+initAlerts(db);
+initPlanner(db);
 // campañas: el presupuesto total del proyecto (pauta.budget) se reparte en campañas con sus cuentas y su contenido
 db.exec(`CREATE TABLE IF NOT EXISTS campaigns (
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, name TEXT NOT NULL,
@@ -250,6 +258,7 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
     if (cover) fs.rm(path.join(UPLOADS, cover), { force: true }, () => {});
     return res.json(ya);
   }
+  if (review === 'aprobado') replanificar(crudo.project_id);
   res.json(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
 });
 
@@ -628,6 +637,13 @@ function scheduleCheck({ id, reel_id, account_id, scheduled_at }) {
     { siblings, sameReelSameNetwork: false, dayCount, networkCap: NETWORK_CAPS[network], tz: TZ });
 }
 const schedAt = (v) => { const m = String(v || '').trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/); return m ? `${m[1]} ${m[2]}` : ''; };
+// publicaciones que el planificador dejó para un día (por defecto hoy)
+app.get('/api/projects/:id/plan', (req, res) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : localNow().slice(0, 10);
+  res.json(all(`SELECT p.id, p.reel_id, p.account_id, p.scheduled_at, p.status, r.title AS reel_title, a.network, a.handle
+    FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
+    WHERE p.project_id = ? AND r.kind = 'listo' AND r.clip_id IS NOT NULL AND substr(p.scheduled_at, 1, 10) = ? ORDER BY p.scheduled_at, p.id`, req.params.id, day));
+});
 app.get('/api/projects/:id/posts', (req, res) => res.json(all(`
   SELECT p.*, r.title AS reel_title, r.file AS reel_file, a.network, a.handle
   FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
@@ -982,6 +998,7 @@ app.post('/api/clips/:clip_id/review', (req, res) => {
   run('INSERT INTO clip_reviews (clip_id, project_id, decision, rechazar_ids, comentario) VALUES (?, ?, ?, ?, ?)', req.params.clip_id, projectId, decision, JSON.stringify([...rejected]), note);
   for (const { r, wins } of affected) for (const [variable, value] of Object.entries(recipeVars(parseJson(r.recipe))))
     run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, NULL, ?, 1, 'opinion_dueno')", projectId, variable, value, wins);
+  if (affected.some((x) => x.wins)) replanificar(projectId);
   const mode = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
   const next = reviewMode(mode, all('SELECT decision FROM clip_reviews WHERE id IN (SELECT max(id) FROM clip_reviews WHERE project_id = ? GROUP BY clip_id) ORDER BY id DESC LIMIT 20', projectId).map((x) => x.decision));
   if (next !== mode) run('UPDATE projects SET review_mode = ? WHERE id = ?', next, projectId);
@@ -1043,6 +1060,16 @@ async function tick() {
 }
 // ACM_TICK_MS: la copia aislada del banco de pruebas lo baja para no esperar 30 s
 if (process.env.ACM_SCHEDULER !== 'off') { setInterval(tick, Number(process.env.ACM_TICK_MS) || 30000); setTimeout(tick, 3000); }
+
+// reparto diario: a las 07:30 (hora local) y, si el servidor arranca más tarde, al arrancar; idempotente
+let planeadoEl = '';
+function repartoDelDia() {
+  const now = localNow(), day = now.slice(0, 10);
+  if (planeadoEl === day || now.slice(11, 16) < '07:30') return;
+  planeadoEl = day;
+  for (const p of all('SELECT id FROM projects WHERE demo = 0')) replanificar(p.id);
+}
+if (process.env.ACM_SCHEDULER !== 'off') { setInterval(repartoDelDia, 60e3); setTimeout(repartoDelDia, 5000); }
 
 // al arrancar completa vectores pendientes (la copia del banco lo hace enseguida para reproducir el orden de producción: primero este, después las importaciones)
 setTimeout(fillVectors, Number(process.env.ACM_FILL_MS) || 5000);

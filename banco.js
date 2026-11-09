@@ -11,10 +11,26 @@ import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS } from './rules.js';
 import { embed } from './knowledge.js';
+import { DatabaseSync } from 'node:sqlite';
+import { planDay, planProject, initPlanner } from './planner.js';
+import { initAlerts } from './alerts.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (cond, what) => { if (!cond) throw new Error(what); };
+
+// cuentas de IG y ediciones aprobadas en recortes de a 3 hermanas (para los casos del planificador)
+function planFixture(nAccounts, nClips) {
+  const accounts = Array.from({ length: nAccounts }, (_, i) => ({ id: i + 1, network: 'instagram', status: 'conectada', posts_per_day: 3 }));
+  const bank = Array.from({ length: nClips * 3 }, (_, i) => ({ id: 100 + i, clip_id: `clip${Math.floor(i / 3)}`, review: 'aprobado', expires_at: '', recipe: null }));
+  return { accounts, bank };
+}
+// ¿las hermanas de cada recorte están a 3 h o más entre sí?
+function siblingsOk(plan, bank) {
+  const clip = new Map(bank.map((e) => [e.id, e.clip_id]));
+  const t = (at) => Number(at.slice(11, 13)) * 60 + Number(at.slice(14, 16));
+  return plan.every((a) => plan.every((b) => a === b || clip.get(a.reel_id) !== clip.get(b.reel_id) || a.scheduled_at.slice(0, 10) !== b.scheduled_at.slice(0, 10) || Math.abs(t(a.scheduled_at) - t(b.scheduled_at)) >= 180));
+}
 
 function cases(video, sim) {
   const IG = { pageId: 'PAGE1', pageAccessToken: 'EAAprueba1234567', instagramBusinessId: 'IG1' };
@@ -129,6 +145,63 @@ function cases(video, sim) {
       eq(scheduleBlocked(p, { siblings: [], dayCount: 14, networkCap: NETWORK_CAPS.tiktok }), null, 'debajo del tope');
       eq(NETWORK_CAPS, { instagram: 100, facebook: 30, tiktok: 15, youtube: null }, 'topes');
       eq(youtubeShare(100, 8), 12, 'cuota de YouTube');
+    }],
+    ['Circuito', 'Planificador: 7 cuentas de IG y 21 ediciones, 3 por cuenta, en horario, sin repetir edición y con las hermanas a 3 h', async () => {
+      const { accounts, bank } = planFixture(7, 7);
+      const plan = planDay({ accounts, bank, existingPosts: [], date: '2026-12-01', now: '2026-12-01 07:30' });
+      eq(plan.length, 21, 'publicaciones');
+      for (const a of accounts) eq(plan.filter((p) => p.account_id === a.id).length, 3, `cuenta ${a.id}`);
+      yes(plan.every((p) => withinWindow(p.scheduled_at)), 'fuera de 08:00-23:00');
+      eq(new Set(plan.map((p) => p.reel_id)).size, 21, 'edición repetida en IG');
+      yes(siblingsOk(plan, bank), 'hermanas a menos de 3 h');
+    }],
+    ['Circuito', 'Planificador: correr dos veces con una edición nueva en el medio agrega solo esa, sin mover ni duplicar', async () => {
+      const { accounts, bank } = planFixture(7, 7);
+      const first = planDay({ accounts, bank: bank.slice(0, 18), existingPosts: [], date: '2026-12-01', now: '2026-12-01 07:30' });
+      eq(first.length, 18, 'primera tanda');
+      const again = planDay({ accounts, bank: bank.slice(0, 18), existingPosts: first.map((p) => ({ ...p, status: 'programado' })), date: '2026-12-01', now: '2026-12-01 07:31' });
+      eq(again, [], 'repetir sin novedades no agrega nada');
+      const nuevo = planDay({ accounts, bank: bank.slice(0, 19), existingPosts: first.map((p) => ({ ...p, status: 'programado' })), date: '2026-12-01', now: '2026-12-01 07:32' });
+      eq(nuevo.map((p) => p.reel_id), [bank[18].id], 'solo la edición nueva');
+      const todo = [...first, ...nuevo];
+      eq(new Set(todo.map((p) => `${p.reel_id}|${p.account_id}`)).size, 19, 'sin duplicados');
+      yes(siblingsOk(todo, bank), 'hermanas a menos de 3 h después de sumar la nueva');
+    }],
+    ['Circuito', 'Planificador: 10 ediciones para 21 lugares programa 10 sin repetir; vacío dos días seguidos alerta falta_material una vez', async () => {
+      const { accounts, bank } = planFixture(7, 4);
+      const plan = planDay({ accounts, bank: bank.slice(0, 10), existingPosts: [], date: '2026-12-01', now: '2026-12-01 07:30' });
+      eq(plan.length, 10, 'programadas'); eq(new Set(plan.map((p) => p.reel_id)).size, 10, 'repetidas');
+      const db = new DatabaseSync(':memory:');
+      db.exec(`PRAGMA foreign_keys = ON; CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT, demo INTEGER DEFAULT 0);
+        CREATE TABLE accounts (id INTEGER PRIMARY KEY, project_id INTEGER, network TEXT, status TEXT, posts_per_day INTEGER DEFAULT 3);
+        CREATE TABLE reels (id INTEGER PRIMARY KEY, project_id INTEGER, kind TEXT, clip_id TEXT, review TEXT, expires_at TEXT DEFAULT '', recipe TEXT, archived_at TEXT DEFAULT '');
+        CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INTEGER, reel_id INTEGER, account_id INTEGER, scheduled_at TEXT, status TEXT DEFAULT 'programado');
+        CREATE TABLE learnings (project_id INTEGER, variable TEXT, value TEXT, network TEXT, wins REAL, trials REAL);
+        INSERT INTO projects (id, name) VALUES (1, 'Club'); INSERT INTO accounts (project_id, network, status) VALUES (1, 'instagram', 'conectada');`);
+      initPlanner(db); initAlerts(db);
+      const alertas = () => db.prepare("SELECT count(*) n FROM alerts WHERE kind = 'falta_material'").get().n;
+      planProject(db, 1, { now: '2026-12-01 07:30' }); eq(alertas(), 0, 'el primer día vacío no alerta');
+      planProject(db, 1, { now: '2026-12-01 09:00' }); eq(alertas(), 0, 'repetir el mismo día no cuenta como otro');
+      planProject(db, 1, { now: '2026-12-02 07:30' }); eq(alertas(), 1, 'dos días seguidos vacíos alertan');
+      planProject(db, 1, { now: '2026-12-02 10:00' }); eq(alertas(), 1, 'un aviso por día');
+      planProject(db, 1, { now: '2026-12-04 07:30' }); eq(alertas(), 1, 'con un día de por medio no alerta');
+    }],
+    ['Circuito', 'Planificador: no programa reels vencidos ni sin aprobar, ni en cuentas no conectadas', async () => {
+      const { accounts, bank } = planFixture(2, 2);
+      bank[0].expires_at = '2026-12-01 06:00'; bank[1].review = 'pendiente'; bank[2].expires_at = '2026-12-01 23:59';
+      accounts[1].status = 'pausada';
+      const plan = planDay({ accounts, bank, existingPosts: [], date: '2026-12-01', now: '2026-12-01 07:30' });
+      yes(!plan.some((p) => p.reel_id === bank[0].id), 'programó un vencido'); yes(!plan.some((p) => p.reel_id === bank[1].id), 'programó uno sin aprobar');
+      yes(plan.some((p) => p.reel_id === bank[2].id), 'el que vence a la noche sí va');
+      yes(plan.every((p) => p.account_id === accounts[0].id), 'usó una cuenta no conectada');
+    }],
+    ['Circuito', 'Planificador: YouTube respeta su cuota por proyecto y usa el mejor horario aprendido', async () => {
+      const yt = [{ id: 1, network: 'youtube', status: 'conectada', posts_per_day: 3 }];
+      const { bank } = planFixture(1, 3);
+      const plan = planDay({ accounts: yt, bank, existingPosts: [], date: '2026-12-01', now: '2026-12-01 07:30', youtubeQuota: 8, activeProjects: 4 });
+      eq(plan.length, 2, 'cuota 8/4 = 2');
+      const ig = [{ id: 1, network: 'instagram', status: 'conectada', posts_per_day: 1 }];
+      eq(planDay({ accounts: ig, bank, existingPosts: [], learnings: { horario: { instagram: '20:30' } }, date: '2026-12-01', now: '2026-12-01 07:30' })[0].scheduled_at, '2026-12-01 20:30', 'horario aprendido');
     }],
   ];
 }

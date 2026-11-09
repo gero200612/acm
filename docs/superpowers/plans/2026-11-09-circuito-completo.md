@@ -186,12 +186,12 @@
 - Es idempotente: si se vuelve a correr con `existingPosts`, solo agrega lo que falta y nunca mueve ni duplica lo ya programado.
 - Saltea vencidos (`expires_at < now`) y no aprobados.
 
-- [ ] Caso: con 7 cuentas IG y 21 ediciones aprobadas, cada cuenta queda con 3, todas las publicaciones caen entre 8 y 23 h y ninguna repite edición en IG.
-- [ ] Caso: las 3 hermanas de un recorte en IG quedan separadas ≥ 3 h.
-- [ ] Caso de **Review Focus 2**: correr dos veces seguidas con una edición nueva entre medio agrega solo esa, sin duplicar ni mover lo anterior.
-- [ ] Caso: con 10 ediciones para 21 lugares programa 10 y no repite ninguna. Con banco vacío dos días seguidos se crea una alerta `falta_material`.
-- [ ] Caso: un reel vencido no se programa.
-- [ ] Implementar. Commit.
+- [x] Caso: con 7 cuentas IG y 21 ediciones aprobadas, cada cuenta queda con 3, todas las publicaciones caen entre 8 y 23 h y ninguna repite edición en IG.
+- [x] Caso: las 3 hermanas de un recorte en IG quedan separadas ≥ 3 h.
+- [x] Caso de **Review Focus 2**: correr dos veces seguidas con una edición nueva entre medio agrega solo esa, sin duplicar ni mover lo anterior.
+- [x] Caso: con 10 ediciones para 21 lugares programa 10 y no repite ninguna. Con banco vacío dos días seguidos se crea una alerta `falta_material`.
+- [x] Caso: un reel vencido no se programa.
+- [x] Implementar. Commit.
 
 ---
 
