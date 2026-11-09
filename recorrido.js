@@ -457,7 +457,7 @@ export function recorridoCases(sb) {
       eq((await post({ reel_id: c.crudo, estado: 'listo' })).status, 200, 'listo');
     }],
     [G('editor'), 'POST /api/editor/edicion con token crea el reel listo con source_id, clip_id y review pendiente', async () => {
-      const b = { crudo_id: c.crudo, clip_id: 'clip-abc', moment: { inicio_s: 1, fin_s: 9 }, recipe: { id: 'rapido' }, review: 'aprobado', edicion_id: 501, caption: 'Un corte', hashtags: 'club, deporte', file_url: `${sb.editor.base}/video.mp4`, cover_url: `${sb.editor.base}/portada.jpg`, duration: 8, expires_at: '2026-12-01 12:00' };
+      const b = { crudo_id: c.crudo, clip_id: 'clip-abc', moment: { inicio_s: 1, fin_s: 9 }, recipe: { id: 'rapido' }, review: 'aprobado', edicion_id: "0a1b2c3d-0000-4000-8000-000000000501", caption: 'Un corte', hashtags: 'club, deporte', file_url: `${sb.editor.base}/video.mp4`, cover_url: `${sb.editor.base}/portada.jpg`, duration: 8, expires_at: '2026-12-01 12:00' };
       const r = await sb.box.editorApi('/api/editor/edicion', b);
       eq(r.status, 200, `entrega (${r.j?.error})`);
       eq([r.j.kind, r.j.source_id, r.j.clip_id, r.j.review, r.j.storage, r.j.expires_at], ['listo', c.crudo, 'clip-abc', 'pendiente', 'r2', '2026-12-01 12:00'], 'reel creado');
@@ -471,24 +471,24 @@ export function recorridoCases(sb) {
       eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, review: 'x' })).status, 400, 'revisión inválida');
     }],
     [G('editor'), 'Un reintento con el mismo edicion_id devuelve el reel ya creado (200), sin duplicar', async () => {
-      const b = { crudo_id: c.crudo, clip_id: 'clip-abc', file_url: `${sb.editor.base}/video.mp4`, edicion_id: 501 };
+      const b = { crudo_id: c.crudo, clip_id: 'clip-abc', file_url: `${sb.editor.base}/video.mp4`, edicion_id: "0a1b2c3d-0000-4000-8000-000000000501" };
       const antes = (await api('GET', `/api/projects/${c.p}/reels`)).j.length;
       const r = await sb.box.editorApi('/api/editor/edicion', b);
-      eq([r.status, r.j?.editor_edition_id], [200, 501], 'reintento');
+      eq([r.status, r.j?.editor_edition_id], [200, '0a1b2c3d-0000-4000-8000-000000000501'], 'reintento');
       eq((await api('GET', `/api/projects/${c.p}/reels`)).j.length, antes, 'no se duplicó');
     }],
     [G('editor'), 'Con revisión automática se acepta aprobado; rechazado queda rechazado', async () => {
       eq((await api('PUT', `/api/projects/${c.p}`, { review_mode: 'auto' })).status, 200, 'modo auto');
       const mk = (review, edicion_id) => sb.box.editorApi('/api/editor/edicion', { crudo_id: c.crudo, clip_id: 'clip-r', review, edicion_id, file_url: `${sb.editor.base}/video.mp4` });
-      eq((await mk('aprobado', 601)).j?.review, 'aprobado', 'aprobado en auto');
-      eq((await mk('rechazado', 602)).j?.review, 'rechazado', 'rechazado');
-      eq((await mk('pendiente', 603)).j?.review, 'pendiente', 'pendiente');
+      eq((await mk('aprobado', "0a1b2c3d-0000-4000-8000-000000000601")).j?.review, 'aprobado', 'aprobado en auto');
+      eq((await mk('rechazado', "0a1b2c3d-0000-4000-8000-000000000602")).j?.review, 'rechazado', 'rechazado');
+      eq((await mk('pendiente', "0a1b2c3d-0000-4000-8000-000000000603")).j?.review, 'pendiente', 'pendiente');
       await api('PUT', `/api/projects/${c.p}`, { review_mode: 'manual' });
     }],
     [G('editor'), 'SSRF: un file_url o cover_url de otro servidor da 400 y ACM no lo pide', async () => {
       const ajeno = await new Promise((res) => { const hits = []; const s = http.createServer((q, w) => { hits.push(q.url); w.end('x'); }); s.listen(0, '127.0.0.1', () => res({ s, hits, base: `http://127.0.0.1:${s.address().port}` })); });
       try {
-        const b = { crudo_id: c.crudo, clip_id: 'clip-x', edicion_id: 701, file_url: `${ajeno.base}/video.mp4` };
+        const b = { crudo_id: c.crudo, clip_id: 'clip-x', edicion_id: "0a1b2c3d-0000-4000-8000-000000000701", file_url: `${ajeno.base}/video.mp4` };
         eq((await sb.box.editorApi('/api/editor/edicion', b)).status, 400, 'file_url ajeno');
         eq((await sb.box.editorApi('/api/editor/edicion', { ...b, file_url: `${sb.editor.base}/video.mp4`, cover_url: `${ajeno.base}/p.jpg` })).status, 400, 'cover_url ajeno');
         eq(ajeno.hits, [], 'ACM no tendría que haber pedido nada al servidor ajeno');

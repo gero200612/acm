@@ -81,7 +81,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
         R.edicion(e.id, { revision: rev });
         await acm.edicion({
           crudo_id: t.reel_id, clip_id: m.clip_id, moment: { inicio_s: m.inicio_s, fin_s: m.fin_s, ...m.datos }, recipe: e.receta,
-          edicion_id: e.id, caption: rev.caption ?? m.datos.caption ?? '', hashtags: rev.hashtags ?? m.datos.hashtags ?? '',
+          edicion_id: e.uuid, caption: rev.caption ?? m.datos.caption ?? '', hashtags: rev.hashtags ?? m.datos.hashtags ?? '',
           file_url: `${publicUrl.replace(/\/+$/, '')}/entregas/${e.resultado.archivo_local}`,
           cover_url: e.resultado.portada_local ? `${publicUrl.replace(/\/+$/, '')}/entregas/${e.resultado.portada_local}` : '',
           duration: e.resultado.duracion_s, review: rev.review || 'pendiente',

@@ -87,8 +87,10 @@ for (const [c, def] of [['kind', "TEXT DEFAULT 'club'"], ['ads_networks', `TEXT 
 for (const [c, def] of [['clip_id', 'TEXT'], ['moment', 'TEXT'], ['recipe', 'TEXT'], ['review', "TEXT DEFAULT 'pendiente'"], ['expires_at', "TEXT DEFAULT ''"], ['cover', "TEXT DEFAULT ''"]])
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
 if (!cols('reels').includes('status_detail')) db.exec("ALTER TABLE reels ADD COLUMN status_detail TEXT DEFAULT ''");
-if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD COLUMN editor_edition_id INTEGER');
-db.exec('CREATE UNIQUE INDEX IF NOT EXISTS reels_editor_edition ON reels(editor_edition_id) WHERE editor_edition_id IS NOT NULL');
+if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD COLUMN editor_edition_id TEXT');
+db.exec('DROP INDEX IF EXISTS reels_editor_edition');
+// la clave de idempotencia es un UUID de la edición del editor, y vale dentro de su crudo
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS reels_editor_edition2 ON reels(source_id, editor_edition_id) WHERE editor_edition_id IS NOT NULL');
 initTrace(db);
 initKnowledge(db);
 // campañas: el presupuesto total del proyecto (pauta.budget) se reparte en campañas con sus cuentas y su contenido
@@ -194,9 +196,9 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
   const crudo = get("SELECT * FROM reels WHERE id = ? AND kind = 'crudo'", Number(b.crudo_id));
   if (!crudo) return res.status(404).json({ error: 'No existe ese crudo' });
   if (!String(b.clip_id || '').trim()) return res.status(400).json({ error: 'Falta el clip_id' });
-  const eid = Number.isInteger(Number(b.edicion_id)) && Number(b.edicion_id) > 0 ? Number(b.edicion_id) : null;
+  const eid = /^[0-9a-f-]{8,64}$/i.test(String(b.edicion_id || '')) ? String(b.edicion_id) : null;
   // un reintento del editor no duplica: devuelve el reel que ya se creó
-  if (eid) { const ya = get('SELECT *, 0 AS posts FROM reels WHERE editor_edition_id = ?', eid); if (ya) return res.json(ya); }
+  if (eid) { const ya = get('SELECT *, 0 AS posts FROM reels WHERE editor_edition_id = ? AND source_id = ?', eid, crudo.id); if (ya) return res.json(ya); }
   if (!deEditor(b.file_url)) return res.status(400).json({ error: 'El link del video (file_url) tiene que ser del editor' });
   if (b.cover_url && !deEditor(b.cover_url)) return res.status(400).json({ error: 'El link de la portada (cover_url) tiene que ser del editor' });
   let review = b.review === undefined ? 'pendiente' : b.review;
@@ -226,9 +228,19 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
   const size = storage === 'local' ? fs.statSync(path.join(UPLOADS, file)).size : 0;
   const dur = Number(b.duration) > 0 ? Number(b.duration) : (m.duration ?? null);
   const title = String(b.title || '').trim() || `${crudo.title} · ${String(b.clip_id).slice(0, 12)}`;
-  const r = run("INSERT INTO reels (project_id, title, caption, hashtags, file, original_name, size, duration, width, height, kind, source_id, storage, clip_id, moment, recipe, review, expires_at, cover, editor_edition_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'borrador')",
+  let r;
+  try {
+  r = run("INSERT INTO reels (project_id, title, caption, hashtags, file, original_name, size, duration, width, height, kind, source_id, storage, clip_id, moment, recipe, review, expires_at, cover, editor_edition_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'borrador')",
     crudo.project_id, title, String(b.caption || ''), tags(b.hashtags), file, `${title}.mp4`, size, dur, m.width ?? null, m.height ?? null, crudo.id, storage,
     String(b.clip_id), json(b.moment), json(b.recipe), review, String(b.expires_at || ''), cover, eid);
+  } catch (e) {
+    // dos reintentos a la vez: el segundo pierde contra el índice único, borra lo que subió y devuelve el reel del primero
+    const ya = eid && get('SELECT *, 0 AS posts FROM reels WHERE editor_edition_id = ? AND source_id = ?', eid, crudo.id);
+    if (!ya) throw e;
+    if (storage === 'r2') await r2Remove(file).catch(() => {}); else fs.rm(path.join(UPLOADS, file), { force: true }, () => {});
+    if (cover) fs.rm(path.join(UPLOADS, cover), { force: true }, () => {});
+    return res.json(ya);
+  }
   res.json(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
 });
 

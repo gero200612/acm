@@ -1,5 +1,6 @@
 // Base del orquestador (node:sqlite). Un trabajo es un crudo; de cada crudo salen momentos, y de cada momento, ediciones (hasta 3 recetas).
 import { DatabaseSync } from 'node:sqlite';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -20,9 +21,10 @@ CREATE TABLE IF NOT EXISTS momentos (
 CREATE TABLE IF NOT EXISTS ediciones (
   id INTEGER PRIMARY KEY, trabajo_id INTEGER NOT NULL REFERENCES trabajos(id) ON DELETE CASCADE,
   momento_id INTEGER NOT NULL REFERENCES momentos(id) ON DELETE CASCADE, idx INTEGER NOT NULL,
-  receta TEXT NOT NULL, estado TEXT NOT NULL DEFAULT 'pendiente', resultado TEXT, revision TEXT, error TEXT DEFAULT '',
+  uuid TEXT NOT NULL DEFAULT '', receta TEXT NOT NULL, estado TEXT NOT NULL DEFAULT 'pendiente', resultado TEXT, revision TEXT, error TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now')), UNIQUE (momento_id, idx));
 `);
+  if (!db.prepare('PRAGMA table_info(ediciones)').all().some((c) => c.name === 'uuid')) db.exec("ALTER TABLE ediciones ADD COLUMN uuid TEXT NOT NULL DEFAULT ''");
   return db;
 }
 
@@ -59,7 +61,7 @@ export function repo(db) {
     ediciones: (tid) => all('SELECT * FROM ediciones WHERE trabajo_id = ? ORDER BY momento_id, idx', tid)
       .map((e) => ({ ...e, receta: P(e.receta), resultado: P(e.resultado), revision: P(e.revision) })),
     guardarEdicion(tid, momento_id, idx, receta) {
-      return Number(run('INSERT INTO ediciones (trabajo_id, momento_id, idx, receta) VALUES (?, ?, ?, ?)', tid, momento_id, idx, J(receta)).lastInsertRowid);
+      return Number(run('INSERT INTO ediciones (trabajo_id, momento_id, idx, receta, uuid) VALUES (?, ?, ?, ?, ?)', tid, momento_id, idx, J(receta), crypto.randomUUID()).lastInsertRowid);
     },
     edicion(id, campos) {
       const k = Object.keys(campos);
