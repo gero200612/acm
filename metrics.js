@@ -3,6 +3,7 @@
 // Los campos spend, impressions y target_reach los completa el lado de la pauta (Tareas 10 y 11); acá quedan en 0.
 import { getTikTokToken, getGoogleToken, bases } from './connections.js';
 import { mask } from './trace.js';
+import { addAlert } from './alerts.js';
 
 export const DEFAULT_WEIGHTS = { target_reach_per_usd: 0.5, impressions_per_usd: 0.2, completion: 0.2, engagement: 0.1 };
 export const WEIGHT_KEYS = Object.keys(DEFAULT_WEIGHTS);
@@ -134,22 +135,29 @@ export function score(metrics, weights = DEFAULT_WEIGHTS) {
 export async function readDue(db, vault, { since } = {}) {
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(since || '')) throw new Error("readDue pide 'since' en hora local 'YYYY-MM-DD HH:MM'");
   const cutoff = since;
-  const posts = db.prepare(`SELECT po.id, po.external_id, po.account_id, a.network, a.creds, po.network_video_id, r.duration FROM posts po
+  const posts = db.prepare(`SELECT po.id, po.project_id, po.external_id, po.account_id, a.network, a.creds, po.network_video_id, r.duration FROM posts po
     JOIN accounts a ON a.id = po.account_id JOIN projects p ON p.id = po.project_id JOIN reels r ON r.id = po.reel_id
     WHERE po.status = 'publicado' AND po.external_id != '' AND p.demo = 0 AND po.published_at >= ? ORDER BY po.id`).all(cutoff);
   const ins = db.prepare('INSERT INTO post_metrics (post_id, views, reach, avg_watch_s, completion, likes, comments, shares, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
   let read = 0, failed = 0;
+  const porRed = new Map(); // red -> { ok, mal, proyectos }
   for (const po of posts) {
+    const rr = porRed.get(po.network) || porRed.set(po.network, { ok: 0, mal: 0, proyectos: new Set(), msg: '' }).get(po.network);
     try {
       const creds = vault.open(po.creds);
       const save = (fresh) => db.prepare('UPDATE accounts SET creds = ? WHERE id = ?').run(vault.seal({ ...vault.open(db.prepare('SELECT creds FROM accounts WHERE id = ?').get(po.account_id).creds), ...fresh }), po.account_id);
       const m = await readMetrics(po.network, creds, po.external_id, { duration: po.duration, save, videoId: po.network_video_id || '', onVideoId: (v) => db.prepare('UPDATE posts SET network_video_id = ? WHERE id = ?').run(v, po.id) });
       ins.run(po.id, m.views, m.reach, m.avg_watch_s, m.completion, m.likes, m.comments, m.shares, m.note || '');
-      read++;
+      read++; rr.ok++;
     } catch (e) {
+      rr.mal++; rr.proyectos.add(po.project_id); rr.msg = mask(e.message, []).slice(0, 150);
       ins.run(po.id, null, null, null, null, null, null, null, mask(e.message, []).slice(0, 300));
       failed++;
     }
+  }
+  // si falló la lectura de todas las publicaciones de una red, algo anda mal con la red o la cuenta: aviso
+  for (const [red, rr] of porRed) if (rr.mal && !rr.ok) for (const pid of rr.proyectos) {
+    try { addAlert(db, 'falla', pid, `No se pudieron leer las métricas de ${red} (${rr.mal} publicaciones): ${rr.msg}`); } catch {}
   }
   return { read, failed };
 }

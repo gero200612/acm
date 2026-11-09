@@ -594,6 +594,22 @@ export function recorridoCases(sb) {
         eq((await box.api('GET', `/api/projects/${p}/reels`)).j[0].status, 'en_cola', 'sigue en cola, sin error');
       } finally { await box.stop(); }
     }],
+    [G('editor'), 'Cuando el editor avisa «error» o ACM no logra mandarle el crudo, queda un aviso `falla` con el nombre del crudo', async () => {
+      eq((await sb.box.editorApi('/api/editor/estado', { reel_id: c.crudo, estado: 'error', detalle: 'se cayó el Estudio' })).status, 200, 'error');
+      const a = sb.box.sql("SELECT kind, project_id, text FROM alerts WHERE kind = 'falla' AND project_id = ?", c.p);
+      yes(a.length === 1 && /se cayó el Estudio/.test(a[0].text), `aviso del editor: ${JSON.stringify(a)}`);
+      await sb.box.editorApi('/api/editor/estado', { reel_id: c.crudo, estado: 'listo' });
+      const box = await startSandbox({ ...sb.bases, editor: 'http://127.0.0.1:1' });
+      try {
+        const p = (await box.api('POST', '/api/login', { password: box.password }), (await box.api('POST', '/api/projects', (() => { const f = new FormData(); f.set('name', 'Editor caído'); return f; })(), true)).j.id);
+        const mp4 = fakeMp4(1080, 1920, 20);
+        const up = await box.api('POST', `/api/projects/${p}/reels/uploads`, { files: [{ name: 'c.mp4', size: mp4.length, type: 'video/mp4' }] });
+        await fetch(up.j[0].url, { method: 'PUT', headers: { 'Content-Type': 'video/mp4' }, body: mp4 });
+        await box.api('POST', `/api/projects/${p}/reels/complete`, { kind: 'crudo', items: [{ key: up.j[0].key, name: 'c.mp4', duration: 20 }] });
+        let f = []; for (let i = 0; i < 30 && !f.length; i++) { await sleep(200); f = box.sql("SELECT text FROM alerts WHERE kind = 'falla' AND project_id = ?", p); }
+        yes(f.length === 1 && /No se pudo mandar el crudo «c»/.test(f[0].text), `aviso al fallar el envío: ${JSON.stringify(f)}`);
+      } finally { await box.stop(); }
+    }],
     [G('editor'), 'Con una edición aprobada que llega en un proyecto automático, GET /plan devuelve lo programado (y no repite si llega de nuevo)', async () => {
       await api('PUT', `/api/projects/${c.p}`, { review_mode: 'auto' });
       const id = "0a1b2c3d-0000-4000-8000-000000000801";

@@ -26,7 +26,7 @@ import { tiktokAdapter } from './ads-tiktok.js';
 import { googleAdapter } from './ads-google.js';
 import { buildAdapters } from './ads-factory.js';
 import { initMemory, compareSiblings, winningVariables, memoryCycle } from './memory.js';
-import { flushAlerts, alert as alert_, dailySummary, editorAtrasado } from './notify.js';
+import { flushAlerts, alert as alert_, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR } from './notify.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -776,6 +776,34 @@ function cases(video, sim) {
       eq([a.length, a[0].kind, a[0].project_id], [1, 'editor_atrasado', 1], 'editor_atrasado del proyecto 1');
       yes(a[0].text.includes('«Entrevista»') && a[0].text.includes('y 1 más') && a[0].text.includes('24 h'), `texto: ${a[0].text}`);
       eq(editorAtrasado(d, now), 0, 'no se repite el mismo día');
+    }],
+    ['Telegram', 'El tope de pauta que frena una promoción deja un aviso `tope` (uno por día)', async () => {
+      const f = mktFixture({ budget: 0.5 }); f.post(2, 1, '2026-11-20 04:00', 1000); f.post(3, 1, '2026-11-20 03:00', 3000);
+      await marketingCycle(1, f.deps); await marketingCycle(1, f.deps);
+      yes(f.d.prepare("SELECT count(*) n FROM decisions WHERE kind = 'tope'").get().n >= 1, 'tiene que haber decisión de tope');
+      const a = f.d.prepare("SELECT kind, text FROM alerts WHERE kind = 'tope'").all();
+      eq(a.length, 1, 'un aviso tope por día'); yes(/tope/i.test(a[0].text), a[0].text);
+    }],
+    ['Telegram', 'Una cuenta que dejó de funcionar avisa `cuenta` con la red y el usuario, sin claves', async () => {
+      const d = notifyFixture();
+      cuentaAlert(d, 1, 'tiktok', '@clubmock', 'Token expirado: access_token=ABCDEF123456789');
+      const a = d.prepare("SELECT kind, text FROM alerts").all();
+      eq(a.length, 1, 'un aviso'); eq(a[0].kind, 'cuenta', 'tipo');
+      yes(a[0].text.includes('TikTok (@clubmock)') && !a[0].text.includes('ABCDEF123456789'), a[0].text);
+      yes(AUTH_ERROR.test('The token is expired') && AUTH_ERROR.test('Error 403: permission') && AUTH_ERROR.test('La cuenta no está conectada: conectala') && !AUTH_ERROR.test('timeout de red'), 'detecta errores de permiso');
+    }],
+    ['Telegram', 'Si falla la lectura de métricas de todas las publicaciones de una red avisa `falla`; si alguna anda, no', async () => {
+      const vault = makeVault('banco'), d = new DatabaseSync(':memory:');
+      d.exec("CREATE TABLE projects (id INTEGER PRIMARY KEY, demo INTEGER DEFAULT 0); CREATE TABLE accounts (id INTEGER PRIMARY KEY, network TEXT, creds TEXT); CREATE TABLE reels (id INTEGER PRIMARY KEY, duration REAL);"
+        + "CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INT, reel_id INT, account_id INT, status TEXT, external_id TEXT, published_at TEXT, network_video_id TEXT DEFAULT '');");
+      initMetrics(d); initAlerts(d);
+      d.exec("INSERT INTO projects VALUES (1, 0); INSERT INTO reels VALUES (1, 15)");
+      d.prepare('INSERT INTO accounts VALUES (1, ?, ?), (2, ?, ?)').run('instagram', vault.seal({ pageId: 'PAGE1', pageAccessToken: 'EAAmalo1234567', instagramBusinessId: 'IG1' }), 'tiktok', vault.seal({ accessToken: 'TT_OK' }));
+      const post = d.prepare("INSERT INTO posts (id, project_id, reel_id, account_id, status, external_id, published_at) VALUES (?, 1, 1, ?, 'publicado', ?, '2030-01-10 10:00')");
+      post.run(1, 1, 'BAD'); post.run(2, 1, 'BAD');
+      await readDue(d, vault, { since: '2030-01-05 00:00' });
+      const a = d.prepare("SELECT kind, text FROM alerts").all();
+      eq([a.length, a[0]?.kind], [1, 'falla'], 'aviso falla de Instagram'); yes(/instagram/.test(a[0].text) && !a[0].text.includes('EAAmalo1234567'), a[0].text);
     }],
     ['Marketing', 'Sin ningún adaptador y con anuncios activos avisa pausa_imposible (una vez); sin anuncios activos no avisa', async () => {
       const f = mktFixture(); f.post(2, 1, '2026-11-20 04:00', 1000);

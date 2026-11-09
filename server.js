@@ -23,7 +23,7 @@ import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleB
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
 import { initAlerts, addAlert } from './alerts.js';
-import { flushAlerts, dailySummary, editorAtrasado } from './notify.js';
+import { flushAlerts, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR } from './notify.js';
 import { initPlanner, planProject, expiredBlocked } from './planner.js';
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initMarketing, marketingCycle } from './marketing.js';
@@ -207,10 +207,11 @@ function requireEditor(req, res, next) {
 // el editor avisa en qué etapa va el crudo
 app.post('/api/editor/estado', requireEditor, (req, res) => {
   const b = req.body || {};
-  const r = get("SELECT id FROM reels WHERE id = ? AND kind = 'crudo'", Number(b.reel_id));
+  const r = get("SELECT id, project_id, title FROM reels WHERE id = ? AND kind = 'crudo'", Number(b.reel_id));
   if (!r) return res.status(404).json({ error: 'No existe ese crudo' });
   if (!EDITOR_STATES.includes(b.estado)) return res.status(400).json({ error: `Estado inválido: ${EDITOR_STATES.join(', ')}` });
   run("UPDATE reels SET status = ?, status_detail = ?, status_at = datetime('now') WHERE id = ?", b.estado, String(b.detalle || '').slice(0, 500), r.id);
+  if (b.estado === 'error') try { addAlert(db, 'falla', r.project_id, `El editor no pudo con el crudo «${r.title}»: ${mask(String(b.detalle || 'sin detalle')).slice(0, 250)}`); } catch {}
   res.json({ ok: true });
 });
 // lo que el editor necesita del proyecto: las variables ganadoras (memoria) y la investigación; solo del proyecto pedido
@@ -602,6 +603,7 @@ async function sendToEditor(r) {
     if (!resp.ok) throw new Error(`el editor respondió ${resp.status}`);
   } catch (e) {
     run("UPDATE reels SET status = 'error', status_detail = ?, status_at = datetime('now') WHERE id = ?", `No pudimos mandar el video al editor: ${e.message}`.slice(0, 500), r.id);
+    try { addAlert(db, 'falla', r.project_id, `No se pudo mandar el crudo «${r.title}» al editor: ${mask(e.message).slice(0, 250)}`); } catch {}
     throw e;
   }
 }
@@ -1084,7 +1086,7 @@ async function tick() {
     const waiting = []; // de un recorte, fuera del horario: quedan 'programado' y salen cuando se abre la ventana
     for (;;) {
       const now = localNow();
-      const p = get(`SELECT p.*, r.clip_id, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.storage, r.archived_at, r.expires_at AS reel_expires, r.title, r.caption, r.hashtags, pr.propaganda_until
+      const p = get(`SELECT p.*, r.clip_id, a.network, a.handle AS acc_handle, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.storage, r.archived_at, r.expires_at AS reel_expires, r.title, r.caption, r.hashtags, pr.propaganda_until
         FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id JOIN projects pr ON pr.id = p.project_id
         WHERE p.status = 'programado' AND pr.demo = 0 AND p.scheduled_at <= ? ${waiting.length ? `AND p.id NOT IN (${waiting.join(',')})` : ''} ORDER BY p.scheduled_at LIMIT 1`, now);
       if (!p) break;
@@ -1099,7 +1101,7 @@ async function tick() {
       const hard = scheduleCheck({ id: p.id, reel_id: p.reel_id, account_id: p.account_id, scheduled_at: p.scheduled_at });
       if (hard) { run("UPDATE posts SET status = 'bloqueado', note = ? WHERE id = ?", hard, p.id); console.log(`[publicar ${p.id}] bloqueada: ${hard}`); continue; }
       const blocked = p.archived_at ? 'El video ya se borró del almacenamiento: subilo de nuevo.' : postBlocked(p);
-      if (blocked) { fail(blocked); continue; }
+      if (blocked) { fail(blocked); if (!p.archived_at && p.acc_status !== 'pausada' && p.acc_status !== 'conectada') try { cuentaAlert(db, p.project_id, p.network, p.acc_handle, blocked); } catch {} continue; }
       // de R2 se baja a un archivo temporal solo para esta subida
       let file = path.join(UPLOADS, path.basename(p.file)), tmp = '';
       if (p.storage === 'r2') {
@@ -1116,7 +1118,7 @@ async function tick() {
         console.log(`[publicar ${p.id}] publicado en ${p.network}`);
       } catch (e) {
         fail(e.message);
-        try { addAlert(db, 'falla', p.project_id, `No se pudo publicar «${p.title}» en ${p.network}: ${mask(e.message).slice(0, 250)}`); } catch {}
+        try { if (AUTH_ERROR.test(e.message)) cuentaAlert(db, p.project_id, p.network, p.acc_handle, e.message); else addAlert(db, 'falla', p.project_id, `No se pudo publicar «${p.title}» en ${p.network}: ${mask(e.message).slice(0, 250)}`); } catch {}
         console.log(`[publicar ${p.id}] falló: ${e.message}`);
       } finally { if (tmp) fs.rm(tmp, { force: true }, () => {}); }
     }
@@ -1173,6 +1175,7 @@ async function resumenDelDia() {
   const now = localNow();
   if (now.slice(11, 16) < '22:00') return;
   for (const p of all('SELECT id FROM projects WHERE demo = 0')) {
+    if (get("SELECT 1 FROM alerts WHERE project_id = ? AND kind = 'resumen_diario' AND substr(at, 1, 10) = ?", p.id, now.slice(0, 10))) continue;
     try { addAlert(db, 'resumen_diario', p.id, dailySummary(db, p.id, now), `${now}:00`); } catch (e) { console.error('resumen:', e.message); }
   }
   await avisos();

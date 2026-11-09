@@ -1,4 +1,5 @@
-// Avisos para Gero (el envío por Telegram llega con la Tarea 13: acá solo se anotan).
+// Avisos para Gero: acá se anotan; notify.js los manda por Telegram.
+// Ojo con la hora: `at` por defecto es UTC, pero los avisos del ciclo de pauta y del servidor pasan hora local (la del ACM_TZ); el dedupe diario usa la fecha de `at` tal cual.
 export function initAlerts(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS alerts (
     id INTEGER PRIMARY KEY, project_id INTEGER, kind TEXT NOT NULL, text TEXT NOT NULL,

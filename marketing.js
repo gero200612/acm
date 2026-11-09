@@ -200,7 +200,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
     const want = targets.get(pr.id) ?? 0;
     if (want <= pr.daily_usd + 0.005) continue;
     const g = guardSpend({ kind: 'raise', dailyUsd: want, currentUsd: pr.daily_usd }, state(pr.id));
-    if (!g.ok || g.usd <= pr.daily_usd + 0.005) { decide('tope', pr.ad_id, { want }, `No se sube el anuncio: ${g.reason || 'sin lugar en el tope'}.`); continue; }
+    if (!g.ok || g.usd <= pr.daily_usd + 0.005) { decide('tope', pr.ad_id, { want }, `No se sube el anuncio: ${g.reason || 'sin lugar en el tope'}.`); addAlert(db, 'tope', projectId, `El tope de pauta frenó una suba de presupuesto (anuncio ${pr.ad_id} de ${pr.network}): ${g.reason || 'sin lugar en el tope'}.`, `${nowStr}:00`); continue; }
     try { await adapters[pr.network].setBudget(pr.ad_id, g.usd); } catch (e) { decide('error', pr.ad_id, {}, `No se pudo subir el presupuesto: ${e.message}`.slice(0, 300)); continue; }
     setPromo(pr.id, { daily_usd: g.usd });
     decide('suba', pr.ad_id, { network: pr.network, from: pr.daily_usd, to: g.usd, want }, `Sube el presupuesto diario de USD ${pr.daily_usd} a USD ${g.usd}${g.clamped ? ` (${g.reason})` : ''}.`);
@@ -210,7 +210,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   for (const c of launch) {
     if (blocked[c.net]) continue; // la red rechazó un anuncio en este mismo ciclo: no se reintenta
     const g = guardSpend({ kind: 'promote', dailyUsd: c.each, currentUsd: 0 }, state(0));
-    if (!g.ok || g.usd < MIN_DAILY_USD) { decide('tope', `post ${c.id}`, { want: c.each }, `No se promociona el post ${c.id}: ${g.reason || `quedan menos de USD ${MIN_DAILY_USD} para hoy`}.`); continue; }
+    if (!g.ok || g.usd < MIN_DAILY_USD) { { const why = `No se promociona el post ${c.id}: ${g.reason || `quedan menos de USD ${MIN_DAILY_USD} para hoy`}.`; decide('tope', `post ${c.id}`, { want: c.each }, why); addAlert(db, 'tope', projectId, `El tope de pauta frenó una promoción. ${why}`, `${nowStr}:00`); } continue; }
     let rowId = null, adId = null;
     try {
       // se reserva la fila antes de llamar a la red: si algo falla después, el anuncio no queda sin registrar

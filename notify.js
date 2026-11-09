@@ -97,3 +97,10 @@ export function editorAtrasado(db, now = new Date()) {
   }
   return n;
 }
+
+// La cuenta se desconectó o la red le negó el permiso: aviso `cuenta` con la red y el usuario (nunca claves). Un solo aviso por proyecto y día.
+export const AUTH_ERROR = /token|permiso|permission|autoriz|authori|unauthori|expir|invalid_grant|revoc|\b(401|403)\b|OAuth|no est[aá] conectada/i;
+export function cuentaAlert(db, projectId, network, handle, msg) {
+  const quien = `${NETS[network] || network}${handle ? ` (${handle})` : ''}`;
+  return addAlert(db, 'cuenta', projectId, `La cuenta de ${quien} dejó de funcionar: ${mask(String(msg), []).slice(0, 200)} Reconectala en Cuentas.`);
+}
