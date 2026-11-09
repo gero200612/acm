@@ -66,13 +66,14 @@ export const canJudge = ({ spend, promotedHours }) => (Number(spend) || 0) >= 5 
 
 // El único paso por donde pasa toda acción que gasta plata. Bajar o pausar siempre se permite.
 // action: { kind, dailyUsd (presupuesto diario que se pide para el anuncio), currentUsd (el que tiene hoy, 0 si es nuevo) }
-// state:  { remainingTotal (pauta total − gastado), cap (dailyCap de hoy), committedOthers (suma diaria de los demás anuncios activos) }
+// state:  { remainingTotal (pauta total − gastado), cap (dailyCap de hoy), spentToday (ya gastado hoy por todos los anuncios, incluso los cortados),
+//          committedOthers (suma diaria de los demás anuncios activos) }
 // Devuelve { ok, usd, clamped, reason }. El pedido se baja a lo que entra en: lo que queda del total, el tope de hoy y 2× el tope base.
 export function guardSpend(action, state) {
   const want = cents(action.dailyUsd), cur = cents(action.currentUsd);
   if (want <= 0 || want <= cur) return { ok: true, usd: usd(Math.max(0, want)), clamped: false, reason: '' };
   const others = cents(state.committedOthers);
-  const limits = [['lo que queda de la pauta', cents(state.remainingTotal)], ['el tope diario', cents(state.cap)]];
+  const limits = [['lo que queda de la pauta', cents(state.remainingTotal)], ['el tope diario (menos lo ya gastado hoy)', cents(state.cap) - cents(state.spentToday)]];
   if (state.baseCap !== undefined) limits.push(['el doble del tope base', 2 * cents(state.baseCap)]);
   let allowed = want, why = '';
   for (const [name, lim] of limits) if (lim - others < allowed) { allowed = lim - others; why = name; }

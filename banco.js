@@ -370,6 +370,47 @@ function cases(video, sim) {
       yes([a.skipped, b.skipped].includes('ya hay un ciclo corriendo'), 'el segundo ciclo simultáneo se saltea');
       eq(m.d.prepare("SELECT count(*) n FROM decisions WHERE kind = 'rechazo'").get().n, 1, 'rechazo anotado');
     }],
+    ['Circuito', 'Ciclo de marketing: el tope del día cuenta lo ya gastado, y corta, sube, baja y respeta redes apagadas y la fecha de inicio', async () => {
+      const today = '2026-11-21';
+      const gastadoHoy = (d) => d.prepare('SELECT spend, spend_day, spend_day_start FROM promotions').all().reduce((a, r) => a + (r.spend_day === today ? r.spend - r.spend_day_start : 0), 0);
+      const comprometido = (d) => d.prepare("SELECT coalesce(sum(daily_usd), 0) t FROM promotions WHERE status = 'activa'").get().t;
+      const ins = (d, post, net, daily, spend, startedAt = '2026-11-19 10:00') => d.prepare("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at, spend, spend_day, spend_day_start) VALUES (1, ?, ?, ?, ?, 'activa', ?, ?, ?, ?, 0)")
+        .run(post, net, `${net}-${post}`, daily, startedAt, startedAt, spend, spend ? today : '');
+      // corte + relanzamiento el mismo día: lo gastado por el anuncio cortado ocupa lugar en el tope (presupuesto 900 -> tope 60)
+      const f = mktFixture({ budget: 900 });
+      f.post(3, 1, '2026-11-18 03:00', 1000, 0, 0.02);   // flojo, ya gastó 25 hoy
+      f.post(4, 2, '2026-11-18 03:00', 3000, 600, 0.9);  // bueno
+      f.post(5, 1, '2026-11-20 03:00', 3000, 600, 0.9);  // candidato nuevo en Instagram
+      ins(f.d, 3, 'meta', 30, 25); ins(f.d, 4, 'youtube', 20, 0);
+      f.spend['meta-3'] = 25;
+      const r = await marketingCycle(1, f.deps);
+      eq(r.cut, 1, 'cortó el flojo'); yes(f.log.includes('meta:pause:meta-3'), 'lo pausó en la red');
+      eq(f.d.prepare("SELECT count(*) n FROM decisions WHERE kind = 'corte'").get().n, 1, 'decisión de corte');
+      yes(gastadoHoy(f.d) + comprometido(f.d) <= 60 + 1e-9, `gastado hoy + presupuestos activos (${gastadoHoy(f.d)} + ${comprometido(f.d)}) pasa el tope de 60`);
+      // subir: con USD 10 gastados hoy, lo que sube no pasa el tope
+      const u = mktFixture({ budget: 900 }); u.post(3, 1, '2026-11-18 03:00', 3000, 600, 0.9); ins(u.d, 3, 'meta', 5, 10); u.spend['meta-3'] = 10;
+      eq((await marketingCycle(1, u.deps)).raised, 1, 'subió');
+      yes(gastadoHoy(u.d) + comprometido(u.d) <= 60 + 1e-9, 'subir respeta el tope de hoy');
+      // bajar: pasa del reparto entre redes y baja sin pedir permiso
+      const b = mktFixture({ budget: 900 }); b.post(3, 1, '2026-11-18 03:00', 3000, 600, 0.9); ins(b.d, 3, 'meta', 55, 0);
+      eq((await marketingCycle(1, b.deps)).lowered, 1, 'bajó'); yes(b.log.some((l) => l.startsWith('meta:budget:meta-3:')), 'llamó a setBudget');
+      yes(comprometido(b.d) < 55, 'quedó más bajo'); eq(b.d.prepare("SELECT count(*) n FROM decisions WHERE kind = 'baja'").get().n, 1, 'decisión de baja');
+      // red apagada: no se le promociona ni se le cambia el presupuesto, y lo activo se pausa
+      const o = mktFixture({ budget: 900 }); o.post(7, 3, '2026-11-18 03:00', 3000, 600, 0.9); o.post(8, 3, '2026-11-18 04:00', 3000, 600, 0.9); ins(o.d, 7, 'tiktok', 10, 0);
+      const ro = await marketingCycle(1, o.deps);
+      eq(ro.paused, 1, 'pausó TikTok'); yes(o.log.includes('tiktok:pause:tiktok-7'), 'pausa en la red');
+      yes(!o.log.some((l) => l.startsWith('tiktok:promote') || l.startsWith('tiktok:budget')), 'TikTok apagado no recibe promote ni setBudget');
+      eq(o.d.prepare("SELECT status FROM promotions WHERE ad_id = 'tiktok-7'").get().status, 'pausada', 'estado');
+      // antes de la fecha de inicio no se hace nada y queda anotado una sola vez por día
+      const e = mktFixture(); e.post(3, 1, '2026-10-20 03:00', 3000, 600, 0.9); e.deps.now = () => '2026-10-30 10:00';
+      eq((await marketingCycle(1, e.deps)).skipped, 'antes del inicio de la pauta', 'espera'); await marketingCycle(1, e.deps);
+      eq(e.log, [], 'sin llamadas'); eq(e.d.prepare("SELECT count(*) n FROM decisions WHERE kind = 'espera'").get().n, 1, 'una decisión por día');
+      // si la red lanza el anuncio pero no se puede registrar, se pausa y se avisa
+      const q = mktFixture({ budget: 900 }); q.post(3, 1, '2026-11-18 03:00', 3000, 600, 0.9);
+      q.d.exec("CREATE TRIGGER rompe BEFORE UPDATE OF ad_id ON promotions BEGIN SELECT RAISE(ABORT, 'disco lleno'); END");
+      await marketingCycle(1, q.deps);
+      yes(q.log.includes('meta:pause:meta-3'), 'se intentó pausar'); eq(q.d.prepare("SELECT count(*) n FROM alerts WHERE kind = 'anuncio_sin_registro'").get().n, 1, 'alerta');
+    }],
     ['Circuito', 'Planificador: YouTube respeta su cuota por proyecto y usa el mejor horario aprendido', async () => {
       const yt = [{ id: 1, network: 'youtube', status: 'conectada', posts_per_day: 3 }];
       const { bank } = planFixture(1, 3);

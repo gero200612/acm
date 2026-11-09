@@ -8,6 +8,7 @@ import { dailyCap, splitNetworks, canJudge, guardSpend } from './budget.js';
 export const MIN_ORGANIC_HOURS = 24;   // un reel se promociona recién con 24 h de vida orgánica
 export const MIN_DAILY_USD = 1;        // menos que esto no vale la pena lanzarlo
 export const MAX_ACTIVE_PER_NETWORK = 2;
+export const CUT_MARGIN = 0.85;       // se corta solo si rinde menos del 85 % del promedio (evita idas y vueltas)
 
 export function initMarketing(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS promotions (
@@ -45,6 +46,13 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   const budget = Number(pa.budget) || 0;
   if (budget <= 0) return { skipped: 'sin presupuesto' };
   if (!AD_NETWORKS.some((n) => adapters[n])) return { skipped: 'sin adaptadores' };
+  const startDay = (pa.start_date || '').slice(0, 10);
+  if (startDay && today < startDay) {
+    const ya = db.prepare("SELECT 1 FROM decisions WHERE project_id = ? AND kind = 'espera' AND substr(at, 1, 10) = ?").get(projectId, today);
+    if (!ya) db.prepare('INSERT INTO decisions (project_id, at, kind, target, data, reason) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(projectId, nowStr, 'espera', 'pauta', JSON.stringify({ start: startDay }), `La pauta empieza el ${startDay}: todavía no se promociona nada.`);
+    return { skipped: 'antes del inicio de la pauta' };
+  }
 
   const decide = (kind, target, data, reason) => db.prepare('INSERT INTO decisions (project_id, at, kind, target, data, reason) VALUES (?, ?, ?, ?, ?, ?)')
     .run(projectId, nowStr, kind, String(target ?? ''), JSON.stringify(data || {}), reason);
@@ -67,7 +75,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
       const f = { spend, impressions: Number(i.impressions) || 0, reach: Number(i.reach) || 0, target_reach: Number(i.target_reach) || 0 };
       if (pr.spend_day !== today) { f.spend_day = today; f.spend_day_start = Number(pr.spend) || 0; }
       setPromo(pr.id, f);
-      const last = db.prepare('SELECT * FROM post_metrics WHERE post_id = ? AND views IS NOT NULL ORDER BY id DESC LIMIT 1').get(pr.post_id) || {};
+      const last = db.prepare("SELECT * FROM post_metrics WHERE post_id = ? AND views IS NOT NULL AND note != 'pauta' ORDER BY id DESC LIMIT 1").get(pr.post_id) || {};
       db.prepare('INSERT INTO post_metrics (post_id, views, reach, avg_watch_s, completion, likes, comments, shares, spend, impressions, target_reach, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(pr.post_id, last.views ?? null, last.reach ?? null, last.avg_watch_s ?? null, last.completion ?? null, last.likes ?? null, last.comments ?? null, last.shares ?? null, spend, f.impressions, f.target_reach, 'pauta');
     } catch (e) { decide('error', pr.ad_id, { network: pr.network }, `No se pudo leer lo gastado en ${pr.network}: ${e.message}`.slice(0, 300)); }
@@ -104,12 +112,12 @@ async function cycle(db, projectId, adapters, nowStr, today) {
 
   // 4) corte: con gasto o tiempo suficientes, se corta lo que rinde bajo el promedio o viene cayendo en 3 lecturas
   const metricsOf = (postId, pr) => {
-    const organic = db.prepare('SELECT * FROM post_metrics WHERE post_id = ? AND views IS NOT NULL ORDER BY id DESC LIMIT 1').get(postId) || {};
+    const organic = db.prepare("SELECT * FROM post_metrics WHERE post_id = ? AND views IS NOT NULL AND note != 'pauta' ORDER BY id DESC LIMIT 1").get(postId) || {};
     return { ...organic, spend: pr ? pr.spend : 0, impressions: pr ? pr.impressions : 0, target_reach: pr ? pr.target_reach : 0 };
   };
   const scoreOf = (pr) => score(metricsOf(pr.post_id, pr), weights);
   const falling = (pr) => {
-    const rows = db.prepare('SELECT * FROM post_metrics WHERE post_id = ? AND views IS NOT NULL ORDER BY id DESC LIMIT 3').all(pr.post_id).reverse();
+    const rows = db.prepare("SELECT * FROM post_metrics WHERE post_id = ? AND views IS NOT NULL AND note != 'pauta' ORDER BY id DESC LIMIT 3").all(pr.post_id).reverse();
     if (rows.length < 3) return false;
     const s = rows.map((r) => score({ ...r, spend: pr.spend, impressions: pr.impressions, target_reach: pr.target_reach }, weights));
     return s[0] > s[1] && s[1] > s[2];
@@ -120,9 +128,9 @@ async function cycle(db, projectId, adapters, nowStr, today) {
     const avg = [...scores.values()].reduce((a, x) => a + x, 0) / scores.size;
     for (const pr of active) {
       if (!canJudge({ spend: pr.spend, promotedHours: hoursBetween(pr.started_at, nowStr) })) continue;
-      const s = scores.get(pr.id), low = active.length > 1 && s < avg - 1e-9;
+      const s = scores.get(pr.id), low = active.length > 1 && s < CUT_MARGIN * avg - 1e-9;
       if (low || falling(pr)) {
-        const reason = low ? `Se corta: puntaje ${s} bajo el promedio ${round2(avg)} con USD ${round2(pr.spend)} gastados.` : 'Se corta: el puntaje cayó en las últimas 3 lecturas.';
+        const reason = low ? `Se corta: puntaje ${s} bajo el promedio ${round2(avg)} (corte a ${CUT_MARGIN * 100} %) con USD ${round2(pr.spend)} gastados.` : 'Se corta: el puntaje cayó en las últimas 3 lecturas.';
         if (await pausePromo(pr, 'corte', reason, 'cortada')) out.cut++;
       }
     }
@@ -131,7 +139,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
 
   // 5) tope de hoy y reparto entre redes
   const cap = dailyCap({ budget, spent, from, to, today, spentToday });
-  const state = (excludeId) => ({ remainingTotal: remaining, cap, baseCap: cap, committedOthers: round2(promos().filter((r) => r.id !== excludeId).reduce((a, r) => a + r.daily_usd, 0)) });
+  const state = (excludeId) => ({ remainingTotal: remaining, cap, baseCap: cap, spentToday, committedOthers: round2(promos().filter((r) => r.id !== excludeId).reduce((a, r) => a + r.daily_usd, 0)) });
   const usable = Object.fromEntries(AD_NETWORKS.map((n) => [n, !!(enabled[n] && adapters[n])]));
   const perf = {};
   for (const n of AD_NETWORKS) { const rs = active.filter((r) => r.network === n); if (rs.length) perf[n] = rs.reduce((a, r) => a + scoreOf(r), 0) / rs.length; }
@@ -164,7 +172,11 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   for (const pr of active) {
     const want = targets.get(pr.id) ?? 0;
     if (want >= pr.daily_usd - 0.005) continue;
-    try { await adapters[pr.network].setBudget(pr.ad_id, want); } catch (e) { decide('error', pr.ad_id, {}, `No se pudo bajar el presupuesto: ${e.message}`.slice(0, 300)); continue; }
+    try { await adapters[pr.network].setBudget(pr.ad_id, want); } catch (e) {
+      decide('error', pr.ad_id, {}, `No se pudo bajar el presupuesto: ${e.message}`.slice(0, 300));
+      addAlert(db, 'pauta_no_baja', projectId, `No se pudo bajar el presupuesto del anuncio ${pr.ad_id} de ${pr.network}; revisalo a mano.`, `${nowStr}:00`);
+      continue;
+    }
     setPromo(pr.id, { daily_usd: want });
     decide('baja', pr.ad_id, { network: pr.network, from: pr.daily_usd, to: want }, `Baja el presupuesto diario de USD ${pr.daily_usd} a USD ${want} por el reparto entre redes.`);
     out.lowered++;
@@ -183,15 +195,25 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   for (const c of launch) {
     const g = guardSpend({ kind: 'promote', dailyUsd: c.each, currentUsd: 0 }, state(0));
     if (!g.ok || g.usd < MIN_DAILY_USD) { decide('tope', `post ${c.id}`, { want: c.each }, `No se promociona el post ${c.id}: ${g.reason || `quedan menos de USD ${MIN_DAILY_USD} para hoy`}.`); continue; }
+    let rowId = null, adId = null;
     try {
+      // se reserva la fila antes de llamar a la red: si algo falla después, el anuncio no queda sin registrar
+      rowId = Number(db.prepare("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at, spend_day, spend_day_start) VALUES (?, ?, ?, '', ?, 'pendiente', ?, ?, ?, 0)")
+        .run(projectId, c.id, c.net, g.usd, nowStr, nowStr, today).lastInsertRowid);
       if (!ensured.has(c.net)) { await adapters[c.net].ensureCampaign(p); ensured.add(c.net); }
-      const { adId } = await adapters[c.net].promote({ id: c.id, external_id: c.external_id, network: c.network }, g.usd);
-      db.prepare('INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at, spend_day, spend_day_start) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)')
-        .run(projectId, c.id, c.net, String(adId), g.usd, 'activa', nowStr, nowStr, today);
+      adId = String((await adapters[c.net].promote({ id: c.id, external_id: c.external_id, network: c.network }, g.usd)).adId);
+      db.prepare("UPDATE promotions SET ad_id = ?, status = 'activa' WHERE id = ?").run(adId, rowId);
       decide('promover', String(adId), { post_id: c.id, network: c.net, daily_usd: g.usd, score: c.s },
         `Se promociona el post ${c.id} en ${c.net} con USD ${g.usd} por día: tiene el mejor puntaje (${c.s}) entre los de más de ${MIN_ORGANIC_HOURS} h orgánicas${g.clamped ? ` (${g.reason})` : ''}.`);
       out.promoted++;
     } catch (e) {
+      if (adId) { // la red lo lanzó pero no pudimos registrarlo: se intenta pausar y se avisa
+        try { await adapters[c.net].pause(adId); db.prepare("UPDATE promotions SET status = 'pausada', ad_id = ?, daily_usd = 0 WHERE id = ?").run(adId, rowId); } catch {}
+        addAlert(db, 'anuncio_sin_registro', projectId, `Un anuncio de ${c.net} (${adId}) se lanzó pero no se pudo registrar; revisá que esté pausado.`, `${nowStr}:00`);
+        decide('error', adId, { network: c.net }, `Se lanzó el anuncio ${adId} pero no se pudo registrar: ${e.message}`.slice(0, 300));
+        continue;
+      }
+      if (rowId) db.prepare('DELETE FROM promotions WHERE id = ?').run(rowId);
       if (e instanceof AdRejected) {
         decide('rechazo', `post ${c.id}`, { network: c.net }, `${c.net} rechazó el anuncio del post ${c.id}: ${e.message}`.slice(0, 300));
         addAlert(db, 'anuncio_rechazado', projectId, `Anuncio rechazado en ${c.net} (post ${c.id}): ${e.message}`.slice(0, 300), `${nowStr}:00`);
