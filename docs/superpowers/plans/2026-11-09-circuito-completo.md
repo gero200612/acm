@@ -106,11 +106,11 @@
 - Produces: `POST /v1/editar-recorte {url, palabras, inicio_s, fin_s, receta}` → `202 {id}`, y `GET /v1/editar-recorte/:id` → `{estado, resultado?: {archivo, portada, duracion_s, receta, tecnica: RevisionTecnica, cuadros:[url…]}}`.
 - `ritmo` cambia el umbral de pausas (lento 0,9 / normal 0,7 / rápido 0,35). Corta solo entre palabras y nunca saca algo que se dijo dentro de `[inicio_s, fin_s]`, salvo para respetar `largo_s` cortando frases enteras desde el final.
 
-- [ ] Test: el esquema rechaza `largo_s > 90` y `subtitulos` desconocido con 422.
-- [ ] Test: un recorte con receta `rapido` + `musica:null` da 1080×1920 y ≤ `largo_s`, y la revisión técnica no tiene fallas de `medidas` ni `duracion`.
-- [ ] Test: con música, la sonoridad queda dentro de la tolerancia (`TOLERANCIA_LUFS`) y la voz por encima de la música.
-- [ ] Test: la portada es un JPG 1080×1920 con el texto de la receta.
-- [ ] Implementar reusando `editar/cortes.ts`, `sonido/musica.ts` y `revision/tecnica.ts`. `npm test` pasa. Commit en `dev`.
+- [x] Test: el esquema rechaza `largo_s > 90` y `subtitulos` desconocido con 422.
+- [x] Test: un recorte con receta `rapido` + `musica:null` da 1080×1920 y ≤ `largo_s`, y la revisión técnica no tiene fallas de `medidas` ni `duracion`.
+- [x] Test: con música, la sonoridad queda dentro de la tolerancia (`TOLERANCIA_LUFS`) y la voz por encima de la música.
+- [x] Test: la portada es un JPG 1080×1920 con el texto de la receta.
+- [x] Implementar reusando `editar/cortes.ts`, `sonido/musica.ts` y `revision/tecnica.ts`. `npm test` pasa. Commit en `dev`.
 
 ---
 
