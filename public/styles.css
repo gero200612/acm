@@ -26,7 +26,7 @@ a { color: var(--blue-2); }
 .side { background: var(--navy); color: #fff; position: sticky; top: 0; height: 100vh; z-index: 30; display: flex; flex-direction: column; padding: 26px 16px 18px; }
 .brand { padding: 0 10px 22px; border-bottom: 1px solid rgba(255,255,255,.1); margin-bottom: 16px; text-decoration: none; color: #fff; display: block; }
 .brand .mark { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 26px; letter-spacing: -.04em; }
-.brand .mark svg { width: 32px; height: 32px; flex: none; }
+.brand .mark .logo { width: 34px; height: 34px; flex: none; border-radius: 9px; }
 .brand .mark i { width: 10px; height: 10px; border-radius: 50%; background: var(--green); display: inline-block; box-shadow: 0 0 0 4px rgba(0,226,129,.18); }
 .brand .sub { display: block; font-size: 12px; color: #8b8e96; margin-top: 2px; letter-spacing: .02em; }
 .side nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
@@ -217,7 +217,7 @@ dialog .df { display: flex; justify-content: flex-end; gap: 10px; padding: 0 22p
 .login { min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at 20% 10%, #2a2c31 0, var(--navy) 55%); padding: 16px; }
 .login form { width: min(380px, 100%); background: #fff; border-radius: 18px; padding: 32px 28px; display: grid; gap: 16px; box-shadow: 0 30px 80px rgba(0,0,0,.35); }
 .login .mark { font-weight: 800; font-size: 36px; letter-spacing: -.05em; display: flex; align-items: center; gap: 12px; }
-.login .mark svg { width: 44px; height: 44px; }
+.login .mark .logo { width: 48px; height: 48px; border-radius: 12px; }
 .login .mark i { width: 12px; height: 12px; border-radius: 50%; background: var(--green); }
 .err { color: var(--red); font-size: 13.5px; min-height: 20px; }
 
