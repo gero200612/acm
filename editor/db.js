@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS trabajos (
   transcripcion TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS momentos (
   id INTEGER PRIMARY KEY, trabajo_id INTEGER NOT NULL REFERENCES trabajos(id) ON DELETE CASCADE,
-  idx INTEGER NOT NULL, clip_id TEXT NOT NULL, inicio_s REAL NOT NULL, fin_s REAL NOT NULL, datos TEXT DEFAULT '{}',
+  idx INTEGER NOT NULL, clip_id TEXT NOT NULL, inicio_s REAL NOT NULL, fin_s REAL NOT NULL, datos TEXT DEFAULT '{}', estado TEXT NOT NULL DEFAULT 'elegido',
   UNIQUE (trabajo_id, idx));
 CREATE TABLE IF NOT EXISTS ediciones (
   id INTEGER PRIMARY KEY, trabajo_id INTEGER NOT NULL REFERENCES trabajos(id) ON DELETE CASCADE,
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS ediciones (
   uuid TEXT NOT NULL DEFAULT '', receta TEXT NOT NULL, estado TEXT NOT NULL DEFAULT 'pendiente', resultado TEXT, revision TEXT, error TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now')), UNIQUE (momento_id, idx));
 `);
+  if (!db.prepare('PRAGMA table_info(momentos)').all().some((c) => c.name === 'estado')) db.exec("ALTER TABLE momentos ADD COLUMN estado TEXT NOT NULL DEFAULT 'elegido'");
   if (!db.prepare('PRAGMA table_info(ediciones)').all().some((c) => c.name === 'uuid')) db.exec("ALTER TABLE ediciones ADD COLUMN uuid TEXT NOT NULL DEFAULT ''");
   return db;
 }
@@ -55,8 +56,8 @@ export function repo(db) {
     guardarTranscripcion(id, t) { run('UPDATE trabajos SET transcripcion = ? WHERE id = ?', J(t), id); },
     // los momentos se guardan una sola vez: si el trabajo se retoma, se reusan (y con ellos el clip_id)
     momentos: (tid) => all('SELECT * FROM momentos WHERE trabajo_id = ? ORDER BY idx', tid).map((m) => ({ ...m, datos: P(m.datos) || {} })),
-    guardarMomento(tid, idx, clip_id, inicio_s, fin_s, datos) {
-      return Number(run('INSERT INTO momentos (trabajo_id, idx, clip_id, inicio_s, fin_s, datos) VALUES (?, ?, ?, ?, ?, ?)', tid, idx, clip_id, inicio_s, fin_s, J(datos) || '{}').lastInsertRowid);
+    guardarMomento(tid, idx, clip_id, inicio_s, fin_s, datos, estado = 'elegido') {
+      return Number(run('INSERT INTO momentos (trabajo_id, idx, clip_id, inicio_s, fin_s, datos, estado) VALUES (?, ?, ?, ?, ?, ?, ?)', tid, idx, clip_id, inicio_s, fin_s, J(datos) || '{}', estado).lastInsertRowid);
     },
     ediciones: (tid) => all('SELECT * FROM ediciones WHERE trabajo_id = ? ORDER BY momento_id, idx', tid)
       .map((e) => ({ ...e, receta: P(e.receta), resultado: P(e.resultado), revision: P(e.revision) })),

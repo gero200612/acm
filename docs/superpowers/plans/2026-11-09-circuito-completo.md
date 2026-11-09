@@ -145,11 +145,11 @@
 - `armarRecetas({momento, aprendizajes}) -> [Receta, Receta, Receta]`: las 3 difieren en gancho, subtítulos, música/ritmo y largo/portada. Si hay aprendizajes, 2 siguen las variables ganadoras y 1 cambia al menos 2 variables (`explora:true`). Sin aprendizajes, las 3 se reparten parejo entre las opciones.
 - Textos: `caption` y `hashtags` distintos por receta (Haiku).
 
-- [ ] Caso: `validarMomentos()` descarta un momento que corta a mitad de palabra, uno de 4 s y uno solapado. Un crudo sin momentos válidos → estado `sin_momentos` con el motivo.
-- [ ] Caso: con 20 momentos devueltos quedan 15 editados y 5 candidatos.
-- [ ] Caso: `armarRecetas` sin aprendizajes da 3 recetas que difieren en las 4 dimensiones. Con aprendizajes `{subtitulos:'karaoke'}` ganador, 2 usan karaoke y la tercera tiene `explora:true` y otro estilo.
-- [ ] Caso: un recorte con `actualidad:true` llega a ACM con `expires_at` = creado + 3 días.
-- [ ] Implementar. Las llamadas a Claude se inyectan, así el banco usa respuestas grabadas. Commit.
+- [x] Caso: `validarMomentos()` descarta un momento que corta a mitad de palabra, uno de 4 s y uno solapado. Un crudo sin momentos válidos → estado `sin_momentos` con el motivo.
+- [x] Caso: con 20 momentos devueltos quedan 15 editados y 5 candidatos.
+- [x] Caso: `armarRecetas` sin aprendizajes da 3 recetas que difieren en las 4 dimensiones. Con aprendizajes `{subtitulos:'karaoke'}` ganador, 2 usan karaoke y la tercera tiene `explora:true` y otro estilo.
+- [x] Caso: un recorte con `actualidad:true` llega a ACM con `expires_at` = creado + 3 días.
+- [x] Implementar. Las llamadas a Claude se inyectan, así el banco usa respuestas grabadas. Commit.
 
 ### Task 7: Analista y pantalla «Para aprobar» de a recorte
 

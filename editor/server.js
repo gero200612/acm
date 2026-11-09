@@ -7,6 +7,8 @@ import { abrirDb } from './db.js';
 import { crearEstudio } from './estudio.js';
 import { crearAcm } from './acm.js';
 import { crearRunner } from './runner.js';
+import { crearClaude } from './claude.js';
+import { crearCriterio } from './criterio.js';
 
 // Arma la app con sus piezas; las funciones de criterio (momentos, recetas, revisión) se inyectan desde acá.
 export function crearEditor({ token, db, estudio, acm, publicUrl, dir, hooks = {}, log } = {}) {
@@ -48,8 +50,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     publicUrl: process.env.EDITOR_PUBLIC_URL || '',
     estudio: crearEstudio({ url: process.env.ESTUDIO_URL, empresa: process.env.ESTUDIO_EMPRESA, clave: process.env.ESTUDIO_CLAVE }),
     acm: crearAcm({ url: process.env.ACM_URL, token: process.env.EDITOR_TOKEN }),
-    // Tarea 6 y 7: acá se enchufan elegirMomentos, armarRecetas y revisar
-    hooks: {},
+    // Tarea 6: momentos y recetas con Claude (sin ANTHROPIC_API_KEY el trabajo termina en «error» con el motivo). Tarea 7: revisar
+    hooks: crearCriterio({ claude: crearClaude() }),
   });
   const srv = app.listen(Number(process.env.PORT || 4000), () => console.log(`Editor en http://localhost:${srv.address().port}`));
   runner.arrancar();

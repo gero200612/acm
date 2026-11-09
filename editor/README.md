@@ -37,6 +37,10 @@ Estados del crudo en ACM (`reels.status`): `en_cola`, `transcribiendo`, `buscand
 
 `trabajos` (un crudo, con su etapa y la transcripción), `momentos` (con `clip_id`), `ediciones` (una por receta: `pendiente` → `editada` → `entregada` o `fallo`). Al reiniciar, los trabajos que no llegaron a un estado final se retoman sin repetir la transcripción ni los momentos.
 
+## Momentos y recetas (Claude)
+
+`momentos.js` (`crearElegirMomentos`, `validarMomentos`): Sonnet propone, el código valida (límites de palabra, 6 a 90 s, sin solapes); ordena por interés y marca `elegido` los primeros 15 y `candidato` el resto (no se editan). Sin válidos devuelve `{ momentos: [], motivo }` y el crudo queda `sin_momentos` con ese motivo. `recetas.js` (`crearArmarRecetas`): el código reparte las variables (gancho, subtítulos, música/ritmo, largo/portada; con aprendizajes, 2 las siguen y 1 explora con `explora:true`) y Haiku escribe caption, hashtags y textos de gancho y portada, distintos por receta. `explora`, `caption` y `hashtags` no van al Estudio (su esquema es estricto). Los momentos con `actualidad:true` se entregan con `expires_at` = creación + 3 días. `claude.js` es el cliente (inyectable: el banco usa uno falso).
+
 ## Variables
 
 | variable | uso |
@@ -47,6 +51,7 @@ Estados del crudo en ACM (`reels.status`): `en_cola`, `transcribiendo`, `buscand
 | `PORT` | 4000 |
 | `ESTUDIO_URL`, `ESTUDIO_EMPRESA`, `ESTUDIO_CLAVE` | el Estudio |
 | `ACM_URL` | dirección de ACM |
+| `ANTHROPIC_API_KEY` | Claude: momentos (`claude-sonnet-5-5`) y textos (`claude-haiku-5-5`). Sin ella el trabajo termina en `error` con un mensaje claro |
 
 En ACM: `EDITOR_URL` (si falta, los crudos quedan `en_cola` y no pasa nada) y `EDITOR_TOKEN`.
 

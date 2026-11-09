@@ -10,6 +10,11 @@ import { crearAcm } from './acm.js';
 import { crearEditor } from './server.js';
 import { crearRunner } from './runner.js';
 import { repo } from './db.js';
+import { validarMomentos, crearElegirMomentos } from './momentos.js';
+import { crearArmarRecetas, elegirVariables } from './recetas.js';
+import { crearCriterio } from './criterio.js';
+import { crearClaude } from './claude.js';
+import { paraEstudio } from './runner.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (c, what) => { if (!c) throw new Error(what); };
@@ -40,7 +45,7 @@ async function estudioFalso(opc = {}) {
       if (t.polls === 2) return json(res, 200, { estado: 'procesando', progreso: 0.5 });
       if (m[1] === 'transcribir') {
         if (opc.falloTranscribir) return json(res, 200, { estado: 'fallo', error: 'whisper se cayó' });
-        return json(res, 200, { estado: 'listo', progreso: 1, resultado: { duracion_s: 60, palabras: [{ inicio_s: 1, fin_s: 2, texto: 'hola' }, { inicio_s: 10, fin_s: 11, texto: 'chau' }, { inicio_s: 30, fin_s: 31, texto: 'afuera' }], audio: { lufs: -20 } } });
+        return json(res, 200, { estado: 'listo', progreso: 1, resultado: { duracion_s: 60, palabras: opc.palabras || [{ inicio_s: 1, fin_s: 2, texto: 'hola' }, { inicio_s: 10, fin_s: 11, texto: 'chau' }, { inicio_s: 30, fin_s: 31, texto: 'afuera' }], audio: { lufs: -20 } } });
       }
       return json(res, 200, { estado: 'listo', resultado: { archivo: `/archivos/${m[2]}.mp4`, portada: `/archivos/${m[2]}.jpg`, duracion_s: t.pedido.fin_s - t.pedido.inicio_s, receta: t.pedido.receta, tecnica: {}, cuadros: [] } });
     }
@@ -172,6 +177,117 @@ casos.push(['Cola', 'Primero los cortos (sin duración al final); el que espera 
   db.prepare("UPDATE trabajos SET created_at = datetime('now', '-3 hours') WHERE id = ?").run(a);
   eq(orden(), [a, b], 'el largo que espera hace 3 h pasa adelante');
 }]);
+
+// ---- Tarea 6: momentos y recetas con Claude (respuestas fakes, cero red) ----
+// 220 palabras de 0,9 s, una por segundo: la palabra i va de i a i+0,9
+const PALABRAS = Array.from({ length: 220 }, (_, i) => ({ inicio_s: i, fin_s: i + 0.9, texto: `p${i}` }));
+const mom = (k, extra = {}) => ({ inicio_s: k * 10, fin_s: k * 10 + 9.9, tema: `tema ${k}`, motivo: `motivo ${k}`, actualidad: false, interes: 100 - k, ...extra });
+// Claude falso: responde según la herramienta pedida y guarda los pedidos
+function claudeFalso({ momentos = [], textos } = {}) {
+  const pedidos = [];
+  return {
+    pedidos,
+    async estructurado(p) {
+      pedidos.push(p);
+      if (p.herramienta.name === 'registrar_momentos') return { momentos };
+      const versiones = textos ? textos(p) : [0, 1, 2].map((i) => ({ caption: `Caption ${pedidos.length}-${i}`, hashtags: [`#club`, `#tema${i}`], gancho_texto: `Gancho ${i}`, portada_texto: `Portada ${i}` }));
+      return { versiones };
+    },
+  };
+}
+const MOM = { id: 1, idx: 0, inicio_s: 20, fin_s: 49.9, datos: { tema: 'el asado', motivo: 'se entiende solo' } };
+const difieren = (rs, f) => new Set(rs.map((r) => JSON.stringify(f(r)))).size === rs.length;
+
+casos.push(
+  ['Momentos', 'validarMomentos descarta uno que corta a mitad de palabra, uno de 4 s y uno solapado', () => {
+    const { validos, descartados } = validarMomentos([
+      mom(0), { inicio_s: 100.5, fin_s: 110.9, tema: 'a', interes: 9 }, // empieza a mitad de la palabra 100
+      { inicio_s: 30, fin_s: 33.9, tema: 'b', interes: 8 }, // 4 s
+      { inicio_s: 5, fin_s: 14.9, tema: 'c', interes: 1 }, // pisa al de 0 a 9,9 (más interesante)
+      mom(5),
+    ], PALABRAS);
+    eq(validos.map((m) => [m.inicio_s, m.fin_s]), [[0, 9.9], [50, 59.9]], 'quedan');
+    eq(descartados.map((d) => d.causa).sort(), ['muy cortos', 'que cortan una palabra', 'solapados'], 'causas');
+    eq(validarMomentos([{ inicio_s: 0, fin_s: 94.9, interes: 5 }], PALABRAS).descartados[0].causa, 'muy largos', 'más de 90 s');
+    eq(validarMomentos([mom(1, { fin_s: 19.5 })], PALABRAS).descartados[0].causa, 'que cortan una palabra', 'termina a mitad de palabra');
+  }],
+  ['Momentos', 'Un crudo sin momentos válidos queda sin_momentos con el motivo (y sin habla ni llama a Claude)', async () => {
+    const claude = claudeFalso({ momentos: [{ inicio_s: 30, fin_s: 33.9, tema: 'x', interes: 5 }, { inicio_s: 100.5, fin_s: 120, tema: 'y', interes: 4 }] });
+    const r = await crearElegirMomentos({ claude })({ palabras: PALABRAS });
+    eq(r.momentos, [], 'ninguno'); yes(/ninguno sirve/.test(r.motivo) && /muy cortos/.test(r.motivo), `motivo: ${r.motivo}`);
+    const muda = await crearElegirMomentos({ claude })({ palabras: [] });
+    yes(/no tiene habla/.test(muda.motivo) && claude.pedidos.length === 1, 'sin habla no pide nada a Claude');
+    const m = await montar({ estudioOpc: { palabras: PALABRAS }, hooks: crearCriterio({ claude }) });
+    try {
+      m.editor.runner.arrancar({ cadaMs: 20 });
+      const id = (await (await post(m, '/trabajos', TRABAJO)).json()).id;
+      const j = await esperarEstado(m, id, ['sin_momentos', 'error']);
+      eq(j.estado, 'sin_momentos', 'estado'); yes(/ninguno sirve/.test(j.detalle), `detalle visible: ${j.detalle}`);
+      eq(m.est.pedidos('/v1/editar-recorte').length, 0, 'no se editó nada');
+    } finally { await m.fin(); }
+  }],
+  ['Momentos', 'Con 20 momentos devueltos quedan 15 editados y 5 candidatos; los de actualidad llevan expires_at = creado + 3 días', async () => {
+    const claude = claudeFalso({ momentos: Array.from({ length: 20 }, (_, k) => mom(k, k === 0 ? { actualidad: true } : {})) });
+    const m = await montar({ estudioOpc: { palabras: PALABRAS }, hooks: crearCriterio({ claude }) });
+    try {
+      m.editor.runner.arrancar({ cadaMs: 20 });
+      const id = (await (await post(m, '/trabajos', TRABAJO)).json()).id;
+      const j = await esperarEstado(m, id, ['listo', 'error'], 20000);
+      eq([j.estado, j.detalle], ['listo', '45 ediciones'], 'estado final');
+      const ms = repo(m.editor.db).momentos(id);
+      eq([ms.length, ms.filter((x) => x.estado === 'elegido').length, ms.filter((x) => x.estado === 'candidato').length], [20, 15, 5], 'momentos');
+      eq(new Set(m.acm.ediciones.map((e) => e.clip_id)).size, 15, 'solo los 15 elegidos llegan a ACM');
+      const act = m.acm.ediciones.filter((e) => e.moment.actualidad === true), resto = m.acm.ediciones.filter((e) => !e.moment.actualidad);
+      eq(act.length, 3, 'las 3 ediciones del momento de actualidad');
+      for (const e of act) {
+        const c = m.editor.db.prepare('SELECT created_at FROM ediciones WHERE uuid = ?').get(e.edicion_id).created_at;
+        eq(new Date(e.expires_at).getTime() - new Date(c.replace(' ', 'T') + 'Z').getTime(), 3 * 864e5, 'expires_at');
+      }
+      yes(resto.every((e) => e.expires_at === undefined), 'los atemporales no vencen');
+      const e = act[0];
+      yes(e.caption.startsWith('Caption') && e.hashtags.startsWith('#club') && e.recipe.explora === false && !('caption' in e.recipe), 'caption y hashtags por receta; la receta a ACM lleva explora pero no los textos');
+      const peds = m.est.pedidos('/v1/editar-recorte');
+      yes(peds.length === 45 && peds.every((p) => !('explora' in p.receta) && !('caption' in p.receta) && p.receta.gancho.desde_s >= p.inicio_s && p.receta.gancho.desde_s < p.fin_s), 'al Estudio va la receta limpia, con desde_s dentro del momento');
+    } finally { await m.fin(); }
+  }],
+  ['Recetas', 'Sin aprendizajes las 3 recetas difieren en gancho, subtítulos, música/ritmo y largo/portada, y los textos son distintos', async () => {
+    const claude = claudeFalso();
+    const rs = await crearArmarRecetas({ claude })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: [] });
+    eq(rs.length, 3, 'tres recetas');
+    yes(difieren(rs, (r) => [r.gancho.texto ?? null, r.gancho.desde_s]), 'gancho');
+    yes(difieren(rs, (r) => r.subtitulos), 'subtítulos');
+    yes(difieren(rs, (r) => [r.musica, r.ritmo]), 'música/ritmo');
+    yes(difieren(rs, (r) => [r.largo_s, r.portada.segundo_s]), 'largo/portada');
+    eq(rs.map((r) => r.explora), [false, false, false], 'sin aprendizajes no hay exploración');
+    for (const r of rs) yes(r.largo_s <= 90 && r.gancho.desde_s >= MOM.inicio_s && r.gancho.desde_s < MOM.fin_s && r.portada.texto && r.portada.segundo_s <= r.largo_s, 'receta dentro del contrato');
+    yes(difieren(rs, (r) => r.caption) && difieren(rs, (r) => r.hashtags), 'caption y hashtags distintos');
+    yes(claude.pedidos.length === 1 && claude.pedidos[0].modelo === 'claude-haiku-5-5', 'una llamada, a Haiku');
+    // repartidas parejo entre las opciones a lo largo de varios momentos
+    const cuenta = {};
+    for (let k = 0; k < 15; k++) for (const v of elegirVariables({ semilla: k })) cuenta[v.subtitulos] = (cuenta[v.subtitulos] || 0) + 1;
+    eq(Object.values(cuenta).sort(), [9, 9, 9, 9, 9], 'subtítulos parejos en 15 momentos');
+  }],
+  ['Recetas', 'Con karaoke ganador, 2 recetas usan karaoke y la tercera explora (explora:true) con otro estilo y al menos 2 variables cambiadas', async () => {
+    const rs = await crearArmarRecetas({ claude: claudeFalso() })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: { subtitulos: 'karaoke' } });
+    eq(rs.filter((r) => r.subtitulos === 'karaoke').length, 2, 'dos con karaoke');
+    const ex = rs.filter((r) => r.explora); eq(ex.length, 1, 'una explora'); yes(ex[0].subtitulos !== 'karaoke', 'otro estilo');
+    const v = elegirVariables({ semilla: 0, aprendizajes: { subtitulos: 'karaoke' } });
+    eq(['gancho', 'subtitulos', 'musica', 'ritmo', 'largo'].filter((d) => v[2][d] !== v[0][d]).length >= 2, true, 'cambia al menos 2 variables');
+    // aprendizajes como lista (el formato de ACM) y vacíos
+    eq(elegirVariables({ aprendizajes: [{ subtitulos: 'grande' }] }).filter((x) => x.subtitulos === 'grande').length, 2, 'lista de aprendizajes');
+    eq(elegirVariables({ aprendizajes: [] }).some((x) => x.explora), false, 'vacío = sin aprendizajes');
+  }],
+  ['Recetas', 'Claude con captions repetidos se reintenta una vez y, si sigue mal, falla con mensaje; sin API key el mensaje es claro', async () => {
+    let n = 0;
+    const iguales = { versiones: [0, 1, 2].map(() => ({ caption: 'Lo mismo', hashtags: ['#a'], gancho_texto: 'x', portada_texto: 'y' })) };
+    const claude = { async estructurado() { n++; return n === 1 ? iguales : { versiones: [0, 1, 2].map((i) => ({ caption: `c${i}`, hashtags: [`#h${i}`], gancho_texto: 'x', portada_texto: 'y' })) }; } };
+    eq((await crearArmarRecetas({ claude })({ momento: MOM, transcripcion: { palabras: PALABRAS } })).length, 3, 'se recupera al reintentar');
+    let msg = ''; try { await crearArmarRecetas({ claude: { async estructurado() { return iguales; } } })({ momento: MOM, transcripcion: { palabras: PALABRAS } }); } catch (e) { msg = e.message; }
+    yes(/repetidos/.test(msg), `mensaje: ${msg}`);
+    msg = ''; try { await crearClaude({ apiKey: '' }).estructurado({ modelo: 'x', system: '', usuario: '', herramienta: { name: 't' } }); } catch (e) { msg = e.message; }
+    yes(/Falta ANTHROPIC_API_KEY/.test(msg), 'sin key: mensaje en español');
+  }],
+);
 
 let ok = 0;
 for (const [grupo, nombre, fn] of casos) {
