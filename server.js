@@ -21,6 +21,7 @@ import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from
 import { initAlerts } from './alerts.js';
 import { initPlanner, planProject, expiredBlocked } from './planner.js';
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
+import { initMarketing, marketingCycle } from './marketing.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -112,6 +113,7 @@ initKnowledge(db);
 initAlerts(db);
 initPlanner(db);
 initMetrics(db);
+initMarketing(db);
 // pesos del puntaje de cada publicación (JSON); el agente nunca los cambia
 if (!cols('projects').includes('score_weights')) db.exec("ALTER TABLE projects ADD COLUMN score_weights TEXT DEFAULT ''");
 // campañas: el presupuesto total del proyecto (pauta.budget) se reparte en campañas con sus cuentas y su contenido
@@ -1092,6 +1094,23 @@ async function leerMetricas() {
   finally { leyendoMetricas = false; }
 }
 if (process.env.ACM_SCHEDULER !== 'off') { setInterval(leerMetricas, 6 * 3600e3); setTimeout(leerMetricas, 60e3); }
+
+// pauta: cada 6 h el ciclo de marketing decide qué promocionar y mueve o corta la plata (ACM_MARKETING_CYCLE=off lo apaga).
+// Hasta que lleguen los adaptadores reales (Tarea 11) no hay ninguno: el ciclo avisa "sin adaptadores" y no toca nada.
+const noAdapters = {};
+let marketingCorriendo = false;
+async function cicloDeMarketing() {
+  if (marketingCorriendo) return; marketingCorriendo = true;
+  try {
+    for (const p of all("SELECT p.id FROM projects p JOIN pauta pa ON pa.project_id = p.id WHERE p.demo = 0 AND pa.budget > 0")) {
+      try {
+        const r = await marketingCycle(p.id, { db, adapters: noAdapters, now: () => localNow() });
+        if (r.skipped === 'sin adaptadores') console.log(`marketing: sin adaptadores (proyecto ${p.id})`);
+      } catch (e) { console.error('marketing:', e.message); }
+    }
+  } finally { marketingCorriendo = false; }
+}
+if (process.env.ACM_MARKETING_CYCLE !== 'off' && process.env.ACM_SCHEDULER !== 'off') { setInterval(cicloDeMarketing, 6 * 3600e3); setTimeout(cicloDeMarketing, 90e3); }
 
 // al arrancar completa vectores pendientes (la copia del banco lo hace enseguida para reproducir el orden de producción: primero este, después las importaciones)
 setTimeout(fillVectors, Number(process.env.ACM_FILL_MS) || 5000);

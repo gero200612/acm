@@ -226,12 +226,12 @@
 - `marketingCycle(projectId, deps)`: lee métricas, elige qué promocionar (orgánico ≥ 24 h, mejor score), sube o baja y corta. Escribe cada acción en `decisions(project_id, at, kind, target, data, reason)`. Las acciones pasan por `guardSpend(action, state)`, que rechaza todo lo que pase la pauta total o el tope diario.
 - Regla de corte: `canJudge({spend, promotedHours}) = spend >= 5 || promotedHours >= 48`. Pasado eso, el agente decide si corta (score bajo el promedio o 3 lecturas cayendo).
 
-- [ ] Caso: `dailyCap({budget:1000, spent:400, from:'2026-11-01', to:'2026-11-30', today:'2026-11-21'})` da 60 (600 ÷ 10). Con 3 días sin gastar no pasa de 120.
-- [ ] Caso: `splitNetworks` con TikTok apagado nunca le da plata. Con Meta muy por encima, YouTube no baja del 10 %.
-- [ ] Caso: un reel publicado hace 10 h no se promociona. Uno de 30 h con el mejor score sí.
-- [ ] Caso: `canJudge({spend:4, promotedHours:47})` da `false`, y con `spend:5` o `promotedHours:48` da `true`.
-- [ ] Caso de **Review Focus 4**: si queda USD 2 de pauta y el ciclo quiere subir USD 10, `guardSpend` lo baja a 2. Pasada la fecha máxima de propaganda, el ciclo pausa todo.
-- [ ] Implementar. El ciclo usa los adaptadores de la Task 11 detrás de una interfaz. Commit.
+- [x] Caso: `dailyCap({budget:1000, spent:400, from:'2026-11-01', to:'2026-11-30', today:'2026-11-21'})` da 60 (600 ÷ 10). Con 3 días sin gastar no pasa de 120.
+- [x] Caso: `splitNetworks` con TikTok apagado nunca le da plata. Con Meta muy por encima, YouTube no baja del 10 %.
+- [x] Caso: un reel publicado hace 10 h no se promociona. Uno de 30 h con el mejor score sí.
+- [x] Caso: `canJudge({spend:4, promotedHours:47})` da `false`, y con `spend:5` o `promotedHours:48` da `true`.
+- [x] Caso de **Review Focus 4**: si queda USD 2 de pauta y el ciclo quiere subir USD 10, `guardSpend` lo baja a 2. Pasada la fecha máxima de propaganda, el ciclo pausa todo.
+- [x] Implementar. El ciclo usa los adaptadores de la Task 11 detrás de una interfaz. Commit.
 
 ### Task 11: Adaptadores de pauta Meta, TikTok y Google contra el simulador
 

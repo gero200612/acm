@@ -16,6 +16,9 @@ import { planDay, planProject, initPlanner, expiredBlocked } from './planner.js'
 import { initAlerts } from './alerts.js';
 import { initMetrics, readMetrics, readDue, score, DEFAULT_WEIGHTS } from './metrics.js';
 import { makeVault } from './connections.js';
+import { dailyCap, splitNetworks, canJudge, guardSpend } from './budget.js';
+import { initMarketing, marketingCycle } from './marketing.js';
+import { AdRejected } from './ads-iface.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -32,6 +35,33 @@ function siblingsOk(plan, bank) {
   const clip = new Map(bank.map((e) => [e.id, e.clip_id]));
   const t = (at) => Number(at.slice(11, 13)) * 60 + Number(at.slice(14, 16));
   return plan.every((a) => plan.every((b) => a === b || clip.get(a.reel_id) !== clip.get(b.reel_id) || a.scheduled_at.slice(0, 10) !== b.scheduled_at.slice(0, 10) || Math.abs(t(a.scheduled_at) - t(b.scheduled_at)) >= 180));
+}
+
+// proyecto con pauta, cuentas y publicaciones para el ciclo de marketing; adaptadores falsos que anotan lo que se les pide
+function mktFixture({ budget = 100, end = '2026-11-30', until = '', nets = '{"meta":true,"youtube":true,"tiktok":false}', demo = 0 } = {}) {
+  const d = new DatabaseSync(':memory:');
+  d.exec(`PRAGMA foreign_keys = ON; CREATE TABLE projects (id INTEGER PRIMARY KEY, demo INTEGER DEFAULT 0, ads_networks TEXT, score_weights TEXT DEFAULT '', propaganda_until TEXT DEFAULT '');
+    CREATE TABLE pauta (project_id INTEGER PRIMARY KEY, budget REAL, start_date TEXT DEFAULT '', end_date TEXT DEFAULT '');
+    CREATE TABLE accounts (id INTEGER PRIMARY KEY, network TEXT);
+    CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INT, account_id INT, status TEXT DEFAULT 'publicado', external_id TEXT, published_at TEXT);`);
+  initMetrics(d); initAlerts(d); initMarketing(d);
+  d.prepare('INSERT INTO projects (id, demo, ads_networks, propaganda_until) VALUES (1, ?, ?, ?)').run(demo, nets, until);
+  d.prepare("INSERT INTO pauta (project_id, budget, start_date, end_date) VALUES (1, ?, '2026-11-01', ?)").run(budget, end);
+  d.exec("INSERT INTO accounts VALUES (1, 'instagram'), (2, 'youtube'), (3, 'tiktok')");
+  const log = [], spend = {};
+  const mk = (net) => ({
+    async ensureCampaign() { log.push(`${net}:campaña`); return { campaignId: `C${net}` }; },
+    async promote(post, usd) { log.push(`${net}:promote:${post.id}:${usd}`); return { adId: `${net}-${post.id}` }; },
+    async setBudget(ad, usd) { log.push(`${net}:budget:${ad}:${usd}`); },
+    async pause(ad) { log.push(`${net}:pause:${ad}`); },
+    async insights(ad) { return { spend: spend[ad] || 0, impressions: (spend[ad] || 0) * 100, reach: 50, target_reach: null }; },
+  });
+  const deps = { db: d, adapters: { meta: mk('meta'), youtube: mk('youtube'), tiktok: mk('tiktok') }, now: () => '2026-11-21 10:00' };
+  const post = (id, acc, at, views, likes = 0, completion = 0.3) => {
+    d.prepare('INSERT INTO posts (id, project_id, account_id, external_id, published_at) VALUES (?, 1, ?, ?, ?)').run(id, acc, `X${id}`, at);
+    d.prepare('INSERT INTO post_metrics (post_id, views, completion, likes, comments, shares) VALUES (?, ?, ?, ?, 0, 0)').run(id, views, completion, likes);
+  };
+  return { d, log, spend, deps, post };
 }
 
 function cases(video, sim) {
@@ -267,6 +297,78 @@ function cases(video, sim) {
       eq(expiredBlocked('2026-12-01 10:00', '2026-12-01 10:00'), null, 'justo a la hora');
       eq(expiredBlocked('', '2026-12-01 10:00'), null, 'sin vencimiento');
       eq(expiredBlocked('2026-12-01', '2026-12-01 23:30'), null, 'solo fecha: vale todo el día');
+    }],
+    ['Circuito', 'Presupuesto: tope diario (restante ÷ días) con techo de 2x y reparto entre redes con piso del 10 %', async () => {
+      eq(dailyCap({ budget: 1000, spent: 400, from: '2026-11-01', to: '2026-11-30', today: '2026-11-21' }), 60, 'tope');
+      yes(dailyCap({ budget: 1000, spent: 0, from: '2026-11-01', to: '2026-11-30', today: '2026-11-04' }) <= 120, '3 días sin gastar no pasa de 120');
+      yes(dailyCap({ budget: 1000, spent: 0, from: '2026-11-01', to: '2026-11-30', today: '2026-11-29' }) <= 2 * 1000 / 30 + 0.01, 'techo de 2x el tope base aunque queden pocos días');
+      eq(dailyCap({ budget: 1000, spent: 500, from: '2026-11-01', to: '2026-11-30', today: '2026-12-01' }), 0, 'pasada la fecha no hay tope');
+      eq(dailyCap({ budget: 1000, spent: 430, from: '2026-11-01', to: '2026-11-30', today: '2026-11-21', spentToday: 30 }), 60, 'lo gastado hoy no mueve el tope del día');
+      eq(splitNetworks({ enabled: { meta: true, youtube: true, tiktok: true } }), { meta: 34, youtube: 33, tiktok: 33 }, 'parejo');
+      let sp = splitNetworks({ enabled: { meta: true, youtube: true, tiktok: false }, perf: { meta: 0.9, youtube: 0.01 } });
+      eq(sp.tiktok, 0, 'TikTok apagado no recibe');
+      let prev = null;
+      for (let i = 0; i < 12; i++) { sp = splitNetworks({ enabled: { meta: true, youtube: true, tiktok: false }, perf: { meta: 0.99, youtube: 0.001 }, prev }); prev = sp; eq(sp.meta + sp.youtube + sp.tiktok, 100, 'suma 100'); }
+      eq(sp, { meta: 90, youtube: 10, tiktok: 0 }, 'YouTube no baja del 10 %');
+      eq(canJudge({ spend: 4, promotedHours: 47 }), false, 'sin base para juzgar');
+      eq(canJudge({ spend: 5, promotedHours: 0 }), true, 'USD 5'); eq(canJudge({ spend: 0, promotedHours: 48 }), true, '48 h');
+    }],
+    ['Circuito', 'Ciclo de marketing: solo promociona reels de 24 h o más con el mejor puntaje, anota la decisión y no toca demos', async () => {
+      const f = mktFixture();
+      f.post(1, 1, '2026-11-21 00:00', 9000, 900, 0.9); // 10 h: no entra aunque sea el mejor
+      f.post(2, 1, '2026-11-20 04:00', 1000, 20, 0.2);  // 30 h
+      f.post(3, 1, '2026-11-20 03:00', 3000, 300, 0.8); // 31 h, el mejor
+      const r = await marketingCycle(1, f.deps);
+      eq(r.promoted, 2, 'promueve los dos de 24 h o más (tope de 2 por red)');
+      yes(!f.log.some((l) => l.startsWith('meta:promote:1:')), 'el de 10 h no se promociona');
+      yes(f.log.some((l) => l.startsWith('meta:promote:3:')), 'el de mejor puntaje sí');
+      const dec = f.d.prepare("SELECT * FROM decisions WHERE kind = 'promover' ORDER BY id").all();
+      yes(dec.length === 2 && dec[0].reason.includes('post 3') && dec[0].project_id === 1 && dec[0].at === '2026-11-21 10:00', 'decisión escrita en español');
+      const tot = f.d.prepare("SELECT sum(daily_usd) t FROM promotions WHERE status = 'activa'").get().t;
+      yes(tot <= dailyCap({ budget: 100, spent: 0, from: '2026-11-01', to: '2026-11-30', today: '2026-11-21' }) + 0.001, 'lo comprometido no pasa el tope de hoy');
+      const demo = mktFixture({ demo: 1 }); demo.post(2, 1, '2026-11-20 04:00', 1000);
+      eq((await marketingCycle(1, demo.deps)).skipped, 'proyecto de demostración', 'demo'); eq(demo.log, [], 'demo sin llamadas');
+      const sin = mktFixture(); sin.post(2, 1, '2026-11-20 04:00', 1000);
+      eq((await marketingCycle(1, { ...sin.deps, adapters: {} })).skipped, 'sin adaptadores', 'sin adaptadores no hace nada');
+      eq(sin.d.prepare('SELECT count(*) n FROM promotions').get().n, 0, 'nada promovido');
+    }],
+    ['Circuito', 'Ciclo de marketing: guardSpend baja el pedido a lo que queda y, pasada la fecha máxima, se pausa todo', async () => {
+      const g = guardSpend({ kind: 'raise', dailyUsd: 10, currentUsd: 0 }, { remainingTotal: 2, cap: 60, committedOthers: 0 });
+      eq([g.ok, g.usd, g.clamped], [true, 2, true], 'queda USD 2 y pide 10');
+      eq(guardSpend({ kind: 'raise', dailyUsd: 10, currentUsd: 0 }, { remainingTotal: 50, cap: 60, baseCap: 4, committedOthers: 0 }).usd, 8, 'nunca más de 2x el tope base');
+      eq(guardSpend({ kind: 'raise', dailyUsd: 10, currentUsd: 5 }, { remainingTotal: 100, cap: 12, committedOthers: 8 }).usd, 4, 'el tope de hoy descuenta a los demás');
+      eq(guardSpend({ kind: 'raise', dailyUsd: 10, currentUsd: 0 }, { remainingTotal: 100, cap: 12, committedOthers: 12 }).ok, false, 'sin lugar se rechaza');
+      // quedan USD 2 de pauta: lo nuevo no pasa de 2 (y 2 >= mínimo para lanzar)
+      const f = mktFixture({ budget: 100, end: '2026-11-21' });
+      f.post(3, 1, '2026-11-20 03:00', 3000, 300, 0.8);
+      f.d.exec("INSERT INTO posts (id, project_id, account_id, external_id, published_at) VALUES (9, 1, 1, 'X9', '2026-11-01 10:00')");
+      f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at, spend) VALUES (1, 9, 'meta', 'meta-9', 0, 'cortada', '2026-11-02 10:00', '2026-11-05 10:00', 98)");
+      const r = await marketingCycle(1, f.deps);
+      eq(r.promoted, 1, 'promueve');
+      const act = f.d.prepare("SELECT sum(daily_usd) t FROM promotions WHERE status = 'activa'").get().t;
+      yes(act <= 2 + 1e-9, `lo comprometido (${act}) no pasa lo que queda (USD 2)`);
+      // pasada la fecha máxima de propaganda: pausa todo en el mismo ciclo
+      const h = mktFixture({ until: '2026-11-20' });
+      h.post(3, 1, '2026-11-18 03:00', 3000, 300, 0.8);
+      h.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 3, 'meta', 'meta-3', 10, 'activa', '2026-11-19 10:00', '2026-11-19 10:00'), (1, 3, 'youtube', 'youtube-3', 5, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')");
+      const r2 = await marketingCycle(1, h.deps);
+      eq(r2.paused, 2, 'pausó todo');
+      eq(h.d.prepare("SELECT count(*) n FROM promotions WHERE status = 'activa'").get().n, 0, 'ninguna activa');
+      yes(h.log.includes('meta:pause:meta-3') && h.log.includes('youtube:pause:youtube-3'), 'se pausó en las redes');
+      yes(!h.log.some((l) => l.includes(':promote:')), 'no lanza nada nuevo');
+      eq(h.d.prepare("SELECT count(*) n FROM decisions WHERE kind = 'pausa_total'").get().n, 2, 'decisiones anotadas');
+      // el gasto real cuenta: con el total gastado también se pausa todo
+      const k = mktFixture({ budget: 50 });
+      k.post(3, 1, '2026-11-18 03:00', 3000, 300, 0.8);
+      k.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 3, 'meta', 'meta-3', 10, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')");
+      k.spend['meta-3'] = 50;
+      eq((await marketingCycle(1, k.deps)).paused, 1, 'se terminó la pauta');
+      // un ciclo encima de otro no gasta dos veces; un anuncio rechazado se anota y no frena
+      const m = mktFixture(); m.post(3, 1, '2026-11-18 03:00', 3000, 300, 0.8);
+      m.deps.adapters.meta.promote = async () => { throw new AdRejected('contenido no permitido'); };
+      const [a, b] = await Promise.all([marketingCycle(1, m.deps), marketingCycle(1, m.deps)]);
+      yes([a.skipped, b.skipped].includes('ya hay un ciclo corriendo'), 'el segundo ciclo simultáneo se saltea');
+      eq(m.d.prepare("SELECT count(*) n FROM decisions WHERE kind = 'rechazo'").get().n, 1, 'rechazo anotado');
     }],
     ['Circuito', 'Planificador: YouTube respeta su cuota por proyecto y usa el mejor horario aprendido', async () => {
       const yt = [{ id: 1, network: 'youtube', status: 'conectada', posts_per_day: 3 }];
