@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS ediciones (
   return db;
 }
 
+// primero los cortos (sin duración, al final); un trabajo que espera 2 h o más compite como corto, así los largos no se quedan sin turno
+export const ESPERA_MAX_H = 2;
+const ORDEN = `CASE WHEN created_at <= datetime('now', '-${ESPERA_MAX_H} hours') THEN 0 ELSE COALESCE(duracion_s, 1e12) END, id`;
 export const TERMINALES = ['listo', 'sin_momentos', 'error'];
 const J = (v) => (v === undefined || v === null ? null : JSON.stringify(v));
 const P = (v) => (v ? JSON.parse(v) : null);
@@ -44,7 +47,7 @@ export function repo(db) {
         project_id, reel_id, url, duracion_s ?? null, aprendizajes_url || '').lastInsertRowid);
     },
     trabajo: (id) => trabajo(get('SELECT * FROM trabajos WHERE id = ?', id)),
-    siguiente: () => get(`SELECT id FROM trabajos WHERE estado NOT IN ('listo','sin_momentos','error') ORDER BY id LIMIT 1`)?.id ?? null,
+    siguiente: () => get(`SELECT id FROM trabajos WHERE estado NOT IN ('listo','sin_momentos','error') ORDER BY ${ORDEN} LIMIT 1`)?.id ?? null,
     pendientes: () => all(`SELECT id FROM trabajos WHERE estado NOT IN ('listo','sin_momentos','error') ORDER BY id`).map((r) => r.id),
     estado(id, estado, detalle = '') { run("UPDATE trabajos SET estado = ?, detalle = ?, updated_at = datetime('now') WHERE id = ?", estado, detalle, id); },
     guardarTranscripcion(id, t) { run('UPDATE trabajos SET transcripcion = ? WHERE id = ?', J(t), id); },

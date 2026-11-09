@@ -60,7 +60,7 @@ export async function startSandbox(bases) {
       ACM_TIKTOK_CLIENT_KEY: 'tt-app', ACM_TIKTOK_CLIENT_SECRET: 'tt-secret', ACM_GOOGLE_CLIENT_ID: 'g-app', ACM_GOOGLE_CLIENT_SECRET: 'g-secret',
       ACM_TIKTOK_AUTH_URL: bases.tiktokAuth, ACM_GOOGLE_AUTH_URL: bases.googleAuth, ANTHROPIC_BASE_URL: bases.anthropic, ACM_R2_ENDPOINT: bases.r2, ACM_R2_BUCKET: 'acm-test', ACM_R2_ACCESS_KEY_ID: 'r2-key', ACM_R2_SECRET_ACCESS_KEY: 'r2-secret-simulador', ACM_CLEANUP: 'off', ANTHROPIC_API_KEY: 'sk-ant-simulador', ANTHROPIC_AUTH_TOKEN: '', ACM_PASSWORD: password, ACM_SECRET: crypto.randomBytes(32).toString('hex'), ACM_TICK_MS: '1000', ACM_FILL_MS: '50', ACM_SCHEDULER: 'on',
       ACM_GRAPH_URL: bases.graph, ACM_RUPLOAD_URL: bases.rupload, ACM_TIKTOK_URL: bases.tiktok, ACM_GOOGLE_OAUTH_URL: bases.googleOauth, ACM_YOUTUBE_URL: bases.youtube, ACM_YT_UPLOAD_URL: bases.ytUpload,
-      EDITOR_URL: bases.editor || '', EDITOR_TOKEN: EDITOR_TOKEN },
+      EDITOR_URL: bases.editor || '', EDITOR_PUBLIC_URL: bases.editor || '', EDITOR_TOKEN: EDITOR_TOKEN },
   });
   let log = '';
   const port = await new Promise((resolve, reject) => {
@@ -457,7 +457,7 @@ export function recorridoCases(sb) {
       eq((await post({ reel_id: c.crudo, estado: 'listo' })).status, 200, 'listo');
     }],
     [G('editor'), 'POST /api/editor/edicion con token crea el reel listo con source_id, clip_id y review pendiente', async () => {
-      const b = { crudo_id: c.crudo, clip_id: 'clip-abc', moment: { inicio_s: 1, fin_s: 9 }, recipe: { id: 'rapido' }, caption: 'Un corte', hashtags: 'club, deporte', file_url: `${sb.editor.base}/video.mp4`, cover_url: `${sb.editor.base}/portada.jpg`, duration: 8, expires_at: '2026-12-01 12:00' };
+      const b = { crudo_id: c.crudo, clip_id: 'clip-abc', moment: { inicio_s: 1, fin_s: 9 }, recipe: { id: 'rapido' }, review: 'aprobado', edicion_id: 501, caption: 'Un corte', hashtags: 'club, deporte', file_url: `${sb.editor.base}/video.mp4`, cover_url: `${sb.editor.base}/portada.jpg`, duration: 8, expires_at: '2026-12-01 12:00' };
       const r = await sb.box.editorApi('/api/editor/edicion', b);
       eq(r.status, 200, `entrega (${r.j?.error})`);
       eq([r.j.kind, r.j.source_id, r.j.clip_id, r.j.review, r.j.storage, r.j.expires_at], ['listo', c.crudo, 'clip-abc', 'pendiente', 'r2', '2026-12-01 12:00'], 'reel creado');
@@ -465,9 +465,34 @@ export function recorridoCases(sb) {
       yes(r.j.cover && (await sb.box.raw(`/media/${r.j.cover}`)).status === 200, 'la portada no se sirve');
       eq((await sb.box.raw(`/media/${r.j.file}`)).status, 302, 'el video quedó en R2');
       yes((sb.simLog?.() || []).some((l) => l === `r2 PUT ${r.j.file}`), 'no se subió a R2');
-      eq((await sb.box.editorApi('/api/editor/edicion', { ...b, crudo_id: 999999 })).status, 404, 'crudo inexistente');
-      eq((await sb.box.editorApi('/api/editor/edicion', { ...b, clip_id: '' })).status, 400, 'sin clip_id');
-      eq((await sb.box.editorApi('/api/editor/edicion', { ...b, review: 'x' })).status, 400, 'revisión inválida');
+      eq(r.j.review, 'pendiente', 'proyecto manual: sin aprobar aunque el editor mande aprobado');
+      eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, crudo_id: 999999 })).status, 404, 'crudo inexistente');
+      eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, clip_id: '' })).status, 400, 'sin clip_id');
+      eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, review: 'x' })).status, 400, 'revisión inválida');
+    }],
+    [G('editor'), 'Un reintento con el mismo edicion_id devuelve el reel ya creado (200), sin duplicar', async () => {
+      const b = { crudo_id: c.crudo, clip_id: 'clip-abc', file_url: `${sb.editor.base}/video.mp4`, edicion_id: 501 };
+      const antes = (await api('GET', `/api/projects/${c.p}/reels`)).j.length;
+      const r = await sb.box.editorApi('/api/editor/edicion', b);
+      eq([r.status, r.j?.editor_edition_id], [200, 501], 'reintento');
+      eq((await api('GET', `/api/projects/${c.p}/reels`)).j.length, antes, 'no se duplicó');
+    }],
+    [G('editor'), 'Con revisión automática se acepta aprobado; rechazado queda rechazado', async () => {
+      eq((await api('PUT', `/api/projects/${c.p}`, { review_mode: 'auto' })).status, 200, 'modo auto');
+      const mk = (review, edicion_id) => sb.box.editorApi('/api/editor/edicion', { crudo_id: c.crudo, clip_id: 'clip-r', review, edicion_id, file_url: `${sb.editor.base}/video.mp4` });
+      eq((await mk('aprobado', 601)).j?.review, 'aprobado', 'aprobado en auto');
+      eq((await mk('rechazado', 602)).j?.review, 'rechazado', 'rechazado');
+      eq((await mk('pendiente', 603)).j?.review, 'pendiente', 'pendiente');
+      await api('PUT', `/api/projects/${c.p}`, { review_mode: 'manual' });
+    }],
+    [G('editor'), 'SSRF: un file_url o cover_url de otro servidor da 400 y ACM no lo pide', async () => {
+      const ajeno = await new Promise((res) => { const hits = []; const s = http.createServer((q, w) => { hits.push(q.url); w.end('x'); }); s.listen(0, '127.0.0.1', () => res({ s, hits, base: `http://127.0.0.1:${s.address().port}` })); });
+      try {
+        const b = { crudo_id: c.crudo, clip_id: 'clip-x', edicion_id: 701, file_url: `${ajeno.base}/video.mp4` };
+        eq((await sb.box.editorApi('/api/editor/edicion', b)).status, 400, 'file_url ajeno');
+        eq((await sb.box.editorApi('/api/editor/edicion', { ...b, file_url: `${sb.editor.base}/video.mp4`, cover_url: `${ajeno.base}/p.jpg` })).status, 400, 'cover_url ajeno');
+        eq(ajeno.hits, [], 'ACM no tendría que haber pedido nada al servidor ajeno');
+      } finally { ajeno.s.close(); }
     }],
     [G('editor'), 'Sin EDITOR_URL el crudo queda en cola y no hay error', async () => {
       const box = await startSandbox({ ...sb.bases, editor: '' });

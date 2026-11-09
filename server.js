@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { readPadron } from './padron.js';
 import { publish, tiktokOptions, tiktokCreator } from './publisher.js';
@@ -87,6 +87,8 @@ for (const [c, def] of [['kind', "TEXT DEFAULT 'club'"], ['ads_networks', `TEXT 
 for (const [c, def] of [['clip_id', 'TEXT'], ['moment', 'TEXT'], ['recipe', 'TEXT'], ['review', "TEXT DEFAULT 'pendiente'"], ['expires_at', "TEXT DEFAULT ''"], ['cover', "TEXT DEFAULT ''"]])
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
 if (!cols('reels').includes('status_detail')) db.exec("ALTER TABLE reels ADD COLUMN status_detail TEXT DEFAULT ''");
+if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD COLUMN editor_edition_id INTEGER');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS reels_editor_edition ON reels(editor_edition_id) WHERE editor_edition_id IS NOT NULL');
 initTrace(db);
 initKnowledge(db);
 // campañas: el presupuesto total del proyecto (pauta.budget) se reparte en campañas con sus cuentas y su contenido
@@ -177,24 +179,35 @@ app.post('/api/editor/estado', requireEditor, (req, res) => {
 // lo que el editor aprendió de lo publicado: lo llena la fase del analista; por ahora devuelve la lista vacía
 app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => res.json({ project_id: Number(req.params.pid), aprendizajes: [] }));
 // el editor entrega una edición lista: ACM baja el archivo (y la portada), lo guarda donde guarda todo y crea el reel
-async function bajar(url, dest) {
-  const r = await fetch(url, { signal: AbortSignal.timeout(30 * 60e3) });
+// solo se baja de la dirección pública del editor (nada de URLs ajenas), sin seguir redirecciones y con tope de tamaño
+const editorOrigin = () => { try { return new URL(process.env.EDITOR_PUBLIC_URL || '').origin; } catch { return ''; } };
+const deEditor = (u) => { try { const o = editorOrigin(); return !!o && new URL(String(u)).origin === o; } catch { return false; } };
+async function bajar(url, dest, maxBytes) {
+  const r = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(30 * 60e3) });
   if (!r.ok || !r.body) throw new Error(`no se pudo bajar ${new URL(url).pathname}: ${r.status}`);
-  await pipeline(Readable.fromWeb(r.body), fs.createWriteStream(dest));
+  let n = 0;
+  const tope = new Transform({ transform(chunk, _e, cb) { n += chunk.length; cb(n > maxBytes ? new Error('el archivo pasa el tamaño máximo') : null, chunk); } });
+  await pipeline(Readable.fromWeb(r.body), tope, fs.createWriteStream(dest));
 }
 app.post('/api/editor/edicion', requireEditor, async (req, res) => {
   const b = req.body || {};
   const crudo = get("SELECT * FROM reels WHERE id = ? AND kind = 'crudo'", Number(b.crudo_id));
   if (!crudo) return res.status(404).json({ error: 'No existe ese crudo' });
   if (!String(b.clip_id || '').trim()) return res.status(400).json({ error: 'Falta el clip_id' });
-  if (!/^https?:\/\//.test(String(b.file_url || ''))) return res.status(400).json({ error: 'Falta el link del video (file_url)' });
-  const review = b.review === undefined ? 'pendiente' : b.review;
+  const eid = Number.isInteger(Number(b.edicion_id)) && Number(b.edicion_id) > 0 ? Number(b.edicion_id) : null;
+  // un reintento del editor no duplica: devuelve el reel que ya se creó
+  if (eid) { const ya = get('SELECT *, 0 AS posts FROM reels WHERE editor_edition_id = ?', eid); if (ya) return res.json(ya); }
+  if (!deEditor(b.file_url)) return res.status(400).json({ error: 'El link del video (file_url) tiene que ser del editor' });
+  if (b.cover_url && !deEditor(b.cover_url)) return res.status(400).json({ error: 'El link de la portada (cover_url) tiene que ser del editor' });
+  let review = b.review === undefined ? 'pendiente' : b.review;
   if (!['pendiente', 'aprobado', 'rechazado'].includes(review)) return res.status(400).json({ error: 'Revisión inválida: pendiente, aprobado o rechazado' });
+  // la aprobación automática solo vale si el proyecto la tiene prendida
+  if (review === 'aprobado' && get('SELECT review_mode FROM projects WHERE id = ?', crudo.project_id)?.review_mode !== 'auto') review = 'pendiente';
   const json = (v) => (v === undefined || v === null ? null : typeof v === 'string' ? v : JSON.stringify(v));
   const id = crypto.randomUUID(), tmp = path.join(UPLOADS, `tmp-ed-${id}.mp4`);
   let file = `${id}.mp4`, storage = 'local', cover = '';
   try {
-    await bajar(b.file_url, tmp);
+    await bajar(b.file_url, tmp, MAX_UPLOAD);
     if (r2Ready()) {
       file = `p${crudo.project_id}-${id}.mp4`; storage = 'r2';
       const size = fs.statSync(tmp).size;
@@ -202,8 +215,8 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
       if (!put.ok) throw new Error(`R2 no aceptó el video: ${put.status}`);
     } else fs.renameSync(tmp, path.join(UPLOADS, file));
     // la portada es chica: va al disco del servidor
-    if (/^https?:\/\//.test(String(b.cover_url || ''))) {
-      try { cover = `${id}.jpg`; await bajar(b.cover_url, path.join(UPLOADS, cover)); } catch { cover = ''; }
+    if (b.cover_url) {
+      try { cover = `${id}.jpg`; await bajar(b.cover_url, path.join(UPLOADS, cover), 10 * 1024 * 1024); } catch { fs.rm(path.join(UPLOADS, cover), { force: true }, () => {}); cover = ''; }
     }
   } catch (e) {
     console.error('editor/edicion:', e.message);
@@ -213,9 +226,9 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
   const size = storage === 'local' ? fs.statSync(path.join(UPLOADS, file)).size : 0;
   const dur = Number(b.duration) > 0 ? Number(b.duration) : (m.duration ?? null);
   const title = String(b.title || '').trim() || `${crudo.title} · ${String(b.clip_id).slice(0, 12)}`;
-  const r = run("INSERT INTO reels (project_id, title, caption, hashtags, file, original_name, size, duration, width, height, kind, source_id, storage, clip_id, moment, recipe, review, expires_at, cover, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', ?, ?, ?, ?, ?, ?, ?, ?, 'borrador')",
+  const r = run("INSERT INTO reels (project_id, title, caption, hashtags, file, original_name, size, duration, width, height, kind, source_id, storage, clip_id, moment, recipe, review, expires_at, cover, editor_edition_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'borrador')",
     crudo.project_id, title, String(b.caption || ''), tags(b.hashtags), file, `${title}.mp4`, size, dur, m.width ?? null, m.height ?? null, crudo.id, storage,
-    String(b.clip_id), json(b.moment), json(b.recipe), review, String(b.expires_at || ''), cover);
+    String(b.clip_id), json(b.moment), json(b.recipe), review, String(b.expires_at || ''), cover, eid);
   res.json(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
 });
 
@@ -516,7 +529,7 @@ async function sendToEditor(r) {
     const pub = (process.env.ACM_PUBLIC_URL || '').replace(/\/+$/, '');
     const resp = await fetch(`${base}/trabajos`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.EDITOR_TOKEN || ''}` }, signal: AbortSignal.timeout(20000),
-      body: JSON.stringify({ project_id: r.project_id, reel_id: r.id, url: await getUrl(r.file, 12 * 3600), duracion_s: r.duration, aprendizajes_url: pub ? `${pub}/api/editor/aprendizajes/${r.project_id}` : '' }),
+      body: JSON.stringify({ project_id: r.project_id, reel_id: r.id, url: await getUrl(r.file, 6 * 86400), duracion_s: r.duration, aprendizajes_url: pub ? `${pub}/api/editor/aprendizajes/${r.project_id}` : '' }),
     });
     if (!resp.ok) throw new Error(`el editor respondió ${resp.status}`);
   } catch (e) {

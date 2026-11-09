@@ -9,6 +9,7 @@ import { crearEstudio } from './estudio.js';
 import { crearAcm } from './acm.js';
 import { crearEditor } from './server.js';
 import { crearRunner } from './runner.js';
+import { repo } from './db.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (c, what) => { if (!c) throw new Error(what); };
@@ -120,7 +121,7 @@ const casos = [
       eq([peds[0].inicio_s, peds[0].fin_s, peds[0].palabras.map((p) => p.texto)], [0, 12, ['hola', 'chau']], 'solo las palabras del momento');
       eq(m.acm.ediciones.length, 2, 'ediciones entregadas');
       const e = m.acm.ediciones[0];
-      eq([e.crudo_id, e.clip_id, e.review, e.caption, e.duration, e.bajado, e.portada_bajada], [42, 'c42-1', 'aprobado', 'Texto revisado', 12, VIDEO.length, true], 'entrega con archivo bajable');
+      yes(e.edicion_id > 0, 'falta edicion_id'); eq([e.crudo_id, e.clip_id, e.review, e.caption, e.duration, e.bajado, e.portada_bajada], [42, 'c42-1', 'aprobado', 'Texto revisado', 12, VIDEO.length, true], 'entrega con archivo bajable');
       eq(m.acm.ediciones.map((x) => x.clip_id), ['c42-1', 'c42-1'], 'las dos versiones comparten clip_id');
       eq(fs.readdirSync(path.join(m.dir, 'entregas')), [], 'los archivos entregados se borran');
       const g = await (await fetch(`${m.srv.base}/trabajos/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } })).json();
@@ -160,6 +161,17 @@ const casos = [
     } finally { await m.fin(); }
   }],
 ];
+
+casos.push(['Cola', 'Primero los cortos (sin duración al final); el que espera 2 h o más compite como corto', async () => {
+  const db = abrirDb(), R = repo(db);
+  const mk = (reel_id, duracion_s) => R.crearTrabajo({ project_id: 1, reel_id, url: 'http://x/y.mp4', duracion_s });
+  const largo = mk(1, 3600), corto = mk(2, 60), medio = mk(3, 600), sinDur = mk(4, null);
+  const orden = () => { const o = []; for (let id; (id = R.siguiente());) { o.push(id); R.estado(id, 'listo'); } return o; };
+  eq(orden(), [corto, medio, largo, sinDur], 'por duración');
+  const a = mk(5, 3600), b = mk(6, 60);
+  db.prepare("UPDATE trabajos SET created_at = datetime('now', '-3 hours') WHERE id = ?").run(a);
+  eq(orden(), [a, b], 'el largo que espera hace 3 h pasa adelante');
+}]);
 
 let ok = 0;
 for (const [grupo, nombre, fn] of casos) {
