@@ -9,7 +9,7 @@ import { publish } from './publisher.js';
 import { uploadAudience, createCampaign, testAds } from './ads.js';
 import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
-import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, youtubeShare, NETWORK_CAPS } from './rules.js';
+import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS } from './rules.js';
 import { embed } from './knowledge.js';
 import { startSandbox, recorridoCases } from './recorrido.js';
 
@@ -113,6 +113,10 @@ function cases(video, sim) {
     ['Circuito', 'Regla: solo de 08:00 a 23:00 hora local', async () => {
       const at = (hm) => scheduleBlocked({ reel_id: 1, account_id: 1, network: 'tiktok', scheduled_at: `2026-12-01 ${hm}`, clip_id: 'c', review: 'aprobado' }, { siblings: [], dayCount: 0, networkCap: 15 });
       yes(at('07:59'), '07:59'); yes(at('23:01'), '23:01'); eq(at('08:00'), null, '08:00'); eq(at('23:00'), null, '23:00');
+    }],
+    ['Circuito', 'withinWindow: la hora real también respeta 08:00-23:00', async () => {
+      eq(['07:59', '08:00', '23:00', '23:01'].map(withinWindow), [false, true, true, false], 'ventana');
+      eq(withinWindow('2026-12-01 12:00'), true, 'con fecha');
     }],
     ['Circuito', 'Regla: sin aprobar no se programa', async () => {
       const p = { reel_id: 1, account_id: 1, network: 'instagram', scheduled_at: '2026-12-01 12:00', clip_id: 'c' };

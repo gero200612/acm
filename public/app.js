@@ -461,7 +461,7 @@ function calendarioView() {
     <div class="cal-legend small muted"><span><i class="lgd prog"></i>Programado</span><span><i class="lgd pub"></i>Publicado</span><span><i class="lgd fail"></i>Falló</span><span><i class="lgd publ"></i>Publicándose</span>${lim ? '<span><i class="lgd veda"></i>Sin propaganda</span>' : ''}</div>
   </section>`;
 }
-const POST_ST = { programado: 'Programado', publicando: 'Publicando…', publicado: 'Publicado', fallido: 'Falló' };
+const POST_ST = { programado: 'Programado', publicando: 'Publicando…', publicado: 'Publicado', fallido: 'Falló', bloqueado: 'Bloqueado' };
 function postDialog(ids) {
   const L = ids.map((id) => state.posts.find((x) => x.id === id)).filter(Boolean);
   if (!L.length) return;

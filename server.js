@@ -13,7 +13,7 @@ import { initTrace, traced } from './trace.js';
 import { runBanco } from './banco.js';
 import { probe, review } from './mp4probe.js';
 import { r2Ready, putUrl, getUrl, head as r2Head, remove as r2Remove, download as r2Download, MAX_UPLOAD } from './storage.js';
-import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, NETWORK_CAPS } from './rules.js';
+import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, withinWindow, NETWORK_CAPS } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
@@ -471,6 +471,7 @@ app.put('/api/reels/:id', (req, res) => {
   const r = get('SELECT * FROM reels WHERE id = ?', req.params.id); if (!r) return res.status(404).json({ error: 'No existe' });
   const d = pick(req.body || {}, ['title', 'caption', 'hashtags', 'status', 'kind', 'source_id', 'clip_id', 'moment', 'recipe', 'review', 'expires_at', 'cover']);
   if ('review' in d && !['pendiente', 'aprobado', 'rechazado'].includes(d.review)) return res.status(400).json({ error: 'Revisión inválida: pendiente, aprobado o rechazado' });
+  if ('clip_id' in d && r.clip_id && d.clip_id !== r.clip_id) return res.status(400).json({ error: 'El recorte de este reel no se puede cambiar ni quitar.' });
   for (const k of ['moment', 'recipe']) if (k in d && d[k] !== null && typeof d[k] !== 'string') d[k] = JSON.stringify(d[k]);
   if ('title' in d && !String(d.title).trim()) return res.status(400).json({ error: 'El reel necesita un título' });
   if ('hashtags' in d) d.hashtags = tags(d.hashtags);
@@ -828,12 +829,14 @@ async function tick() {
   if (busy) return;
   busy = true;
   try {
+    const waiting = []; // de un recorte, fuera del horario: quedan 'programado' y salen cuando se abre la ventana
     for (;;) {
       const now = localNow();
-      const p = get(`SELECT p.*, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.storage, r.archived_at, r.title, r.caption, r.hashtags, pr.propaganda_until
+      const p = get(`SELECT p.*, r.clip_id, a.network, a.status AS acc_status, a.creds, a.id AS acc_id, r.file, r.storage, r.archived_at, r.title, r.caption, r.hashtags, pr.propaganda_until
         FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id JOIN projects pr ON pr.id = p.project_id
-        WHERE p.status = 'programado' AND pr.demo = 0 AND p.scheduled_at <= ? ORDER BY p.scheduled_at LIMIT 1`, now);
+        WHERE p.status = 'programado' AND pr.demo = 0 AND p.scheduled_at <= ? ${waiting.length ? `AND p.id NOT IN (${waiting.join(',')})` : ''} ORDER BY p.scheduled_at LIMIT 1`, now);
       if (!p) break;
+      if (p.clip_id && !withinWindow(now)) { waiting.push(Number(p.id)); continue; }
       // se marca antes de subir: si dos vueltas se cruzan, solo una la toma
       if (!run("UPDATE posts SET status = 'publicando', attempts = attempts + 1 WHERE id = ? AND status = 'programado'", p.id).changes) continue;
       const fail = (msg) => run("UPDATE posts SET status = 'fallido', error = ? WHERE id = ?", msg, p.id);

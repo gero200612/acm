@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { als } from './trace.js';
+import { withinWindow } from './rules.js';
 
 const APP = path.dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -119,14 +120,23 @@ export function recorridoCases(sb) {
       eq((await P(r2, a2, '2030-01-10 13:00')).status, 200, 'a +3 h');
       c.clipAcc = [a1, a2];
     }],
+    [G('circuito'), 'Un reel con recorte no puede cambiar ni quitar su clip_id', async () => {
+      eq((await api('PUT', `/api/reels/${c.cl[0]}`, { clip_id: '' })).status, 400, 'quitar');
+      eq((await api('PUT', `/api/reels/${c.cl[0]}`, { clip_id: 'otro' })).status, 400, 'cambiar');
+      eq((await api('PUT', `/api/reels/${c.cl[0]}`, { clip_id: 'clip-prueba', title: 'V1' })).status, 200, 'el mismo valor sigue valiendo');
+    }],
     [G('circuito'), 'Una publicación programada antes de un rechazo no sale: queda bloqueada con la nota', async () => {
       const posts = (await api('GET', `/api/projects/${c.pol}/posts`)).j;
       const p = posts.find((x) => x.reel_id === c.cl[0]); yes(p, 'no está la publicación');
       eq((await api('PUT', `/api/reels/${c.cl[0]}`, { review: 'rechazado' })).status, 200, 'rechazo');
       eq((await api('POST', `/api/posts/${p.id}/now`, {})).status, 200, 'publicar ahora');
-      let q; for (let i = 0; i < 20; i++) { await sleep(500); q = (await api('GET', `/api/projects/${c.pol}/posts`)).j.find((x) => x.id === p.id); if (q.status !== 'programado') break; }
-      yes(q.status === 'bloqueado' && /aprobado/.test(q.note), `estado ${q.status}, nota ${q.note}`);
-      await api('DELETE', `/api/projects/${c.pol}`); // que no queden publicaciones de este recorrido para el caso de borrar
+      try {
+        // dentro del horario (08:00-23:00 hora local) el tick la bloquea; fuera, la deja programada hasta que se abra la ventana
+        const inside = withinWindow((await api('GET', '/api/clock')).j.now);
+        let q; for (let i = 0; i < 20; i++) { await sleep(500); q = (await api('GET', `/api/projects/${c.pol}/posts`)).j.find((x) => x.id === p.id); if (q.status !== 'programado') break; }
+        if (inside) yes(q.status === 'bloqueado' && /aprobado/.test(q.note), `estado ${q.status}, nota ${q.note}`);
+        else eq([q.status, q.note], ['programado', ''], 'fuera de horario no se publica ni se bloquea');
+      } finally { await api('DELETE', `/api/projects/${c.pol}`); } // que no queden publicaciones de este recorrido para el caso de borrar
     }],
     [G('padrón'), 'CSV: cuenta socios, teléfonos y mails; rechaza .xls', async () => {
       const csv = 'Nro Socio;Apellido y Nombre;DNI;Teléfono;Email\n1;Pérez Ana;30111222;11 15 1234-5678;ANA@x.com\n2;Gómez B;30111223;;\n3;López C;30111224;0351 15 555 1234;caro@y.com.ar\n4;X;1;+54 9 11 2222 3333;malo@\n';

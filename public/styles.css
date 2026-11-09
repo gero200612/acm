@@ -109,7 +109,7 @@ a { color: var(--blue-2); }
 .chip.s-pendiente, .chip.s-borrador { background: #eef0f7; color: #5f6080; }
 .chip.s-conectada, .chip.s-publicado, .chip.s-aprobado { background: #d6f8e8; color: #00704a; }
 .chip.s-pausada, .chip.s-programado { background: #fff1d6; color: #8a5300; }
-.chip.s-fallido { background: #fde3e6; color: #a8202f; }
+.chip.s-fallido, .chip.s-bloqueado { background: #fde3e6; color: #a8202f; }
 .chip.k-principal { background: #ffe8de; color: #b23a0b; }
 .chip.countdown { background: var(--navy); color: #fff; }
 .chip.countdown::before { background: var(--green); }
@@ -378,7 +378,7 @@ dialog .df { display: flex; justify-content: flex-end; gap: 10px; padding: 0 22p
 .cal-ev { display: flex; align-items: center; gap: 5px; width: 100%; border: 0; border-radius: 6px; padding: 3px 6px; font-size: 12px; text-align: left; background: #fff1d6; color: #6b4300; min-width: 0; }
 .cal-ev:hover { filter: brightness(.96); }
 .cal-ev.s-publicado { background: #d6f8e8; color: #00573a; }
-.cal-ev.s-fallido { background: #fde3e6; color: #8c1c29; }
+.cal-ev.s-fallido, .cal-ev.s-bloqueado { background: #fde3e6; color: #8c1c29; }
 .cal-ev .t { font-weight: 700; font-variant-numeric: tabular-nums; flex: none; }
 .cal-ev .r { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .cal-more { border: 0; background: transparent; font-size: 12px; font-weight: 600; color: var(--muted); text-align: left; padding: 2px 6px; }

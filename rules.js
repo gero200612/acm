@@ -30,6 +30,8 @@ export const youtubeShare = (totalQuota, activeProjects) => Math.floor((Number(t
 
 export const SPACING_MIN = 180;            // misma red, hermanas del mismo recorte: 3 h entre una y otra
 export const WINDOW = ['08:00', '23:00'];  // horario permitido, hora local (ambos extremos valen)
+// hm = 'HH:MM' (o una fecha-hora local 'YYYY-MM-DD HH:MM'): ¿está dentro del horario de publicación?
+export function withinWindow(hm) { const t = String(hm).slice(-5); return t >= WINDOW[0] && t <= WINDOW[1]; }
 const toMin = (s) => new Date(String(s).replace(' ', 'T') + ':00Z').getTime() / 6e4; // 'YYYY-MM-DD HH:MM' como minutos (la hora local no cambia con el huso)
 
 // Por qué no se puede programar (o publicar) esta publicación (null = se puede). Pura: todo lo que necesita viene en ctx.
@@ -40,7 +42,7 @@ export function scheduleBlocked(post, ctx = {}) {
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(at)) return 'La fecha no es válida.';
   if (post.review !== 'aprobado') return 'El recorte todavía no está aprobado: aprobalo antes de programarlo.';
   const hm = at.slice(11);
-  if (hm < WINDOW[0] || hm > WINDOW[1]) return `Solo se publica entre las ${WINDOW[0]} y las ${WINDOW[1]} (hora de Argentina).`;
+  if (!withinWindow(hm)) return `Solo se publica entre las ${WINDOW[0]} y las ${WINDOW[1]} (hora de Argentina).`;
   if (ctx.sameReelSameNetwork) return 'El mismo reel en dos cuentas de la misma red hace que la red las bloquee.';
   for (const s of ctx.siblings || []) {
     if (s.network !== post.network) continue;
