@@ -1,5 +1,7 @@
 // Meta Ads: público personalizado con el padrón (solo huellas SHA-256) y campaña creada EN PAUSA para revisar.
 import { bases } from './connections.js';
+import { AdRejected, endOfDay, usdToLocal, localToUsd } from './ads-iface.js';
+import { mask } from './trace.js';
 
 async function g(method, path, token, params = {}, json) {
   const url = `${bases().graph}/${path}`;
@@ -17,7 +19,9 @@ async function send(url, opt) {
   try { res = await fetch(url, opt); } catch (e) { throw new Error(e.name === 'TimeoutError' ? 'Meta no respondió a tiempo.' : 'No pudimos conectar con Meta.'); }
   const body = await res.json().catch(() => ({}));
   if (res.ok && !body.error) return body;
-  throw new Error(`Meta respondió: ${body.error?.error_user_msg || body.error?.message || 'error ' + res.status}`);
+  const err = new Error(`Meta respondió: ${body.error?.error_user_msg || body.error?.message || 'error ' + res.status}`);
+  err.metaCode = body.error?.code;
+  throw err;
 }
 const act = (id) => (String(id).startsWith('act_') ? String(id) : 'act_' + id);
 
@@ -73,4 +77,62 @@ export async function campaignInsights(c, id) {
   const r = await g('GET', `${id}/insights`, c.accessToken, { fields: 'spend,impressions,reach', date_preset: 'maximum' });
   const d = r.data?.[0] || {};
   return { spend: Number(d.spend) || 0, impressions: Number(d.impressions) || 0, reach: Number(d.reach) || 0 };
+}
+
+// ---- Adaptador del ciclo de marketing (interfaz de ads-iface.js): promociona una publicación que YA existe ----
+const policyError = (e) => e.metaCode === 368 || /\bpolicy\b|pol[ií]ticas de (anuncios|publicidad)/i.test(e.message || '');
+
+export function metaAdapter(ctx) {
+  const c = ctx.creds, secrets = [c.accessToken];
+  const call = async (...a) => {
+    try { return await g(...a); }
+    catch (e) {
+      const msg = mask(e.message, secrets);
+      if (policyError(e)) throw new AdRejected(msg);
+      throw new Error(msg);
+    }
+  };
+  const ensureCampaign = async (project) => {
+    const st = ctx.state.get('meta');
+    if (st.campaignId) return { campaignId: st.campaignId };
+    const p = project || ctx.project(), pol = !!p.ads_political;
+    const r = await call('POST', `${act(c.adAccountId)}/campaigns`, c.accessToken, {
+      name: `ACM · ${p.name}`, objective: 'OUTCOME_AWARENESS', status: 'ACTIVE',
+      special_ad_categories: pol ? ['ISSUES_ELECTIONS_POLITICS'] : [], special_ad_category_country: pol ? ['AR'] : [],
+    });
+    ctx.state.set('meta', { ...st, campaignId: r.id });
+    return { campaignId: r.id };
+  };
+  return {
+    ensureCampaign,
+    // el adId es el ID del conjunto de anuncios: ahí viven el presupuesto diario, el fin y el pausado
+    async promote(post, dailyUsd) {
+      const p = ctx.project(), { campaignId } = await ensureCampaign(p);
+      const acc = ctx.accountCreds(post.network) || {};
+      const creative = post.network === 'facebook'
+        ? { object_story_id: String(post.external_id).includes('_') ? post.external_id : `${acc.pageId}_${post.external_id}` }
+        : { object_id: acc.pageId, instagram_user_id: acc.instagramBusinessId, source_instagram_media_id: post.external_id };
+      const end = ctx.endDate();
+      if (!end) throw new Error('Falta la fecha de fin de la pauta.');
+      const cr = await call('POST', `${act(c.adAccountId)}/adcreatives`, c.accessToken, { name: `ACM · post ${post.id}`, ...creative });
+      const targeting = { geo_locations: { countries: ['AR'] }, age_min: 18, ...(p.ads_audience_id ? { custom_audiences: [{ id: p.ads_audience_id }] } : {}) };
+      const set = await call('POST', `${act(c.adAccountId)}/adsets`, c.accessToken, {
+        name: `ACM · post ${post.id}`, campaign_id: campaignId, status: 'ACTIVE',
+        daily_budget: Math.round(usdToLocal(p, dailyUsd) * 100), end_time: endOfDay(end),
+        billing_event: 'IMPRESSIONS', optimization_goal: 'REACH', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', targeting,
+      });
+      try { await call('POST', `${act(c.adAccountId)}/ads`, c.accessToken, { name: `ACM · post ${post.id}`, adset_id: set.id, creative: { creative_id: cr.id }, status: 'ACTIVE' }); }
+      catch (e) { try { await call('POST', set.id, c.accessToken, { status: 'PAUSED' }); } catch {} throw e; }
+      return { adId: set.id };
+    },
+    async setBudget(adId, dailyUsd) { await call('POST', adId, c.accessToken, { daily_budget: Math.round(usdToLocal(ctx.project(), dailyUsd) * 100) }); },
+    async pause(adId) { await call('POST', adId, c.accessToken, { status: 'PAUSED' }); },
+    async insights(adId) {
+      const p = ctx.project();
+      const r = await call('GET', `${adId}/insights`, c.accessToken, { fields: 'spend,impressions,reach', date_preset: 'maximum' });
+      const d = r.data?.[0] || {}, reach = Number(d.reach) || 0;
+      // con el público del padrón en la segmentación, todo el alcance cae dentro del padrón; sin él, no hay forma de saberlo
+      return { spend: localToUsd(p, d.spend), impressions: Number(d.impressions) || 0, reach, target_reach: p.ads_audience_id ? reach : null };
+    },
+  };
 }

@@ -245,10 +245,10 @@
 - Interfaz común por red: `ensureCampaign(project)`, `promote(post, dailyUsd)`, `setBudget(adId, dailyUsd)`, `pause(adId)`, `insights(adId) -> {spend, impressions, reach, target_reach|null}`.
 - Rechazo: un error de política (`AdRejected`) marca la red como `bloqueada` en el proyecto, `splitNetworks` la deja en 0 y se manda una alerta. No se reintenta hasta que Gero la reactive.
 
-- [ ] Casos contra el simulador: con cada red se crea la campaña (una sola por red y proyecto, la segunda llamada reusa), se promociona, se cambia el presupuesto, se pausa y se leen insights.
-- [ ] Caso de **Review Focus 3**: el simulador rechaza el anuncio en TikTok. La red queda `bloqueada`, el siguiente ciclo reparte entre Meta y YouTube, hay 1 alerta y no hay más intentos.
-- [ ] Caso: una red sin `target_reach` usa el alcance por segmentación con peso 0,5.
-- [ ] Implementar. Commit.
+- [x] Casos contra el simulador: con cada red se crea la campaña (una sola por red y proyecto, la segunda llamada reusa), se promociona, se cambia el presupuesto, se pausa y se leen insights.
+- [x] Caso de **Review Focus 3**: el simulador rechaza el anuncio en TikTok. La red queda `bloqueada`, el siguiente ciclo reparte entre Meta y YouTube, hay 1 alerta y no hay más intentos.
+- [x] Caso: una red sin `target_reach` usa el alcance por segmentación con peso 0,5.
+- [x] Implementar. Commit.
 
 ---
 

@@ -57,6 +57,8 @@ export const BASES = {
   rupload: process.env.ACM_RUPLOAD_URL || 'https://rupload.facebook.com',
   tiktok: process.env.ACM_TIKTOK_URL || 'https://open.tiktokapis.com',
   googleOauth: process.env.ACM_GOOGLE_OAUTH_URL || 'https://oauth2.googleapis.com',
+  tiktokAds: process.env.ACM_TIKTOK_ADS_URL || 'https://business-api.tiktok.com/open_api',
+  googleAds: process.env.ACM_GOOGLE_ADS_URL || 'https://googleads.googleapis.com',
   youtube: process.env.ACM_YOUTUBE_URL || 'https://www.googleapis.com',
   youtubeAnalytics: process.env.ACM_YT_ANALYTICS_URL || 'https://youtubeanalytics.googleapis.com',
   ytUpload: process.env.ACM_YT_UPLOAD_URL || 'https://www.googleapis.com',

@@ -186,7 +186,7 @@ function homeView() {
 
 
 // ---------- laboratorio ----------
-const RUN_KIND = { publicacion: 'Publicación', conexion: 'Prueba de conexión', meta_ads: 'Meta Ads', banco: 'Banco de pruebas' };
+const RUN_KIND = { publicacion: 'Publicación', conexion: 'Prueba de conexión', meta_ads: 'Meta Ads', pauta: 'Pauta', banco: 'Banco de pruebas' };
 const RUN_ST = { ok: 'Bien', error: 'Falló', corriendo: 'Corriendo', cortada: 'Cortada' };
 async function loadLab(tab) {
   state.lab ||= { kind: '', sel: null, detail: null };
@@ -589,7 +589,35 @@ function pautaView() {
     <div class="pz-main" id="pauta-out">${pautaOut(p, c)}</div>
   </div>
   <section class="card" id="pauta-tabla">${pautaTabla(p, c)}</section>
-  ${adsCard(p)}`;
+  ${adsCard(p)}
+  ${adsNetCards(p)}`;
+}
+// TikTok Ads y Google Ads: credenciales de pauta del proyecto, "Probar conexión" y, si una red rechazó un anuncio, «Reactivar»
+function adsNetCards(p) {
+  const a = p.ads || {}, bl = p.ads_blocked || {};
+  const inp = (net, k, label, ph = '', secret = false) => {
+    const f = (a[net] || {})[k] || {};
+    return `<label class="field">${label}<input class="input ${secret ? 'masked' : ''}" data-adsx="${net}" data-k="${k}" autocomplete="off" ${secret ? `placeholder="${f.set ? 'Guardado · pegá uno nuevo para cambiarlo' : esc(ph)}"` : `value="${esc(f.value || '')}" placeholder="${esc(ph)}"`}></label>`;
+  };
+  const blocked = (net, t) => bl[net] ? `<p class="banner err">${t} rechazó un anuncio y la red está bloqueada: no se le reparte plata. ${esc(bl[net].reason || '')} <button class="btn sm" data-act="ads-unblock" data-net="${net}">Reactivar</button></p>` : '';
+  return `<section class="card ads" id="ads-tt-card">
+    <div class="card-head"><div><h2 class="h2">TikTok Ads</h2><p class="small muted">Spark Ads: el ciclo promociona el video ya publicado en la cuenta de TikTok vinculada, con presupuesto diario y fecha de fin en la propia red.</p></div>
+      ${a.ok?.tiktok ? '<span class="chip s-conectada">Datos completos</span>' : ''}</div>
+    ${blocked('tiktok', 'TikTok')}
+    <div class="two">${inp('tiktok', 'ttAdvertiserId', 'ID del anunciante', '7000000000000')}${inp('tiktok', 'ttAccessToken', 'Token de acceso (Marketing API)', 'Access token', true)}</div>
+    <div class="two">${inp('tiktok', 'ttBcId', 'ID del Business Center', '')}${inp('tiktok', 'ttIdentityId', 'Identidad (cuenta de TikTok vinculada)', '')}</div>
+    <div class="row"><button class="btn primary sm" data-act="ads-save-net" data-net="tiktok">Guardar y probar conexión</button></div>
+  </section>
+  <section class="card ads" id="ads-youtube-card">
+    <div class="card-head"><div><h2 class="h2">Google Ads · YouTube Shorts</h2><p class="small muted">El Short ya publicado sale como anuncio de video; el padrón viaja como lista de Customer Match (solo huellas). Cada Short lleva su propia campaña con presupuesto diario y fecha de fin.</p></div>
+      ${a.ok?.youtube ? '<span class="chip s-conectada">Datos completos</span>' : ''}</div>
+    ${blocked('youtube', 'YouTube')}
+    <div class="two">${inp('youtube', 'gCustomerId', 'ID de cliente de Google Ads', '123-456-7890')}${inp('youtube', 'gLoginCustomerId', 'ID de la cuenta administradora (opcional)', '')}</div>
+    <div class="two">${inp('youtube', 'gDeveloperToken', 'Token de desarrollador', 'Developer token', true)}${inp('youtube', 'gRefreshToken', 'Token de renovación (alcance adwords)', 'Refresh token', true)}</div>
+    <div class="two">${inp('youtube', 'gClientId', 'ID de cliente OAuth (si no, el de ACM)', '')}${inp('youtube', 'gClientSecret', 'Secreto OAuth (si no, el de ACM)', '', true)}</div>
+    <div class="row"><button class="btn primary sm" data-act="ads-save-net" data-net="youtube">Guardar y probar conexión</button></div>
+  </section>
+  ${bl.meta ? `<p class="banner err">Meta rechazó un anuncio y la red está bloqueada. ${esc(bl.meta.reason || '')} <button class="btn sm" data-act="ads-unblock" data-net="meta">Reactivar</button></p>` : ''}`;
 }
 function adsCard(p) {
   const a = p.ads || {};
@@ -1294,6 +1322,19 @@ document.addEventListener('click', async (e) => {
         await api(`/api/projects/${state.project.id}/ads`, { method: 'PUT', body });
         try { await api(`/api/projects/${state.project.id}/ads/test`, { method: 'POST' }); toast('Cuenta publicitaria conectada'); } catch (err) { fail(err); }
         render(); break; }
+      case 'ads-save-net': {
+        const net = el.dataset.net, body = {};
+        $$(`[data-adsx="${net}"]`).forEach((i) => { if (i.value || !i.classList.contains('masked')) body[i.dataset.k] = i.value; });
+        el.disabled = true; el.textContent = 'Probando…';
+        try {
+          await api(`/api/projects/${state.project.id}/ads`, { method: 'PUT', body });
+          await api(`/api/projects/${state.project.id}/ads/test`, { method: 'POST', body: { network: net } });
+          toast(net === 'tiktok' ? 'TikTok Ads conectado' : 'Google Ads conectado');
+        } catch (err) { fail(err); }
+        render(); break; }
+      case 'ads-unblock':
+        try { await api(`/api/projects/${state.project.id}/ads/unblock`, { method: 'POST', body: { network: el.dataset.net } }); toast('Red reactivada'); } catch (err) { fail(err); }
+        render(); break;
       case 'ads-audience': el.disabled = true; el.textContent = 'Subiendo…'; try { await api(`/api/projects/${state.project.id}/ads/audience`, { method: 'POST' }); toast('Padrón subido a Meta'); } catch (err) { fail(err); } render(); break;
       case 'ads-campaign': el.disabled = true; el.textContent = 'Creando…'; try { await api(`/api/projects/${state.project.id}/ads/campaign`, { method: 'POST' }); toast('Campaña creada en pausa'); } catch (err) { fail(err); } render(); break;
       case 'lab-kind': state.lab.kind = el.dataset.k; state.lab.sel = null; render(); break;

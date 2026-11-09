@@ -6,6 +6,7 @@ import http from 'node:http';
 const send = (res, code, obj, headers = {}) => { res.writeHead(code, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(obj)); };
 export function startSimulator(port = 0) {
   const log = [];
+  const adsets = new Map(), tt = { groups: 0 }, g = { campaigns: 0, budgets: 0, lists: 0 }; // anuncios de mentira
   const objects = new Map(); // R2 de mentira: bucket acm-test
   let B = '';
   const server = http.createServer((req, res) => {
@@ -87,11 +88,50 @@ export function startSimulator(port = 0) {
     if (p === '/graph/act_999' && req.method === 'GET') return send(res, 200, { name: 'Cuenta Mock', currency: 'ARS', account_status: 1 });
     if (p === '/graph/act_999/customaudiences') return send(res, 200, { id: 'AUD1' });
     if (p === '/graph/AUD1/usersreplace') { const j = JSON.parse(body); return send(res, 200, { num_received: j.payload.data.length, session_id: j.session.session_id }); }
-    if (p === '/graph/act_999/campaigns') return params.status === 'PAUSED' ? send(res, 200, { id: 'CAMP1' }) : send(res, 400, { error: { message: 'no en pausa' } });
-    if (p === '/graph/act_999/adsets') { log.push('adset ' + JSON.stringify({ b: params.lifetime_budget, s: params.start_time, e: params.end_time, f: params.frequency_control_specs, t: params.targeting })); return send(res, 200, { id: 'SET1' }); }
-    if (p === '/graph/act_999/adcreatives') return params.source_instagram_media_id ? send(res, 200, { id: 'CR1' }) : send(res, 400, { error: { message: 'sin media' } });
+    if (p === '/graph/act_999/campaigns') return ['PAUSED', 'ACTIVE'].includes(params.status) ? send(res, 200, { id: 'CAMP1' }) : send(res, 400, { error: { message: 'estado inválido' } });
+    if (p === '/graph/act_999/adsets') {
+      log.push('adset ' + JSON.stringify({ b: params.lifetime_budget, db: params.daily_budget, s: params.start_time, e: params.end_time, f: params.frequency_control_specs, t: params.targeting }));
+      const id = 'SET' + (adsets.size + 1); adsets.set(id, { daily_budget: params.daily_budget, end_time: params.end_time, status: params.status, targeting: params.targeting }); return send(res, 200, { id });
+    }
+    if (p === '/graph/act_999/adcreatives') return params.source_instagram_media_id === 'MBAD' ? send(res, 400, { error: { code: 368, message: 'El anuncio infringe las políticas (policy)' } })
+      : params.source_instagram_media_id || params.object_story_id ? send(res, 200, { id: 'CR1' }) : send(res, 400, { error: { message: 'sin media' } });
     if (p === '/graph/act_999/ads') return send(res, 200, { id: 'AD1' });
+    if (/^\/graph\/SET\d+$/.test(p) && req.method === 'POST') { const a = adsets.get(p.slice(7)); if (!a) return send(res, 404, { error: { message: 'no existe el conjunto' } }); Object.assign(a, params); log.push(`adset-update ${p.slice(7)} ${JSON.stringify(params)}`); return send(res, 200, { success: true }); }
+    if (/^\/graph\/SET\d+\/insights$/.test(p)) return send(res, 200, { data: [{ spend: '30000', impressions: '8000', reach: '5000' }] });
     if (p === '/graph/CAMP1/insights') return send(res, 200, { data: [{ spend: '121000', impressions: '34000', reach: '21000' }] });
+    // TikTok Ads (Marketing API): código 0 = bien; el anuncio del video TVBAD se rechaza por política
+    if (p.startsWith('/ttads/v1.3/')) {
+      const route = p.slice('/ttads/v1.3/'.length), ok0 = (data) => send(res, 200, { code: 0, message: 'OK', data });
+      if (req.headers['access-token'] !== 'TTADS_OK') return send(res, 200, { code: 40105, message: 'Access-Token inválido' });
+      const j = req.method === 'POST' ? JSON.parse(body) : {};
+      log.push(`ttads ${route} ${JSON.stringify(req.method === 'POST' ? j : Object.fromEntries(u.searchParams))}`);
+      if (route === 'advertiser/info/') return ok0({ list: [{ name: 'Anunciante Mock', currency: 'USD', status: 'STATUS_ENABLE' }] });
+      if (route === 'campaign/create/') return ok0({ campaign_id: 'TTC1' });
+      if (route === 'adgroup/create/') return j.budget > 0 && j.schedule_end_time ? ok0({ adgroup_id: 'TTG' + (++tt.groups) }) : send(res, 200, { code: 40002, message: 'falta presupuesto o fin de programación' });
+      if (route === 'ad/create/') return j.creatives?.[0]?.tiktok_item_id === 'TVBAD' ? send(res, 200, { code: 40911, message: 'Ad rejected: violates advertising policy' }) : ok0({ ad_ids: ['TTA1'] });
+      if (route === 'adgroup/budget/update/' || route === 'adgroup/status/update/') return ok0({});
+      if (route === 'report/integrated/get/') return ok0({ list: [{ dimensions: { adgroup_id: 'TTG1' }, metrics: { spend: '7.50', impressions: '3000', reach: '2100' } }] });
+      return send(res, 200, { code: 40001, message: 'mock: no conozco ' + route });
+    }
+    // Google Ads (REST): el video YBADPOL se rechaza por política
+    if (p.startsWith('/gads/v18/customers/')) {
+      const [cid, ...rest] = p.slice('/gads/v18/customers/'.length).split('/'), route = rest.join('/'), j = JSON.parse(body || '{}');
+      if (req.headers.authorization !== 'Bearer ya29.mock' || req.headers['developer-token'] !== 'DEVTOK') return send(res, 401, { error: { message: 'credenciales de Google Ads inválidas' } });
+      log.push(`gads ${route} ${JSON.stringify(j).slice(0, 600)}`);
+      const rn = (kind, n) => `customers/${cid}/${kind}/${n}`;
+      const op = j.operations?.[0] || {};
+      if (route === 'googleAds:search') return /FROM customer/.test(j.query) ? send(res, 200, { results: [{ customer: { descriptiveName: 'Cuenta Google Mock', currencyCode: 'USD' } }] })
+        : send(res, 200, { results: [{ metrics: { costMicros: '12500000', impressions: '4000', uniqueUsers: '2500' } }] });
+      if (route === 'userLists:mutate') return send(res, 200, { results: [{ resourceName: rn('userLists', ++g.lists) }] });
+      if (route === 'offlineUserDataJobs:create') return send(res, 200, { resourceName: rn('offlineUserDataJobs', 'J1') });
+      if (/^offlineUserDataJobs\/J1:(addOperations|run)$/.test(route)) return send(res, 200, {});
+      if (route === 'campaignBudgets:mutate') return send(res, 200, { results: [{ resourceName: op.update?.resourceName || rn('campaignBudgets', ++g.budgets) }] });
+      if (route === 'campaigns:mutate') return send(res, 200, { results: [{ resourceName: op.update?.resourceName || rn('campaigns', 700 + ++g.campaigns) }] });
+      if (route === 'adGroupAds:mutate') return JSON.stringify(op).includes('YBADPOL') ? send(res, 400, { error: { code: 400, message: 'El anuncio infringe una política', details: [{ errors: [{ errorCode: { policyViolationError: 'POLICY_ERROR' } }] }] } }) : send(res, 200, { results: [{ resourceName: rn('adGroupAds', 'AG1~AD1') }] });
+      if (route === 'assets:mutate') return send(res, 200, { results: [{ resourceName: rn('assets', op.create?.youtubeVideoAsset?.youtubeVideoId || 1) }] });
+      if (['campaignCriteria', 'adGroups', 'adGroupCriteria'].some((r) => route === r + ':mutate')) return send(res, 200, { results: [{ resourceName: rn(route.split(':')[0], 1) }] });
+      return send(res, 404, { error: { message: 'mock: no conozco ' + route } });
+    }
     // Claude: responde citando la primera ficha, y si se le pide, se niega
     if (p === '/anthropic/v1/messages') {
       const j = JSON.parse(body); log.push('claude ' + JSON.stringify({ model: j.model, effort: j.output_config?.effort, fallbacks: j.fallbacks, beta: req.headers['anthropic-beta'], key: !!(req.headers['x-api-key'] || /^Bearer sk-ant-/.test(req.headers.authorization || '')), turns: j.messages.length }));
@@ -107,7 +147,7 @@ export function startSimulator(port = 0) {
     B = `http://127.0.0.1:${server.address().port}`;
     resolve({
       url: B, log,
-      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, youtubeAnalytics: `${B}/ytan`, ytUpload: `${B}/ytup`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, r2: B },
+      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, youtubeAnalytics: `${B}/ytan`, ytUpload: `${B}/ytup`, tiktokAds: `${B}/ttads`, googleAds: `${B}/gads`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, r2: B },
       close: () => new Promise((r) => server.close(r)),
     });
   }));

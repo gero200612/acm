@@ -10,6 +10,9 @@ import { pipeline } from 'node:stream/promises';
 import { readPadron } from './padron.js';
 import { publish, tiktokOptions, tiktokCreator } from './publisher.js';
 import { testAds, uploadAudience, createCampaign, campaignInsights } from './ads.js';
+import { testTikTokAds } from './ads-tiktok.js';
+import { testGoogleAds } from './ads-google.js';
+import { buildAdapters, ADS_FIELDS, hasAdsCreds, parseObj } from './ads-factory.js';
 import { ask, askError, agentReady } from './agent.js';
 import { initTrace, traced } from './trace.js';
 import { runBanco } from './banco.js';
@@ -84,6 +87,9 @@ for (const [c, def] of [['options', "TEXT DEFAULT ''"], ['external_id', "TEXT DE
 db.exec("UPDATE posts SET status = 'programado' WHERE status = 'publicando'");
 for (const [c, def] of [['ads_creds', "TEXT DEFAULT ''"], ['ads_name', "TEXT DEFAULT ''"], ['ads_currency', "TEXT DEFAULT ''"], ['ads_rate', 'REAL DEFAULT 0'], ['ads_political', 'INTEGER DEFAULT 1'],
   ['ads_audience_id', "TEXT DEFAULT ''"], ['ads_audience_count', 'INTEGER DEFAULT 0'], ['ads_campaign_id', "TEXT DEFAULT ''"], ['ads_ads', 'INTEGER DEFAULT 0'], ['ads_error', "TEXT DEFAULT ''"], ['ads_at', "TEXT DEFAULT ''"]])
+  if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
+// pauta del ciclo de marketing: estado por red (campaña/lista ya creadas) y redes bloqueadas por rechazo de un anuncio
+for (const [c, def] of [['ads_state', "TEXT DEFAULT ''"], ['ads_blocked', "TEXT DEFAULT ''"]])
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
 // proyecto de demostración: se ve completo pero no publica ni pauta nada
 if (!cols('projects').includes('demo')) db.exec('ALTER TABLE projects ADD COLUMN demo INTEGER DEFAULT 0');
@@ -344,15 +350,19 @@ function accountOut(a) {
 }
 const NETWORKS = ['instagram', 'facebook', 'tiktok', 'youtube'];
 
+// lo que ve la pantalla de la pauta de TikTok/Google: los valores comunes tal cual, de los secretos solo si hay uno guardado
+const publicAdsFields = (net, ac) => Object.fromEntries(Object.entries(ADS_FIELDS[net]).map(([k, secret]) => [k, secret ? { set: !!ac[k] } : { value: ac[k] || '' }]));
 function projectSummary(full) {
-  const { ads_creds, ...p } = full;
+  const { ads_creds, ads_state, ...p } = full;
   const ac = vault.open(ads_creds);
   const c = (sql) => get(sql, p.id).n;
   return {
     ...p,
     score_weights: weightsOf(p.score_weights),
     ads_networks: (() => { try { return JSON.parse(p.ads_networks); } catch { return defaultAdsNetworks(p.kind); } })(),
-    ads: { adAccountId: ac.adAccountId || '', token: !!ac.accessToken },
+    ads: { adAccountId: ac.adAccountId || '', token: !!ac.accessToken,
+      tiktok: publicAdsFields('tiktok', ac), youtube: publicAdsFields('youtube', ac), ok: { tiktok: hasAdsCreds.tiktok(ac), youtube: hasAdsCreds.youtube(ac) } },
+    ads_blocked: parseObj(p.ads_blocked),
     accounts: c('SELECT count(*) n FROM accounts WHERE project_id = ?'),
     accounts_live: c("SELECT count(*) n FROM accounts WHERE project_id = ? AND status = 'conectada'"),
     reels: c('SELECT count(*) n FROM reels WHERE project_id = ?'),
@@ -732,10 +742,38 @@ app.put('/api/projects/:id/ads', (req, res) => {
   const c = vault.open(p.ads_creds), b = req.body || {};
   if (b.adAccountId !== undefined) c.adAccountId = String(b.adAccountId).trim().replace(/^act_/, '');
   if (b.accessToken) c.accessToken = String(b.accessToken).trim();
+  // TikTok Ads y Google Ads: un secreto vacío conserva el anterior
+  for (const net of ['tiktok', 'youtube']) for (const [k, secret] of Object.entries(ADS_FIELDS[net])) {
+    if (b[k] === undefined) continue;
+    const v = String(b[k]).trim();
+    if (secret && !v) continue;
+    c[k] = v;
+  }
   run('UPDATE projects SET ads_creds = ?, ads_rate = ?, ads_political = ? WHERE id = ?', vault.seal(c), Number(b.rate ?? p.ads_rate) || 0, b.political === undefined ? p.ads_political : (b.political ? 1 : 0), p.id);
   sendProject(res, p.id);
 });
 const adsFail = (res, id, e) => { run('UPDATE projects SET ads_error = ? WHERE id = ?', e.message, id); res.status(400).json({ error: e.message }); };
+// Probar conexión de TikTok Ads o Google Ads (el de Meta sigue más abajo, sin `network`)
+app.post('/api/projects/:id/ads/test', async (req, res, next) => {
+  const net = req.body?.network;
+  if (net !== 'tiktok' && net !== 'youtube') return next();
+  const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
+  const c = vault.open(p.ads_creds), tester = net === 'tiktok' ? testTikTokAds : testGoogleAds, who = net === 'tiktok' ? 'TikTok Ads' : 'Google Ads';
+  try {
+    const r = await traced({ kind: 'pauta', title: `Probar ${who}`, project_id: p.id, network: net, secrets: Object.values(c) }, async () => { const x = await tester(c); return { ...x, summary: `${x.name} (${x.currency})` }; });
+    if (r.currency !== 'USD') return res.status(400).json({ error: `La cuenta de ${who} está en ${r.currency}: por ahora ACM solo pauta en dólares en esa red.` });
+    sendProject(res, p.id);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Gero reactiva una red que había quedado bloqueada por un anuncio rechazado
+app.post('/api/projects/:id/ads/unblock', (req, res) => {
+  const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
+  const b = parseObj(p.ads_blocked), net = req.body?.network;
+  if (!b[net]) return res.status(400).json({ error: 'Esa red no está bloqueada.' });
+  delete b[net];
+  run('UPDATE projects SET ads_blocked = ? WHERE id = ?', JSON.stringify(b), p.id);
+  sendProject(res, p.id);
+});
 app.post('/api/projects/:id/ads/test', async (req, res) => {
   const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
   const adsRun = (title, fn) => traced({ kind: 'meta_ads', title, project_id: p.id, network: 'meta', secrets: Object.values(vault.open(p.ads_creds)) }, fn);
@@ -1096,15 +1134,14 @@ async function leerMetricas() {
 if (process.env.ACM_SCHEDULER !== 'off') { setInterval(leerMetricas, 6 * 3600e3); setTimeout(leerMetricas, 60e3); }
 
 // pauta: cada 6 h el ciclo de marketing decide qué promocionar y mueve o corta la plata (ACM_MARKETING_CYCLE=off lo apaga).
-// Hasta que lleguen los adaptadores reales (Tarea 11) no hay ninguno: el ciclo avisa "sin adaptadores" y no toca nada.
-const noAdapters = {};
+// Los adaptadores se arman por proyecto con sus credenciales de pauta; sin credenciales (o en demos) el ciclo avisa "sin adaptadores" y no toca nada.
 let marketingCorriendo = false;
 async function cicloDeMarketing() {
   if (marketingCorriendo) return; marketingCorriendo = true;
   try {
     for (const p of all("SELECT p.id FROM projects p JOIN pauta pa ON pa.project_id = p.id WHERE p.demo = 0 AND pa.budget > 0")) {
       try {
-        const r = await marketingCycle(p.id, { db, adapters: noAdapters, now: () => localNow() });
+        const r = await marketingCycle(p.id, { db, adapters: buildAdapters(db, vault, p.id, () => localNow().slice(0, 10)), now: () => localNow() });
         if (r.skipped === 'sin adaptadores') console.log(`marketing: sin adaptadores (proyecto ${p.id})`);
       } catch (e) { console.error('marketing:', e.message); }
     }

@@ -8,6 +8,7 @@ import { dailyCap, splitNetworks, canJudge, guardSpend } from './budget.js';
 export const MIN_ORGANIC_HOURS = 24;   // un reel se promociona recién con 24 h de vida orgánica
 export const MIN_DAILY_USD = 1;        // menos que esto no vale la pena lanzarlo
 export const MAX_ACTIVE_PER_NETWORK = 2;
+export const UNTARGETED_REACH_WEIGHT = 0.5; // sin alcance dentro del público: el alcance total cuenta a la mitad
 export const CUT_MARGIN = 0.85;       // se corta solo si rinde menos del 85 % del promedio (evita idas y vueltas)
 
 export function initMarketing(db) {
@@ -57,7 +58,10 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   const decide = (kind, target, data, reason) => db.prepare('INSERT INTO decisions (project_id, at, kind, target, data, reason) VALUES (?, ?, ?, ?, ?, ?)')
     .run(projectId, nowStr, kind, String(target ?? ''), JSON.stringify(data || {}), reason);
   let enabled; try { enabled = typeof p.ads_networks === 'string' ? JSON.parse(p.ads_networks) : p.ads_networks; } catch { enabled = null; }
-  enabled = { meta: !!enabled?.meta, youtube: !!enabled?.youtube, tiktok: !!enabled?.tiktok };
+  // una red bloqueada (rechazó un anuncio) se trata como apagada hasta que Gero la reactive
+  let blocked; try { blocked = typeof p.ads_blocked === 'string' ? JSON.parse(p.ads_blocked || '{}') : p.ads_blocked; } catch { blocked = null; }
+  blocked = blocked && typeof blocked === 'object' ? blocked : {};
+  enabled = { meta: !!enabled?.meta && !blocked.meta, youtube: !!enabled?.youtube && !blocked.youtube, tiktok: !!enabled?.tiktok && !blocked.tiktok };
   const weights = weightsOf(p.score_weights);
   const to = [pa.end_date, p.propaganda_until].filter(Boolean).map((d) => d.slice(0, 10)).sort()[0] || '';
   const from = (pa.start_date || '').slice(0, 10) || today;
@@ -72,7 +76,8 @@ async function cycle(db, projectId, adapters, nowStr, today) {
     try {
       const i = await ad.insights(pr.ad_id);
       const spend = Math.max(Number(pr.spend) || 0, Number(i.spend) || 0);
-      const f = { spend, impressions: Number(i.impressions) || 0, reach: Number(i.reach) || 0, target_reach: Number(i.target_reach) || 0 };
+      const reach = Number(i.reach) || 0;
+      const f = { spend, impressions: Number(i.impressions) || 0, reach, target_reach: i.target_reach == null ? Math.round(reach * UNTARGETED_REACH_WEIGHT) : Number(i.target_reach) || 0 };
       if (pr.spend_day !== today) { f.spend_day = today; f.spend_day_start = Number(pr.spend) || 0; }
       setPromo(pr.id, f);
       const last = db.prepare("SELECT * FROM post_metrics WHERE post_id = ? AND views IS NOT NULL AND note != 'pauta' ORDER BY id DESC LIMIT 1").get(pr.post_id) || {};
@@ -193,6 +198,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   }
   const ensured = new Set();
   for (const c of launch) {
+    if (blocked[c.net]) continue; // la red rechazó un anuncio en este mismo ciclo: no se reintenta
     const g = guardSpend({ kind: 'promote', dailyUsd: c.each, currentUsd: 0 }, state(0));
     if (!g.ok || g.usd < MIN_DAILY_USD) { decide('tope', `post ${c.id}`, { want: c.each }, `No se promociona el post ${c.id}: ${g.reason || `quedan menos de USD ${MIN_DAILY_USD} para hoy`}.`); continue; }
     let rowId = null, adId = null;
@@ -216,7 +222,11 @@ async function cycle(db, projectId, adapters, nowStr, today) {
       if (rowId) db.prepare('DELETE FROM promotions WHERE id = ?').run(rowId);
       if (e instanceof AdRejected) {
         decide('rechazo', `post ${c.id}`, { network: c.net }, `${c.net} rechazó el anuncio del post ${c.id}: ${e.message}`.slice(0, 300));
-        addAlert(db, 'anuncio_rechazado', projectId, `Anuncio rechazado en ${c.net} (post ${c.id}): ${e.message}`.slice(0, 300), `${nowStr}:00`);
+        // la red queda bloqueada en el proyecto: sin reparto y sin reintentos hasta que Gero la reactive
+        blocked[c.net] = { at: nowStr, post_id: c.id, reason: String(e.message).slice(0, 200) };
+        db.prepare('UPDATE projects SET ads_blocked = ? WHERE id = ?').run(JSON.stringify(blocked), projectId);
+        decide('bloqueo', c.net, { network: c.net }, `La red ${c.net} quedó bloqueada en el proyecto hasta que se reactive.`);
+        addAlert(db, 'red_bloqueada', projectId, `${c.net} rechazó un anuncio (post ${c.id}): ${e.message}. La red quedó bloqueada: no se le reparte plata hasta que la reactives en Pauta.`.slice(0, 300), `${nowStr}:00`);
       } else decide('error', `post ${c.id}`, { network: c.net }, `No se pudo promocionar en ${c.net}: ${e.message}`.slice(0, 300));
     }
   }
