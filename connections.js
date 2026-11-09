@@ -62,6 +62,7 @@ export const BASES = {
   youtube: process.env.ACM_YOUTUBE_URL || 'https://www.googleapis.com',
   youtubeAnalytics: process.env.ACM_YT_ANALYTICS_URL || 'https://youtubeanalytics.googleapis.com',
   ytUpload: process.env.ACM_YT_UPLOAD_URL || 'https://www.googleapis.com',
+  telegram: process.env.ACM_TELEGRAM_URL || 'https://api.telegram.org',
   // pantallas donde la persona autoriza (conectar con un clic)
   tiktokAuth: process.env.ACM_TIKTOK_AUTH_URL || 'https://www.tiktok.com',
   googleAuth: process.env.ACM_GOOGLE_AUTH_URL || 'https://accounts.google.com',

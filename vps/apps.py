@@ -5,7 +5,8 @@ import json, os, urllib.request
 
 UUID = 'n661mrfkfpuwy2ijrwo9pekt'
 KEYS = ['ACM_TIKTOK_CLIENT_KEY', 'ACM_TIKTOK_CLIENT_SECRET', 'ACM_GOOGLE_CLIENT_ID', 'ACM_GOOGLE_CLIENT_SECRET',
-        'ACM_R2_ACCOUNT_ID', 'ACM_R2_ACCESS_KEY_ID', 'ACM_R2_SECRET_ACCESS_KEY', 'ACM_R2_BUCKET', 'ANTHROPIC_API_KEY']
+        'ACM_R2_ACCOUNT_ID', 'ACM_R2_ACCESS_KEY_ID', 'ACM_R2_SECRET_ACCESS_KEY', 'ACM_R2_BUCKET', 'ANTHROPIC_API_KEY',
+        'EDITOR_URL', 'EDITOR_TOKEN', 'EDITOR_PUBLIC_URL', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'YOUTUBE_DAILY_QUOTA', 'ACM_MARKETING_CYCLE', 'ACM_YT_ANALYTICS']
 data = [{'key': k, 'value': os.environ[k].strip(), 'is_preview': False, 'is_literal': True} for k in KEYS if os.environ.get(k, '').strip()]
 if not data:
     raise SystemExit('No vino ninguna clave (' + ', '.join(KEYS) + ')')

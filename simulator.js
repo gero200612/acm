@@ -132,6 +132,8 @@ export function startSimulator(port = 0) {
       if (['campaignCriteria', 'adGroups', 'adGroupCriteria'].some((r) => route === r + ':mutate')) return send(res, 200, { results: [{ resourceName: rn(route.split(':')[0], 1) }] });
       return send(res, 404, { error: { message: 'mock: no conozco ' + route } });
     }
+    // Telegram de mentira: cuenta los mensajes (token 123:ABC-bueno, cualquier otro da 401)
+    if (/^\/telegram\/bot[^/]+\/sendMessage$/.test(p)) { const j = JSON.parse(body); if (!p.includes('bot123:ABC-bueno/')) return send(res, 401, { ok: false, description: 'Unauthorized' }); log.push('telegram ' + JSON.stringify({ chat: j.chat_id, text: j.text })); return send(res, 200, { ok: true, result: { message_id: log.length } }); }
     // Claude: responde citando la primera ficha, y si se le pide, se niega
     if (p === '/anthropic/v1/messages') {
       const j = JSON.parse(body); log.push('claude ' + JSON.stringify({ model: j.model, effort: j.output_config?.effort, fallbacks: j.fallbacks, beta: req.headers['anthropic-beta'], key: !!(req.headers['x-api-key'] || /^Bearer sk-ant-/.test(req.headers.authorization || '')), turns: j.messages.length }));
@@ -147,7 +149,7 @@ export function startSimulator(port = 0) {
     B = `http://127.0.0.1:${server.address().port}`;
     resolve({
       url: B, log,
-      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, youtubeAnalytics: `${B}/ytan`, ytUpload: `${B}/ytup`, tiktokAds: `${B}/ttads`, googleAds: `${B}/gads`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, r2: B },
+      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, youtubeAnalytics: `${B}/ytan`, ytUpload: `${B}/ytup`, tiktokAds: `${B}/ttads`, googleAds: `${B}/gads`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, telegram: `${B}/telegram`, r2: B },
       close: () => new Promise((r) => server.close(r)),
     });
   }));

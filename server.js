@@ -15,14 +15,15 @@ import { testGoogleAds } from './ads-google.js';
 import { AD_NETWORKS } from './ads-iface.js';
 import { buildAdapters, ADS_FIELDS, hasAdsCreds, parseObj } from './ads-factory.js';
 import { ask, askError, agentReady } from './agent.js';
-import { initTrace, traced } from './trace.js';
+import { initTrace, traced, mask } from './trace.js';
 import { runBanco } from './banco.js';
 import { probe, review } from './mp4probe.js';
 import { r2Ready, putUrl, getUrl, head as r2Head, remove as r2Remove, download as r2Download, MAX_UPLOAD } from './storage.js';
 import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, withinWindow, NETWORK_CAPS, reviewMode } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
-import { initAlerts } from './alerts.js';
+import { initAlerts, addAlert } from './alerts.js';
+import { flushAlerts, dailySummary, editorAtrasado } from './notify.js';
 import { initPlanner, planProject, expiredBlocked } from './planner.js';
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initMarketing, marketingCycle } from './marketing.js';
@@ -103,6 +104,8 @@ for (const [c, def] of [['kind', "TEXT DEFAULT 'club'"], ['ads_networks', `TEXT 
 for (const [c, def] of [['clip_id', 'TEXT'], ['moment', 'TEXT'], ['recipe', 'TEXT'], ['review', "TEXT DEFAULT 'pendiente'"], ['expires_at', "TEXT DEFAULT ''"], ['cover', "TEXT DEFAULT ''"]])
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
 if (!cols('reels').includes('status_detail')) db.exec("ALTER TABLE reels ADD COLUMN status_detail TEXT DEFAULT ''");
+// cuándo cambió por última vez el estado del crudo en el editor (UTC); sirve para avisar si una etapa lleva más de 24 h
+if (!cols('reels').includes('status_at')) db.exec("ALTER TABLE reels ADD COLUMN status_at TEXT DEFAULT ''");
 if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD COLUMN editor_edition_id TEXT');
 db.exec('DROP INDEX IF EXISTS reels_editor_edition');
 // la clave de idempotencia es un UUID de la edición del editor, y vale dentro de su crudo
@@ -207,7 +210,7 @@ app.post('/api/editor/estado', requireEditor, (req, res) => {
   const r = get("SELECT id FROM reels WHERE id = ? AND kind = 'crudo'", Number(b.reel_id));
   if (!r) return res.status(404).json({ error: 'No existe ese crudo' });
   if (!EDITOR_STATES.includes(b.estado)) return res.status(400).json({ error: `Estado inválido: ${EDITOR_STATES.join(', ')}` });
-  run('UPDATE reels SET status = ?, status_detail = ? WHERE id = ?', b.estado, String(b.detalle || '').slice(0, 500), r.id);
+  run("UPDATE reels SET status = ?, status_detail = ?, status_at = datetime('now') WHERE id = ?", b.estado, String(b.detalle || '').slice(0, 500), r.id);
   res.json({ ok: true });
 });
 // lo que el editor necesita del proyecto: las variables ganadoras (memoria) y la investigación; solo del proyecto pedido
@@ -580,7 +583,7 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
     const title = path.parse(String(it.name || 'reel')).name.replace(/[_-]+/g, ' ');
     const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2')",
       pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind);
-    if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola' WHERE id = ?", r.lastInsertRowid);
+    if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola', status_at = datetime('now') WHERE id = ?", r.lastInsertRowid);
     out.push(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
   }
   res.json(out);
@@ -598,7 +601,7 @@ async function sendToEditor(r) {
     });
     if (!resp.ok) throw new Error(`el editor respondió ${resp.status}`);
   } catch (e) {
-    run("UPDATE reels SET status = 'error', status_detail = ? WHERE id = ?", `No pudimos mandar el video al editor: ${e.message}`.slice(0, 500), r.id);
+    run("UPDATE reels SET status = 'error', status_detail = ?, status_at = datetime('now') WHERE id = ?", `No pudimos mandar el video al editor: ${e.message}`.slice(0, 500), r.id);
     throw e;
   }
 }
@@ -1113,6 +1116,7 @@ async function tick() {
         console.log(`[publicar ${p.id}] publicado en ${p.network}`);
       } catch (e) {
         fail(e.message);
+        try { addAlert(db, 'falla', p.project_id, `No se pudo publicar «${p.title}» en ${p.network}: ${mask(e.message).slice(0, 250)}`); } catch {}
         console.log(`[publicar ${p.id}] falló: ${e.message}`);
       } finally { if (tmp) fs.rm(tmp, { force: true }, () => {}); }
     }
@@ -1157,6 +1161,23 @@ async function cicloDeMarketing() {
   } finally { marketingCorriendo = false; }
 }
 if (process.env.ACM_MARKETING_CYCLE !== 'off' && process.env.ACM_SCHEDULER !== 'off') { setInterval(cicloDeMarketing, 6 * 3600e3); setTimeout(cicloDeMarketing, 90e3); }
+
+// Telegram: cada minuto se mandan los avisos sin enviar (sin TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID no hace nada) y se revisa la cola del editor
+async function avisos() {
+  try { editorAtrasado(db); } catch (e) { console.error('editor atrasado:', e.message); }
+  try { await flushAlerts(db, { now: localNow() }); } catch (e) { console.error('avisos:', mask(e.message)); }
+}
+if (process.env.ACM_SCHEDULER !== 'off') { setInterval(avisos, 60e3); setTimeout(avisos, 20e3); }
+// resumen diario a las 22:00 (hora local) por proyecto que no es de demostración; si el servidor arranca más tarde ese día, se manda al arrancar. Una vez por día (addAlert no repite).
+async function resumenDelDia() {
+  const now = localNow();
+  if (now.slice(11, 16) < '22:00') return;
+  for (const p of all('SELECT id FROM projects WHERE demo = 0')) {
+    try { addAlert(db, 'resumen_diario', p.id, dailySummary(db, p.id, now), `${now}:00`); } catch (e) { console.error('resumen:', e.message); }
+  }
+  await avisos();
+}
+if (process.env.ACM_SCHEDULER !== 'off') { setInterval(resumenDelDia, 60e3); setTimeout(resumenDelDia, 30e3); }
 
 // al arrancar completa vectores pendientes (la copia del banco lo hace enseguida para reproducir el orden de producción: primero este, después las importaciones)
 setTimeout(fillVectors, Number(process.env.ACM_FILL_MS) || 5000);

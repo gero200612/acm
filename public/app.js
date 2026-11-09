@@ -337,7 +337,7 @@ function memoriaView() {
   const dec = (M.decisions || []).map((d) => `<tr><td class="small muted">${esc(d.at)}</td><td>${esc(MEM_KINDS[d.kind] || d.kind)}</td><td>${esc(d.target)}</td><td>${esc(d.reason)}</td></tr>`).join('');
   return `<div class="ap">
     <section class="card"><h2 class="h2">Lo que está ganando</h2>
-      ${gan ? `<ul>${gan}</ul><p class="muted small">Esto es lo que el editor usa al armar las próximas ediciones. Una variable entra con 5 intentos o más.</p>` : '<p class="muted">Todavía no hay nada ganador: una variable necesita 5 intentos. Se junta a medida que Gero aprueba o rechaza recortes y las 3 versiones de cada uno se comparan.</p>'}
+      ${gan ? `<ul>${gan}</ul><p class="muted small">Esto es lo que el editor usa al armar las próximas ediciones. Una variable entra con 5 intentos o más.</p>` : '<p class="muted">Todavía no hay nada ganador: una variable necesita 5 intentos. Se junta a medida que Gero aprueba o rechaza recortes y las versiones publicadas de cada uno se comparan.</p>'}
     </section>
     <section class="card"><h2 class="h2">Aprendizajes</h2>${rows ? `<table class="list"><thead><tr><th>Variable</th><th>Valor</th><th>Victorias</th><th>Tasa</th></tr></thead><tbody>${rows}</tbody></table><p class="muted small">La opinión de Gero pesa 3 veces.</p>` : '<p class="muted">Sin aprendizajes todavía.</p>'}</section>
     <section><h2 class="h2">Comparaciones de recortes</h2>${cmp || '<p class="muted">Cuando las versiones publicadas de un recorte tienen 48 horas de datos, se comparan acá.</p>'}</section>

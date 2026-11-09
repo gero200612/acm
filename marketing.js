@@ -46,7 +46,12 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   const pa = db.prepare('SELECT * FROM pauta WHERE project_id = ?').get(projectId) || {};
   const budget = Number(pa.budget) || 0;
   if (budget <= 0) return { skipped: 'sin presupuesto' };
-  if (!AD_NETWORKS.some((n) => adapters[n])) return { skipped: 'sin adaptadores' };
+  if (!AD_NETWORKS.some((n) => adapters[n])) {
+    // sin ninguna red conectada no se puede pausar ni controlar nada: si hay anuncios activos, hay que avisar
+    const activos = db.prepare("SELECT count(*) n FROM promotions WHERE project_id = ? AND status = 'activa'").get(projectId).n;
+    if (activos) addAlert(db, 'pausa_imposible', projectId, `Hay ${activos} ${activos === 1 ? 'anuncio activo' : 'anuncios activos'} pero no se pudo conectar con ninguna red de pauta (credenciales faltantes o inválidas): ACM no puede pausarlos ni controlar el gasto. Revisalos a mano.`, `${nowStr}:00`);
+    return { skipped: 'sin adaptadores' };
+  }
   const startDay = (pa.start_date || '').slice(0, 10);
   if (startDay && today < startDay) {
     const ya = db.prepare("SELECT 1 FROM decisions WHERE project_id = ? AND kind = 'espera' AND substr(at, 1, 10) = ?").get(projectId, today);

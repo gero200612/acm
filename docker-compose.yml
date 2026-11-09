@@ -7,5 +7,24 @@ services:
       - ACM_SECRET=${ACM_SECRET}
     volumes:
       - acm-data:/data
+  # Orquestador de ediciones (opcional): en producción ACM corre en Coolify y esto va en el VPS de Contabo.
+  # Se levanta con: docker compose --profile editor up -d   (variables en README.md)
+  editor:
+    profiles: ['editor']
+    build: ./editor
+    restart: unless-stopped
+    environment:
+      - ACM_URL=${ACM_URL}
+      - EDITOR_TOKEN=${EDITOR_TOKEN}
+      - EDITOR_PUBLIC_URL=${EDITOR_PUBLIC_URL}
+      - ESTUDIO_URL=${ESTUDIO_URL}
+      - ESTUDIO_EMPRESA=${ESTUDIO_EMPRESA}
+      - ESTUDIO_CLAVE=${ESTUDIO_CLAVE}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    ports:
+      - '4000:4000'
+    volumes:
+      - editor-data:/data
 volumes:
   acm-data:
+  editor-data:

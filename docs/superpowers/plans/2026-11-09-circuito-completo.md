@@ -284,5 +284,6 @@
 
 - [x] Caso: dos alertas iguales seguidas mandan 1 mensaje (el simulador cuenta los envíos a Telegram). El resumen tiene los 5 bloques.
 - [x] Caso: una cola del editor con un trabajo de más de 24 h genera `editor_atrasado`.
-- [x] Documentar cómo levantar el Estudio y el orquestador en Contabo. Desplegarlos queda a cargo de Gero (el servidor todavía no está). Commit y push.
+- [x] Documentar cómo levantar el Estudio y el orquestador en Contabo. Desplegarlos queda a cargo de Gero (el servidor todavía no está). Commit.
+- [ ] Push — pendiente: push con ok de Gero
 

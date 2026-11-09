@@ -100,7 +100,7 @@ export async function sonnetHypothesis(info) {
 }
 
 // deps: { db, now?: 'YYYY-MM-DD HH:MM' local, hypothesize?: async (info) => string }
-// Compara las hermanas de un recorte cuando todas tienen >= 48 h de datos. Una sola vez por recorte.
+// Compara las hermanas publicadas de un recorte (2 o más; las no publicadas quedan afuera) y espera mientras alguna publicada tenga menos de 48 h de datos. Una sola vez por recorte.
 export async function compareSiblings(clipId, deps = {}) {
   const { db } = deps, now = (typeof deps.now === 'function' ? deps.now() : deps.now) || nowLocal();
   if (db.prepare('SELECT 1 FROM comparisons WHERE clip_id = ?').get(clipId)) return { skipped: 'ya comparado' };

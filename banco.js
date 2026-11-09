@@ -13,7 +13,7 @@ import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinW
 import { embed } from './knowledge.js';
 import { DatabaseSync } from 'node:sqlite';
 import { planDay, planProject, initPlanner, expiredBlocked } from './planner.js';
-import { initAlerts } from './alerts.js';
+import { initAlerts, addAlert } from './alerts.js';
 import { initMetrics, readMetrics, readDue, score, DEFAULT_WEIGHTS } from './metrics.js';
 import { makeVault } from './connections.js';
 import { dailyCap, splitNetworks, canJudge, guardSpend } from './budget.js';
@@ -26,6 +26,7 @@ import { tiktokAdapter } from './ads-tiktok.js';
 import { googleAdapter } from './ads-google.js';
 import { buildAdapters } from './ads-factory.js';
 import { initMemory, compareSiblings, winningVariables, memoryCycle } from './memory.js';
+import { flushAlerts, alert as alert_, dailySummary, editorAtrasado } from './notify.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -125,6 +126,22 @@ function adsFixture({ nets = '{"meta":true,"youtube":true,"tiktok":true}', demo 
   const run = (deps = {}) => marketingCycle(1, { db: d, adapters: buildAdapters(d, ADS_VAULT, 1, () => '2026-11-21'), now, ...deps });
   return { d, post, run, adapters: () => buildAdapters(d, ADS_VAULT, 1, () => '2026-11-21') };
 }
+
+// proyecto con todo lo que cuenta el resumen diario y los avisos de Telegram
+function notifyFixture() {
+  const d = new DatabaseSync(':memory:');
+  d.exec(`CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT, demo INTEGER DEFAULT 0, score_weights TEXT DEFAULT '');
+    CREATE TABLE pauta (project_id INTEGER PRIMARY KEY, budget REAL);
+    CREATE TABLE accounts (id INTEGER PRIMARY KEY, network TEXT);
+    CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INT, account_id INT, status TEXT DEFAULT 'publicado', published_at TEXT DEFAULT '');
+    CREATE TABLE reels (id INTEGER PRIMARY KEY, project_id INT, kind TEXT, title TEXT, status TEXT, status_at TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE learnings (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, variable TEXT NOT NULL, value TEXT NOT NULL, network TEXT, wins REAL DEFAULT 0, trials REAL DEFAULT 0, origin TEXT NOT NULL DEFAULT 'opinion_dueno', updated_at TEXT DEFAULT (datetime('now')));`);
+  initAlerts(d); initMarketing(d); initMemory(d);
+  d.exec("INSERT INTO projects (id, name) VALUES (1, 'Club Mock'), (2, 'Demo Mock'); UPDATE projects SET demo = 1 WHERE id = 2; INSERT INTO pauta VALUES (1, 100); INSERT INTO accounts VALUES (1, 'instagram'), (2, 'tiktok')");
+  return d;
+}
+const TG = { token: '123:ABC-bueno', chat: '777' };
+const tgLog = (sim) => sim.log.filter((l) => l.startsWith('telegram '));
 
 function cases(video, sim) {
   const IG = { pageId: 'PAGE1', pageAccessToken: 'EAAprueba1234567', instagramBusinessId: 'IG1' };
@@ -706,6 +723,70 @@ function cases(video, sim) {
       f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 3, 'meta', 'meta-3', 5, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')");
       f.spend['meta-3'] = 4; await marketingCycle(1, f.deps);
       eq(f.d.prepare('SELECT target_reach FROM promotions').get().target_reach, 25, 'alcance 50 × 0,5');
+    }],
+    ['Telegram', 'Dos avisos iguales seguidos mandan 1 mensaje (el segundo, aunque sea otro día, se suprime dentro de 6 h); sin credenciales no manda nada; con token malo no filtra el token', async () => {
+      const d = notifyFixture(), n0 = tgLog(sim).length, now = '2026-11-21 10:00';
+      eq(await alert_(d, 'falta_material', 1, 'Sin material para mañana.', TG), 1, 'primer aviso anotado');
+      eq(tgLog(sim).length - n0, 1, 'un mensaje');
+      const msg = JSON.parse(tgLog(sim).at(-1).slice(9));
+      eq(msg, { chat: '777', text: '[Club Mock] Sin material para mañana.' }, 'mensaje en español con el nombre del proyecto');
+      d.exec("UPDATE alerts SET at = '2026-11-21 10:00:00', sent_at = '2026-11-21 10:00:00'"); // se fija la hora para que el resto sea determinista
+      eq(addAlert(d, 'falta_material', 1, 'Sin material para mañana.', '2026-11-21 10:05:00'), null, 'el mismo día no se anota dos veces');
+      d.prepare("INSERT INTO alerts (project_id, kind, text, at) VALUES (1, 'falta_material', 'otra vez', '2026-11-21 11:30:00')").run(); // otro registro, dentro de las 6 h
+      const r = await flushAlerts(d, { ...TG, now: '2026-11-21 11:31' });
+      eq([r.sent, r.suppressed, tgLog(sim).length - n0], [0, 1, 1], 'dentro de 6 h se suprime');
+      d.prepare("INSERT INTO alerts (project_id, kind, text, at) VALUES (1, 'falta_material', 'a las 7 h', '2026-11-21 17:30:00')").run();
+      eq((await flushAlerts(d, { ...TG, now: '2026-11-21 17:31' })).sent, 1, 'pasadas 6 h vuelve a avisar');
+      d.prepare("INSERT INTO alerts (project_id, kind, text, at) VALUES (1, 'tope', 'otro tipo', '2026-11-21 17:32:00')").run();
+      eq((await flushAlerts(d, { ...TG, now: '2026-11-21 17:33' })).sent, 1, 'otro tipo no se suprime');
+      // sin credenciales no hace nada y los avisos quedan para cuando se configure
+      const sin = notifyFixture(); addAlert(sin, 'tope', 1, 'sin telegram', '2026-11-21 10:00:00');
+      eq([await flushAlerts(sin, { token: '', chat: '', now }), sin.prepare('SELECT sent_at FROM alerts').get().sent_at], [{ sent: 0, suppressed: 0, failed: 0 }, null], 'sin credenciales no hace nada');
+      // token inválido: falla sin romper, queda sin enviar y el token no sale en el log
+      const mal = notifyFixture(); addAlert(mal, 'tope', 1, 'x', '2026-11-21 10:00:00');
+      const errs = []; const ce = console.error; console.error = (...a) => errs.push(a.join(' '));
+      let rr; try { rr = await flushAlerts(mal, { token: '999:SECRETO-malo', chat: '777', now }); } finally { console.error = ce; }
+      eq([rr.failed, mal.prepare('SELECT sent_at FROM alerts').get().sent_at], [1, null], 'falla y queda pendiente');
+      yes(errs.length && !errs.join('').includes('SECRETO-malo'), 'el token no aparece en el log');
+    }],
+    ['Telegram', 'El resumen diario tiene los 5 bloques: publicado, gastado, lo que queda, el ganador con su porqué y lo aprendido', async () => {
+      const d = notifyFixture();
+      d.exec("INSERT INTO posts (project_id, account_id, published_at) VALUES (1, 1, '2026-11-21 09:00'), (1, 1, '2026-11-21 12:00'), (1, 2, '2026-11-21 13:00'), (1, 1, '2026-11-20 13:00')");
+      d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at, spend, spend_day, spend_day_start) VALUES (1, 1, 'meta', 'A1', 5, 'activa', '2026-11-20 10:00', '2026-11-21 10:00', 30, '2026-11-21', 22.5)");
+      d.exec("INSERT INTO comparisons (project_id, clip_id, winner_reel_id, diff, hypothesis) VALUES (1, 'c1', 2, 0.25, 'La versión 2 ganó por el gancho en pregunta.')");
+      d.exec("INSERT INTO learnings (project_id, variable, value, wins, trials, origin) VALUES (1, 'gancho', 'pregunta', 1, 1, 'comparacion')");
+      const t = dailySummary(d, 1, '2026-11-22 22:00').split('\n');
+      eq(dailySummary(d, 1, '2026-11-21 22:00').split('\n').length, 6, 'título + 5 bloques');
+      const s = dailySummary(d, 1, '2026-11-21 22:00');
+      for (const b of ['Publicado hoy: 3 publicaciones (Instagram: 2, TikTok: 1).', 'Gastado hoy: USD 7,50.', 'Queda de pauta: USD 70,00 de USD 100,00', 'Ganador: La versión 2 ganó por el gancho en pregunta.', 'Aprendido: gancho «pregunta»']) yes(s.includes(b), `falta «${b}» en:\n${s}`);
+      yes(s.startsWith('Resumen del día 2026-11-21 de Club Mock'), 'título con el proyecto');
+      yes(/Publicado hoy: ninguna/.test(t.join('\n')) && /Gastado hoy: USD 0,00/.test(t.join('\n')), 'otro día: nada publicado ni gastado');
+      eq(dailySummary(notifyFixture(), 1, '2026-11-21 22:00').split('\n').slice(4).map((x) => x.slice(0, 23)), ['Ganador: todavía no hay', 'Aprendido: todavía no h'], 'sin datos no inventa');
+    }],
+    ['Telegram', 'Un crudo con más de 24 h en una etapa del editor genera editor_atrasado (una vez por día); los terminados y los de menos de 24 h no', async () => {
+      const d = notifyFixture(), now = new Date('2026-11-21T12:00:00Z');
+      d.exec(`INSERT INTO reels (id, project_id, kind, title, status, status_at, created_at) VALUES
+        (1, 1, 'crudo', 'Entrevista', 'editando', '2026-11-20 10:00:00', '2026-11-20 09:00:00'),
+        (2, 1, 'crudo', 'Reciente', 'en_cola', '2026-11-21 08:00:00', '2026-11-21 08:00:00'),
+        (3, 1, 'crudo', 'Terminado', 'listo', '2026-11-18 08:00:00', '2026-11-18 08:00:00'),
+        (4, 1, 'crudo', 'Sin hora', 'en_cola', '', '2026-11-19 08:00:00'),
+        (5, 2, 'crudo', 'De demo', 'en_cola', '2026-11-10 08:00:00', '2026-11-10 08:00:00')`);
+      eq(editorAtrasado(d, now), 1, 'un aviso por proyecto');
+      const a = d.prepare("SELECT kind, project_id, text FROM alerts").all();
+      eq([a.length, a[0].kind, a[0].project_id], [1, 'editor_atrasado', 1], 'editor_atrasado del proyecto 1');
+      yes(a[0].text.includes('«Entrevista»') && a[0].text.includes('y 1 más') && a[0].text.includes('24 h'), `texto: ${a[0].text}`);
+      eq(editorAtrasado(d, now), 0, 'no se repite el mismo día');
+    }],
+    ['Marketing', 'Sin ningún adaptador y con anuncios activos avisa pausa_imposible (una vez); sin anuncios activos no avisa', async () => {
+      const f = mktFixture(); f.post(2, 1, '2026-11-20 04:00', 1000);
+      eq((await marketingCycle(1, { ...f.deps, adapters: {} })).skipped, 'sin adaptadores', 'sin anuncios');
+      eq(f.d.prepare('SELECT count(*) n FROM alerts').get().n, 0, 'sin anuncios activos no avisa');
+      f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 2, 'meta', 'meta-2', 5, 'activa', '2026-11-20 10:00', '2026-11-20 10:00')");
+      await marketingCycle(1, { ...f.deps, adapters: {} }); await marketingCycle(1, { ...f.deps, adapters: {} });
+      const a = f.d.prepare('SELECT kind, text FROM alerts').all();
+      eq([a.length, a[0].kind], [1, 'pausa_imposible'], 'un aviso pausa_imposible por día');
+      yes(/1 anuncio activo/.test(a[0].text), a[0].text);
+      eq(f.d.prepare("SELECT status FROM promotions").get().status, 'activa', 'no toca el anuncio');
     }],
     ['Circuito', 'Planificador: YouTube respeta su cuota por proyecto y usa el mejor horario aprendido', async () => {
       const yt = [{ id: 1, network: 'youtube', status: 'conectada', posts_per_day: 3 }];
