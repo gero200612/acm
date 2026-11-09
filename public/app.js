@@ -930,6 +930,7 @@ function projectForm(p = {}) {
     <label class="field">Revisión de recortes<select class="input" name="review_mode"><option value="manual" ${p.review_mode === 'auto' ? '' : 'selected'}>Manual: apruebo yo</option><option value="auto" ${p.review_mode === 'auto' ? 'selected' : ''}>Automática</option></select></label></div>
     <div class="field">Redes con pauta<div class="row" style="gap:16px;flex-wrap:wrap">${[['meta', 'Meta'], ['youtube', 'YouTube'], ['tiktok', 'TikTok']].map(([k, t]) => `<label class="row" style="gap:6px"><input type="checkbox" name="ads_${k}" ${(p.ads_networks || { meta: true, youtube: true, tiktok: true })[k] ? 'checked' : ''}> ${t}</label>`).join('')}</div></div>
     ${p.id ? `<label class="field">Modo demostración<select class="input" name="demo"><option value="0" ${p.demo ? '' : 'selected'}>No: publica y pauta de verdad</option><option value="1" ${p.demo ? 'selected' : ''}>Sí: se ve completo pero no publica ni pauta nada</option></select></label>` : ''}
+    ${p.id ? `<div class="field">Puntaje de cada publicación<div class="two">${[['target_reach_per_usd', 'Personas del público por dólar'], ['impressions_per_usd', 'Impresiones por dólar'], ['completion', 'Cuánto del video se ve'], ['engagement', 'Interacción (me gusta, comentarios, compartidos)']].map(([k, t]) => `<label class="field">${t}<input class="input" type="number" min="0" step="0.05" name="w_${k}" value="${esc((p.score_weights || {})[k] ?? '')}"></label>`).join('')}</div><span class="hint">Cuánto pesa cada cosa al puntuar un video. Sin gasto solo cuentan los dos últimos. El agente no los cambia.</span></div>` : ''}
     <label class="field">Notas<textarea class="textarea" name="notes" rows="3" placeholder="Tono, temas, lo que nunca diría…">${esc(p.notes)}</textarea></label>
     <div class="row"><span class="spacer"></span><button class="btn primary" type="submit">${p.id ? 'Guardar' : 'Crear proyecto'}</button></div>
   </form>`;
@@ -958,6 +959,9 @@ function projectFormData(form) {
   const fd = new FormData(form);
   fd.set('ads_networks', JSON.stringify(Object.fromEntries(['meta', 'youtube', 'tiktok'].map((k) => [k, !!form.querySelector(`[name=ads_${k}]`)?.checked]))));
   for (const k of ['meta', 'youtube', 'tiktok']) fd.delete(`ads_${k}`);
+  const wk = ['target_reach_per_usd', 'impressions_per_usd', 'completion', 'engagement'];
+  if (wk.some((k) => form.querySelector(`[name=w_${k}]`))) fd.set('score_weights', JSON.stringify(Object.fromEntries(wk.map((k) => [k, Number(form.querySelector(`[name=w_${k}]`)?.value) || 0]))));
+  for (const k of wk) fd.delete(`w_${k}`);
   return fd;
 }
 function wireKindDefaults(form) {

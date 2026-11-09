@@ -72,6 +72,17 @@ export function startSimulator(port = 0) {
     if (p === '/yt/youtube/v3/channels') return send(res, 200, { items: [{ snippet: { title: 'Canal Mock', customUrl: '@canalmock' }, statistics: { subscriberCount: '321' } }] });
     if (p === '/ytup/upload/youtube/v3/videos') return send(res, 200, {}, { Location: `${B}/ytup/put/1` });
     if (p === '/ytup/put/1') return send(res, 200, { id: 'Y1' });
+    // Métricas por publicación (organicas). El ID BAD falla con un error que repite el token, para probar que no se muestra.
+    if (/^\/graph\/(M1|V1|BAD)\/(insights|video_insights)$/.test(p)) {
+      if (p.includes('/BAD/')) return send(res, 400, { error: { message: `Invalid OAuth access token ${u.searchParams.get('access_token')}` } });
+      if (p === '/graph/M1/insights') return send(res, 200, { data: [['views', 1500], ['reach', 1100], ['ig_reels_avg_watch_time', 4500], ['likes', 90], ['comments', 12], ['shares', 8]].map(([name, value]) => ({ name, period: 'lifetime', values: [{ value }] })) });
+      return send(res, 200, { data: [['blue_reels_play_count', 800], ['post_impressions_unique', 600], ['post_video_avg_time_watched', 3000]].map(([name, value]) => ({ name, period: 'lifetime', values: [{ value }] })) });
+    }
+    if (p === '/graph/V1' && req.method === 'GET') return send(res, 200, { likes: { summary: { total_count: 40 } }, comments: { summary: { total_count: 5 } }, shares: { count: 3 } });
+    if (p === '/yt/youtube/v3/videos' && req.method === 'GET') return u.searchParams.get('id') === 'YBAD' ? send(res, 403, { error: { message: 'quota' } }) : send(res, 200, { items: [{ id: u.searchParams.get('id'), statistics: { viewCount: '2000', likeCount: '150', commentCount: '20' } }] });
+    if (p === '/ytan/v2/reports') return u.searchParams.get('filters') === 'video==YNOAN' ? send(res, 403, { error: { message: 'sin permiso de Analytics' } })
+      : send(res, 200, { columnHeaders: [{ name: 'views' }, { name: 'averageViewDuration' }, { name: 'averageViewPercentage' }, { name: 'shares' }], rows: [[2000, 9, 60, 30]] });
+    if (p === '/tt/v2/video/query/') { const j = JSON.parse(body); return j.filters?.video_ids?.[0] === 'TV1' ? send(res, 200, { data: { videos: [{ id: 'TV1', view_count: 5000, like_count: 400, comment_count: 30, share_count: 60 }] }, ...ok }) : send(res, 200, { data: { videos: [] }, ...ok }); }
     // Meta Ads
     if (p === '/graph/act_999' && req.method === 'GET') return send(res, 200, { name: 'Cuenta Mock', currency: 'ARS', account_status: 1 });
     if (p === '/graph/act_999/customaudiences') return send(res, 200, { id: 'AUD1' });
@@ -96,7 +107,7 @@ export function startSimulator(port = 0) {
     B = `http://127.0.0.1:${server.address().port}`;
     resolve({
       url: B, log,
-      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, ytUpload: `${B}/ytup`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, r2: B },
+      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, youtubeAnalytics: `${B}/ytan`, ytUpload: `${B}/ytup`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, r2: B },
       close: () => new Promise((r) => server.close(r)),
     });
   }));

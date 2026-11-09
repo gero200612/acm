@@ -20,6 +20,7 @@ import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
 import { initAlerts } from './alerts.js';
 import { initPlanner, planProject, expiredBlocked } from './planner.js';
+import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -110,6 +111,9 @@ initTrace(db);
 initKnowledge(db);
 initAlerts(db);
 initPlanner(db);
+initMetrics(db);
+// pesos del puntaje de cada publicación (JSON); el agente nunca los cambia
+if (!cols('projects').includes('score_weights')) db.exec("ALTER TABLE projects ADD COLUMN score_weights TEXT DEFAULT ''");
 // campañas: el presupuesto total del proyecto (pauta.budget) se reparte en campañas con sus cuentas y su contenido
 db.exec(`CREATE TABLE IF NOT EXISTS campaigns (
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, name TEXT NOT NULL,
@@ -307,11 +311,16 @@ function update(table, id, data) {
   if (!keys.length) return;
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
-const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode'];
+const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode', 'score_weights'];
 // valida tipo, redes con pauta y modo de revisión; devuelve el motivo del error o '' (y normaliza ads_networks a JSON)
 function circuitFields(d, kindBefore) {
   if ('kind' in d && !PROJECT_KINDS.includes(d.kind)) return 'Tipo de proyecto inválido: club, politica o comercial';
   if ('review_mode' in d && !['manual', 'auto'].includes(d.review_mode)) return 'Modo de revisión inválido: manual o auto';
+  if ('score_weights' in d) {
+    let v = d.score_weights; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return 'Pesos del puntaje inválidos'; } }
+    if (!v || typeof v !== 'object' || Array.isArray(v) || WEIGHT_KEYS.some((k) => !(Number(v[k]) >= 0))) return 'Los pesos del puntaje tienen que ser números de 0 en adelante';
+    d.score_weights = JSON.stringify(weightsOf(v));
+  }
   if ('ads_networks' in d) {
     let v = d.ads_networks; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return 'Redes con pauta inválidas'; } }
     if (!v || typeof v !== 'object' || Array.isArray(v)) return 'Redes con pauta inválidas';
@@ -339,6 +348,7 @@ function projectSummary(full) {
   const c = (sql) => get(sql, p.id).n;
   return {
     ...p,
+    score_weights: weightsOf(p.score_weights),
     ads_networks: (() => { try { return JSON.parse(p.ads_networks); } catch { return defaultAdsNetworks(p.kind); } })(),
     ads: { adAccountId: ac.adAccountId || '', token: !!ac.accessToken },
     accounts: c('SELECT count(*) n FROM accounts WHERE project_id = ?'),
@@ -1073,6 +1083,15 @@ function repartoDelDia() {
   for (const p of all('SELECT id FROM projects WHERE demo = 0')) replanificar(p.id);
 }
 if (process.env.ACM_SCHEDULER !== 'off') { setInterval(repartoDelDia, 60e3); setTimeout(repartoDelDia, 5000); }
+
+// métricas: cada 6 h se leen las publicaciones de los últimos 7 días (sin proyectos de demostración); un error de una red no frena a las otras
+let leyendoMetricas = false;
+async function leerMetricas() {
+  if (leyendoMetricas) return; leyendoMetricas = true;
+  try { await readDue(db, vault, { since: localNow(-7 * 24 * 60).slice(0, 16) }); } catch (e) { console.error('métricas:', e.message); }
+  finally { leyendoMetricas = false; }
+}
+if (process.env.ACM_SCHEDULER !== 'off') { setInterval(leerMetricas, 6 * 3600e3); setTimeout(leerMetricas, 60e3); }
 
 // al arrancar completa vectores pendientes (la copia del banco lo hace enseguida para reproducir el orden de producción: primero este, después las importaciones)
 setTimeout(fillVectors, Number(process.env.ACM_FILL_MS) || 5000);

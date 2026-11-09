@@ -209,9 +209,9 @@
 - `readMetrics(network, creds, externalId) -> {views, reach, avg_watch_s, completion, likes, comments, shares}`, una función por red.
 - `score(metrics, weights)`: puntaje configurable del proyecto. Por defecto `{target_reach_per_usd:0.5, impressions_per_usd:0.2, completion:0.2, engagement:0.1}`. Sin gasto se usa la parte orgánica normalizada.
 
-- [ ] Casos contra el simulador: cada red devuelve sus métricas y se guarda una fila. Un error de API no frena a las otras y deja la nota.
-- [ ] Caso: `score` premia el mayor `target_reach_per_usd` con los pesos por defecto.
-- [ ] Implementar. Commit.
+- [x] Casos contra el simulador: cada red devuelve sus métricas y se guarda una fila. Un error de API no frena a las otras y deja la nota.
+- [x] Caso: `score` premia el mayor `target_reach_per_usd` con los pesos por defecto.
+- [x] Implementar. Commit.
 
 ### Task 10: Presupuesto y ciclo de 6 h
 

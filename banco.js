@@ -14,6 +14,8 @@ import { embed } from './knowledge.js';
 import { DatabaseSync } from 'node:sqlite';
 import { planDay, planProject, initPlanner, expiredBlocked } from './planner.js';
 import { initAlerts } from './alerts.js';
+import { initMetrics, readMetrics, readDue, score, DEFAULT_WEIGHTS } from './metrics.js';
+import { makeVault } from './connections.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -39,6 +41,42 @@ function cases(video, sim) {
     ['Conexiones', 'Facebook: trae el nombre de la Página', async () => { const r = await testConnection('facebook', { pageId: 'PAGE1', pageAccessToken: IG.pageAccessToken }); eq(r.connectedAs, 'Página Mock', 'nombre'); }],
     ['Conexiones', 'TikTok: renueva solo el token vencido', async () => { const r = await testConnection('tiktok', { accessToken: 'TT_VIEJO', refreshToken: 'R', clientKey: 'k', clientSecret: 's' }); eq(r.connectedAs, '@mock.tt', 'usuario'); eq(r.extra.accessToken, 'TT_OK', 'token nuevo'); }],
     ['Conexiones', 'YouTube: trae el canal', async () => { const r = await testConnection('youtube', { clientId: 'c', clientSecret: 's', refreshToken: 'r' }); eq(r.connectedAs, '@canalmock', 'canal'); }],
+    ['Métricas', 'Cada red devuelve sus métricas', async () => {
+      const ig = await readMetrics('instagram', IG, 'M1', { duration: 15 });
+      eq([ig.views, ig.reach, ig.avg_watch_s, ig.completion, ig.likes, ig.comments, ig.shares], [1500, 1100, 4.5, 0.3, 90, 12, 8], 'Instagram');
+      const fb = await readMetrics('facebook', IG, 'V1', { duration: 12 });
+      eq([fb.views, fb.reach, fb.avg_watch_s, fb.completion, fb.likes, fb.comments, fb.shares], [800, 600, 3, 0.25, 40, 5, 3], 'Facebook');
+      const yt = await readMetrics('youtube', { clientId: 'c', clientSecret: 's', refreshToken: 'r' }, 'Y1');
+      eq([yt.views, yt.avg_watch_s, yt.completion, yt.likes, yt.comments, yt.shares], [2000, 9, 0.6, 150, 20, 30], 'YouTube');
+      const tt = await readMetrics('tiktok', { accessToken: 'TT_OK' }, 'TV1');
+      eq([tt.views, tt.likes, tt.comments, tt.shares, tt.reach], [5000, 400, 30, 60, null], 'TikTok');
+    }],
+    ['Métricas', 'La lectura guarda una fila por publicación y un error no frena a las otras ni muestra el token', async () => {
+      const vault = makeVault('banco'), d = new DatabaseSync(':memory:');
+      d.exec("PRAGMA foreign_keys = ON; CREATE TABLE projects (id INTEGER PRIMARY KEY, demo INTEGER DEFAULT 0); CREATE TABLE accounts (id INTEGER PRIMARY KEY, network TEXT, creds TEXT);"
+        + "CREATE TABLE reels (id INTEGER PRIMARY KEY, duration REAL); CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INT, reel_id INT, account_id INT, status TEXT, external_id TEXT, published_at TEXT);");
+      initMetrics(d);
+      d.exec("INSERT INTO projects (id, demo) VALUES (1, 0), (2, 1); INSERT INTO reels VALUES (1, 15)");
+      const acc = d.prepare('INSERT INTO accounts (id, network, creds) VALUES (?, ?, ?)');
+      acc.run(1, 'instagram', vault.seal(IG)); acc.run(2, 'instagram', vault.seal({ ...IG, pageAccessToken: 'EAAsecretoNoVisible99' })); acc.run(3, 'tiktok', vault.seal({ accessToken: 'TT_OK' }));
+      const post = d.prepare("INSERT INTO posts (id, project_id, reel_id, account_id, status, external_id, published_at) VALUES (?, ?, 1, ?, 'publicado', ?, ?)");
+      post.run(1, 1, 2, 'BAD', '2030-01-10 10:00'); post.run(2, 1, 1, 'M1', '2030-01-10 11:00'); post.run(3, 1, 3, 'TV1', '2030-01-10 12:00');
+      post.run(4, 2, 1, 'M1', '2030-01-10 12:00'); post.run(5, 1, 1, 'M1', '2029-12-01 12:00');
+      const r = await readDue(d, vault, { since: '2030-01-05 00:00' });
+      eq(r, { read: 2, failed: 1 }, 'resultado');
+      const rows = d.prepare('SELECT * FROM post_metrics ORDER BY post_id').all();
+      eq(rows.map((x) => x.post_id), [1, 2, 3], 'filas (la demo y la vieja no se leen)');
+      yes(rows[0].note && rows[0].views === null && !rows[0].note.includes('EAAsecretoNoVisible99'), `nota con el token: ${rows[0].note}`);
+      eq([rows[1].views, rows[1].spend, rows[1].target_reach, rows[2].views], [1500, 0, 0, 5000], 'valores');
+    }],
+    ['Métricas', 'El puntaje premia más personas del público por dólar con los pesos por defecto', () => {
+      const base = { views: 1000, likes: 50, comments: 5, shares: 5, completion: 0.4, spend: 10, impressions: 5000 };
+      const a = score({ ...base, target_reach: 100 }, DEFAULT_WEIGHTS), b = score({ ...base, target_reach: 400 }, DEFAULT_WEIGHTS);
+      yes(b > a, `400 personas tendría que puntuar más que 100: ${b} vs ${a}`);
+      const sin = score({ views: 1000, likes: 50, comments: 5, shares: 5, completion: 0.4 }, DEFAULT_WEIGHTS);
+      yes(sin > 0 && sin <= 1, `sin gasto usa la parte orgánica: ${sin}`);
+      yes(score({ ...base, target_reach: 100 }, { target_reach_per_usd: 0, impressions_per_usd: 0, completion: 1, engagement: 0 }) === 0.4, 'pesos propios');
+    }],
     ['Conexiones', 'Un error de Meta no muestra el token', async () => {
       let msg = '';
       try { await testConnection('facebook', { pageId: 'PAGEBAD', pageAccessToken: 'EAAsecretoNoVisible99' }); } catch (e) { msg = e.message; }
