@@ -89,10 +89,10 @@
 - Procesa por tramos de 10 min con 2 s de solapamiento y une las palabras sin duplicar las del solapamiento. Límite propio: `ESTUDIO_MAX_DURACION_LARGO_S` (por defecto 10800, 3 h) y `ESTUDIO_MAX_BYTES_LARGO` (5 GB). Baja el video con la guardia SSRF de `assets/descargar`.
 - La prioridad en la cola es por duración: menos de 5 min va antes.
 
-- [ ] Test: `unirTramos()` con dos tramos solapados devuelve las palabras sin repetir y con los tiempos en segundos del original.
-- [ ] Test: un crudo de prueba de 3 s con voz (fixture existente) termina `listo` y tiene palabras. Un video mudo termina en `fallo` con el motivo "sin habla".
-- [ ] Test: la cola saca un trabajo de 60 s antes que uno de 1 h encolado antes.
-- [ ] Implementar sobre `ojos/whisper.ts` y `cola/`. `npm test` pasa. Commit en `dev`.
+- [x] Test: `unirTramos()` con dos tramos solapados devuelve las palabras sin repetir y con los tiempos en segundos del original.
+- [x] Test: un crudo de prueba de 3 s con voz (fixture existente) termina `listo` y tiene palabras. Un video mudo termina en `fallo` con el motivo "sin habla".
+- [x] Test: la cola saca un trabajo de 60 s antes que uno de 1 h encolado antes.
+- [x] Implementar sobre `ojos/whisper.ts` y `cola/`. `npm test` pasa. Commit en `dev`.
 
 ### Task 4: `POST /v1/editar-recorte` con receta
 
