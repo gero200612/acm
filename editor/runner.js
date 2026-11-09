@@ -131,7 +131,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
         }
         const review = rev.veredicto ? (rev.veredicto === 'aprobado' ? 'aprobado' : 'pendiente') : rev.review || 'pendiente'; // dudoso siempre espera a una persona
         const archivos = [e.resultado.archivo_local, e.resultado.portada_local].filter(Boolean).map(unArchivo);
-        R.edicion(e.id, { revision: { ...(e.revision || {}), ...rev } });
+        R.edicion(e.id, { revision: { ...(R.ediciones(t.id).find((x) => x.id === e.id)?.revision || {}), ...rev } });
         await acm.edicion({
           crudo_id: t.reel_id, clip_id: m.clip_id, moment: { inicio_s: m.inicio_s, fin_s: m.fin_s, ...m.datos }, recipe: paraAcm(e.receta),
           edicion_id: e.uuid, caption: rev.caption ?? e.receta?.caption ?? m.datos.caption ?? '', hashtags: rev.hashtags ?? e.receta?.hashtags ?? m.datos.hashtags ?? '',

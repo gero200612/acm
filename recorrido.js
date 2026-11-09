@@ -215,6 +215,20 @@ export function recorridoCases(sb) {
       eq(rv.map((x) => x.decision), ['aprobar', 'rechazar'], 'decisiones'); eq(rv[1].comentario, 'Los subtítulos tapan la cara', 'comentario');
       await api('DELETE', `/api/projects/${c.ap}`); // que no queden publicaciones de este caso para el de borrar
     }],
+    [G('aprobar'), 'Repetir la misma aprobación 20 veces no cuenta 20 recortes ni pasa a automático; los aprobados recientes se pueden rechazar', async () => {
+      const r = await api('POST', '/api/projects', form({ name: 'Repetir', kind: 'politica' }), true); const pid = r.j.id;
+      const up = await api('POST', `/api/projects/${pid}/reels`, form({ files: [[new Blob([fakeMp4(1080, 1920, 5)], { type: 'video/mp4' }), 'z.mp4']] }), true);
+      const rid = up.j[0].id; await api('PUT', `/api/reels/${rid}`, { clip_id: 'clip-rep', recipe: { subtitulos: 'karaoke', ritmo: 'normal', musica: null } });
+      let last; for (let i = 0; i < 20; i++) last = await api('POST', '/api/clips/clip-rep/review', { decision: 'aprobar' });
+      eq([last.j.review_mode, last.j.unchanged], ['manual', true], 'sigue manual y la repetición no cambia nada');
+      eq(sb.box.sql('SELECT count(*) n FROM clip_reviews WHERE project_id = ?', pid)[0].n, 1, 'una sola decisión guardada');
+      eq(sb.box.sql('SELECT count(*) n FROM learnings WHERE project_id = ?', pid)[0].n, 3, 'opiniones sin duplicar');
+      const g = (await api('GET', `/api/projects/${pid}/review`)).j;
+      eq([g.pending, g.recent.length, g.recent[0]?.clip_id], [0, 1, 'clip-rep'], 'aprobado reciente visible');
+      eq((await api('POST', '/api/clips/clip-rep/review', { decision: 'rechazar', comentario: 'x'.repeat(2001) })).status, 400, 'comentario largo');
+      eq((await api('POST', '/api/clips/clip-rep/review', { decision: 'rechazar', comentario: 'No me gusta' })).j.reels[0].review, 'rechazado', 'rechazo desde recientes');
+      await api('DELETE', `/api/projects/${pid}`);
+    }],
     [G('padrón'), 'CSV: cuenta socios, teléfonos y mails; rechaza .xls', async () => {
       const csv = 'Nro Socio;Apellido y Nombre;DNI;Teléfono;Email\n1;Pérez Ana;30111222;11 15 1234-5678;ANA@x.com\n2;Gómez B;30111223;;\n3;López C;30111224;0351 15 555 1234;caro@y.com.ar\n4;X;1;+54 9 11 2222 3333;malo@\n';
       const r = await api('POST', `/api/projects/${c.p}/padron`, form({ file: [[new Blob([csv], { type: 'text/csv' }), 'padron.csv']] }), true);

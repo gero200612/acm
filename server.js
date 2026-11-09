@@ -951,10 +951,14 @@ app.get('/api/projects/:id/review', (req, res) => {
   for (const r of reels) { if (!clips.has(r.clip_id)) clips.set(r.clip_id, []); clips.get(r.clip_id).push({ ...r, recipe: parseJson(r.recipe), moment: parseJson(r.moment) }); }
   const pending = [...clips.entries()].filter(([, rs]) => rs.some((r) => r.review === 'pendiente'))
     .map(([clip_id, rs]) => ({ clip_id, moment: rs[0].moment, reels: rs }));
-  res.json({ review_mode: p.review_mode, pending: pending.length, clips: pending });
+  // aprobados en los últimos 7 días (por el analista o por Gero) y sin rechazos: Gero puede rechazarlos todavía
+  const recent = [...clips.entries()].filter(([, rs]) => !rs.some((r) => r.review === 'pendiente') && rs.some((r) => r.review === 'aprobado') && rs.some((r) => new Date(String(r.created_at).replace(' ', 'T') + 'Z') > Date.now() - 7 * 864e5))
+    .map(([clip_id, rs]) => ({ clip_id, moment: rs[0].moment, reels: rs })).reverse().slice(0, 30);
+  res.json({ review_mode: p.review_mode, pending: pending.length, clips: pending, recent });
 });
 app.post('/api/clips/:clip_id/review', (req, res) => {
   const { decision, comentario } = req.body || {}, note = String(comentario || '').trim();
+  if (note.length > 2000) return res.status(400).json({ error: 'El comentario pasa de 2000 caracteres' });
   const reels = all("SELECT * FROM reels WHERE clip_id = ? AND kind = 'listo' ORDER BY id", req.params.clip_id);
   if (!reels.length) return res.status(404).json({ error: 'No existe ese recorte' });
   if (!['aprobar', 'rechazar'].includes(decision)) return res.status(400).json({ error: 'La decisión es aprobar o rechazar' });
@@ -969,6 +973,9 @@ app.post('/api/clips/:clip_id/review', (req, res) => {
     if (rejected.has(r.id)) { if (r.review !== 'rechazado') { run("UPDATE reels SET review = 'rechazado' WHERE id = ?", r.id); affected.push({ r, wins: 0 }); } }
     else if (r.review === 'pendiente') { run("UPDATE reels SET review = 'aprobado' WHERE id = ?", r.id); affected.push({ r, wins: 1 }); }
   }
+  const mode0 = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
+  // repetir una decisión que no cambia nada no suma opiniones ni cuenta para el modo
+  if (!affected.length) return res.json({ ok: true, unchanged: true, review_mode: mode0, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', req.params.clip_id) });
   // lo ya programado de una edición rechazada no sale
   const why = 'El recorte se rechazó: ya no está aprobado.';
   for (const id of rejected) run("UPDATE posts SET status = 'bloqueado', note = ? WHERE reel_id = ? AND status = 'programado'", why, id);
@@ -976,7 +983,7 @@ app.post('/api/clips/:clip_id/review', (req, res) => {
   for (const { r, wins } of affected) for (const [variable, value] of Object.entries(recipeVars(parseJson(r.recipe))))
     run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, NULL, ?, 1, 'opinion_dueno')", projectId, variable, value, wins);
   const mode = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
-  const next = reviewMode(mode, all('SELECT decision FROM clip_reviews WHERE project_id = ? ORDER BY id DESC LIMIT 20', projectId).map((x) => x.decision));
+  const next = reviewMode(mode, all('SELECT decision FROM clip_reviews WHERE id IN (SELECT max(id) FROM clip_reviews WHERE project_id = ? GROUP BY clip_id) ORDER BY id DESC LIMIT 20', projectId).map((x) => x.decision));
   if (next !== mode) run('UPDATE projects SET review_mode = ? WHERE id = ?', next, projectId);
   res.json({ ok: true, review_mode: next, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', req.params.clip_id) });
 });

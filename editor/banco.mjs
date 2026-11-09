@@ -318,6 +318,7 @@ casos.push(['Analista', 'La receta corregida siempre cambia algo', async () => {
 }]);
 const hooksAnalista = (veredictos) => { const claude = claudeAnalista(veredictos); return { claude, hooks: { ...hooksDePrueba, armarRecetas: async () => [{ ...RECETA_A }], revisar: crearAnalista({ claude }) } }; };
 const correr = async (m) => { m.editor.runner.arrancar({ cadaMs: 20 }); const id = (await (await post(m, '/trabajos', TRABAJO)).json()).id; return esperarEstado(m, id, ['listo', 'error']); };
+const require_ediciones = (m, id) => repo(m.editor.db).ediciones(id);
 casos.push(['Analista', 'Un rechazo se rehace una vez con la receta corregida y, si el segundo intento sale bien, se entrega aprobado', async () => {
   const { claude, hooks } = hooksAnalista([{ veredicto: 'rechazado', motivo: 'subtítulos tapados', correccion: { subtitulos: 'placa' } }, 'aprobado']);
   const m = await montar({ hooks, estudioOpc: { cuadros: CUADROS } });
@@ -325,7 +326,7 @@ casos.push(['Analista', 'Un rechazo se rehace una vez con la receta corregida y,
     const j = await correr(m);
     eq(j.estado, 'listo', 'estado'); const peds = m.est.pedidos('/v1/editar-recorte');
     eq(peds.map((p) => p.receta.subtitulos), ['karaoke', 'placa'], 'se pidió de nuevo con la receta corregida'); eq(claude.pedidos.length, 2, 'dos miradas');
-    eq(m.acm.ediciones.length, 1, 'una sola entrega'); eq(m.acm.ediciones[0].review, 'aprobado', 'aprobada'); eq(m.acm.ediciones[0].recipe.subtitulos, 'placa', 'va la receta corregida');
+    eq(require_ediciones(m, j.id)[0].revision.rechazos, ['subtítulos tapados'], 'queda el historial del rechazo'); eq(m.acm.ediciones.length, 1, 'una sola entrega'); eq(m.acm.ediciones[0].review, 'aprobado', 'aprobada'); eq(m.acm.ediciones[0].recipe.subtitulos, 'placa', 'va la receta corregida');
     eq(m.est.log.filter((l) => l.startsWith('sin-auth')), [], 'los cuadros se bajan con autenticación');
   } finally { await m.fin(); }
 }]);
@@ -339,7 +340,6 @@ casos.push(['Analista', 'Si el segundo intento también se rechaza, se descarta:
     eq(fs.readdirSync(path.join(m.dir, 'entregas')), [], 'se borran los archivos');
   } finally { await m.fin(); }
 }]);
-const require_ediciones = (m, id) => repo(m.editor.db).ediciones(id);
 casos.push(['Analista', 'Lo dudoso se entrega siempre con review pendiente', async () => {
   const { hooks } = hooksAnalista(['dudoso']);
   const m = await montar({ hooks, estudioOpc: { cuadros: CUADROS } });

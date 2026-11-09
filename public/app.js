@@ -298,7 +298,14 @@ function aprobarView() {
   const auto = R.review_mode === 'auto';
   const head = `<div class="ap-head"><div><h2 class="h2">Para aprobar <span class="count">${R.pending}</span></h2><p class="muted small">${R.pending ? `${R.pending} ${R.pending === 1 ? 'recorte espera' : 'recortes esperan'} tu decisión. Aprobás o rechazás las 3 versiones juntas.` : 'No hay recortes esperando.'}</p></div>
     <span class="chip ${auto ? 's-conectada' : 'nodot'}" title="${auto ? 'Lo que el analista aprueba entra solo; lo dudoso siempre espera acá. Un rechazo tuyo la vuelve a manual.' : 'Con 19 de los últimos 20 recortes aprobados pasa a automática.'}">Revisión ${auto ? 'automática' : 'manual'}</span></div>`;
-  if (!R.clips.length) return `<section class="card">${head}<p class="muted" style="margin-top:12px">Cuando el editor entregue recortes nuevos, aparecen acá.</p></section>`;
+  const rec = (R.recent || []).length ? `<h2 class="h2" style="margin-top:8px">Aprobados recientes</h2>${R.recent.map((c) => `
+  <section class="card ap-clip" data-clip="${esc(c.clip_id)}">
+    <div class="card-head"><h2 class="h2">${esc(c.moment?.tema || c.clip_id)}</h2><span class="small muted">${c.reels.filter((r) => r.review === 'aprobado').length} aprobadas</span></div>
+    <div class="ap-eds">${c.reels.map((r, i) => `<article class="ap-ed ${r.review === 'rechazado' ? 'no' : ''}"><video src="/media/${esc(r.file)}" controls preload="metadata" playsinline></video><b>Versión ${i + 1}</b><ul class="ap-recipe">${recetaResumen(r.recipe)}</ul></article>`).join('')}</div>
+    <label class="field">Motivo <span class="small muted">(obligatorio para rechazar)</span><textarea class="input ap-note" rows="2" maxlength="2000"></textarea></label>
+    <div class="row"><button class="btn" data-act="ap-no-all">Rechazar</button></div>
+  </section>`).join('')}` : '';
+  if (!R.clips.length) return `<div class="ap"><section class="card">${head}<p class="muted" style="margin-top:12px">Cuando el editor entregue recortes nuevos, aparecen acá.</p></section>${rec}</div>`;
   return `<div class="ap">${head}${R.clips.map((c) => `
   <section class="card ap-clip" data-clip="${esc(c.clip_id)}">
     <div class="card-head"><h2 class="h2">${esc(c.moment?.tema || c.clip_id)}</h2><span class="small muted">${c.moment?.motivo ? esc(c.moment.motivo) : ''}</span></div>
@@ -311,9 +318,9 @@ function aprobarView() {
         ${r.hashtags ? `<p class="small muted">${esc(r.hashtags)}</p>` : ''}
         ${r.review === 'rechazado' ? '' : `<label class="small ap-pick"><input type="checkbox" data-rid="${r.id}"> Rechazar solo esta</label>`}
       </article>`).join('')}</div>
-    <label class="field">Comentario <span class="small muted">(obligatorio para rechazar; sirve para aprender qué te gusta)</span><textarea class="input ap-note" rows="2" placeholder="Por ejemplo: los subtítulos tapan la cara"></textarea></label>
+    <label class="field">Comentario <span class="small muted">(obligatorio para rechazar; sirve para aprender qué te gusta)</span><textarea class="input ap-note" rows="2" maxlength="2000" placeholder="Por ejemplo: los subtítulos tapan la cara"></textarea></label>
     <div class="row"><button class="btn primary" data-act="ap-ok">Aprobar las 3</button><button class="btn" data-act="ap-no">Rechazar lo marcado</button><button class="btn" data-act="ap-no-all">Rechazar las 3</button></div>
-  </section>`).join('')}</div>`;
+  </section>`).join('')}${rec}</div>`;
 }
 
 // Datos fijos del cálculo (no se tocan desde la pantalla): CPM de Meta en Argentina en campaña con públicos chicos,
