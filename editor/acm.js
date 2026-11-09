@@ -18,17 +18,19 @@ export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn 
     throw ultimo;
   }
   return {
-    // lo que ACM sabe del proyecto: lo aprendido (variables ganadoras) y su investigación; si no se puede traer, el trabajo sigue sin eso
-    async contexto(urlAprendizajes) {
-      if (!urlAprendizajes) return { aprendizajes: [], investigacion: [] };
+    // lo que ACM sabe del proyecto: lo aprendido (variables ganadoras) y su investigación; si no se puede traer, el trabajo sigue sin eso.
+    // El link se arma siempre con ACM_URL (nunca con uno que llegue en el trabajo): el EDITOR_TOKEN solo viaja a ACM.
+    async contexto(projectId) {
+      const pid = Number(projectId);
+      if (!base || !(pid > 0)) return { aprendizajes: [], investigacion: [] };
       try {
-        const r = await fetchFn(urlAprendizajes, { headers: { authorization: `Bearer ${token || ''}` }, signal: AbortSignal.timeout(20000) });
+        const r = await fetchFn(`${base}/api/editor/aprendizajes/${pid}`, { headers: { authorization: `Bearer ${token || ''}` }, signal: AbortSignal.timeout(20000) });
         if (!r.ok) return { aprendizajes: [], investigacion: [] };
         const j = await r.json();
         return { aprendizajes: j.aprendizajes || [], investigacion: Array.isArray(j.investigacion) ? j.investigacion : [] };
       } catch { return { aprendizajes: [], investigacion: [] }; }
     },
-    async aprendizajes(urlAprendizajes) { return (await this.contexto(urlAprendizajes)).aprendizajes; },
+    async aprendizajes(projectId) { return (await this.contexto(projectId)).aprendizajes; },
     estado: (reel_id, estado, detalle = '') => post('/api/editor/estado', { reel_id, estado, detalle }),
     // {crudo_id, clip_id, moment, recipe, caption, hashtags, file_url, cover_url, duration, review, expires_at?}
     edicion: (payload) => post('/api/editor/edicion', payload),

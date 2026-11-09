@@ -26,7 +26,7 @@ Estados del crudo en ACM (`reels.status`): `en_cola`, `transcribiendo`, `buscand
 | `revisar` (Tarea 7, el analista) | `{ trabajo, momento, edicion, resultado, tecnica, cuadros, palabras }` | `{ veredicto: 'aprobado'\|'rechazado'\|'dudoso', motivo, correccion? }` (el formato viejo `{ review }` sigue valiendo) |
 
 - `transcripcion` es el resultado del Estudio: `{ duracion_s, palabras: [{inicio_s, fin_s, texto}], audio: { lufs } }`.
-- `aprendizajes` es la lista que devuelve `GET {aprendizajes_url}` de ACM (hoy vacía; la llena el analista).
+- `aprendizajes` es la lista que devuelve `GET {ACM_URL}/api/editor/aprendizajes/{project_id}` (el link se arma siempre con `ACM_URL`; el `aprendizajes_url` que llega en el trabajo se guarda pero no se usa, así el token no viaja a otro lado).
 - A `editar-recorte` van solo las palabras que tocan el momento, con los tiempos absolutos del crudo.
 - El `clip_id` lo pone el corredor: `c<reel_id>-<n°>` y no cambia si el trabajo se retoma.
 - Cada edición que falla queda en `ediciones` con su error; si salen todas mal el crudo pasa a `error`, si salen algunas queda `listo` con el detalle «N de M ediciones».

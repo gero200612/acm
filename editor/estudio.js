@@ -9,6 +9,18 @@ const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 export function crearEstudio({ url, empresa, clave, intervaloMs = 2000, esperaMaxMs = 6 * 3600e3, fetchFn = fetch } = {}) {
   const base = String(url || '').replace(/\/+$/, '');
   const headers = (extra = {}) => ({ 'X-Empresa': empresa || '', Authorization: `Bearer ${clave || ''}`, ...extra });
+  // la clave del Estudio viaja solo al Estudio: rutas relativas o links absolutos del mismo origen que ESTUDIO_URL; cualquier otro, error
+  const origen = (() => { try { return new URL(base).origin; } catch { return ''; } })();
+  const resolver = (ruta) => {
+    const r = String(ruta || '');
+    if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(r)) {
+      let o = ''; try { o = new URL(r).origin; } catch {}
+      if (!origen || o !== origen) throw new Error(`El Estudio devolvió un link de otro servidor (${o || 'inválido'}): no se baja con la clave`);
+      return r;
+    }
+    if (!base) throw new Error('Falta ESTUDIO_URL');
+    return base + (r.startsWith('/') ? '' : '/') + r;
+  };
   const pedir = async (method, ruta, body) => {
     if (!base) throw new Error('Falta ESTUDIO_URL');
     const r = await fetchFn(base + ruta, { method, headers: headers(body ? { 'content-type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(60000) });
@@ -38,8 +50,7 @@ export function crearEstudio({ url, empresa, clave, intervaloMs = 2000, esperaMa
     },
     // un cuadro (imagen) del Estudio, para que lo mire el analista: {tipo, base64}
     async cuadro(ruta) {
-      const abs = /^https?:\/\//.test(ruta) ? ruta : base + (ruta.startsWith('/') ? '' : '/') + ruta;
-      const r = await fetchFn(abs, { headers: headers(), signal: AbortSignal.timeout(60000) });
+      const r = await fetchFn(resolver(ruta), { headers: headers(), signal: AbortSignal.timeout(60000) });
       if (!r.ok) throw new Error(`No pudimos bajar el cuadro ${ruta}: ${r.status}`);
       const buf = Buffer.from(await r.arrayBuffer());
       if (buf.length > 4 * 1024 * 1024) throw new Error('El cuadro pasa de 4 MB');
@@ -48,8 +59,7 @@ export function crearEstudio({ url, empresa, clave, intervaloMs = 2000, esperaMa
     },
     // archivo y portada vienen como rutas del Estudio: se bajan con la misma autenticación
     async descargar(ruta, destino) {
-      const abs = /^https?:\/\//.test(ruta) ? ruta : base + (ruta.startsWith('/') ? '' : '/') + ruta;
-      const r = await fetchFn(abs, { headers: headers(), signal: AbortSignal.timeout(30 * 60e3) });
+      const r = await fetchFn(resolver(ruta), { headers: headers(), signal: AbortSignal.timeout(30 * 60e3) });
       if (!r.ok || !r.body) throw new Error(`No pudimos bajar ${ruta} del Estudio: ${r.status}`);
       await pipeline(Readable.fromWeb(r.body), fs.createWriteStream(destino));
       return destino;

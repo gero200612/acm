@@ -144,8 +144,8 @@ const casos = [
       eq([peds[0].inicio_s, peds[0].fin_s, peds[0].palabras.map((p) => p.texto)], [0, 12, ['hola', 'chau']], 'solo las palabras del momento');
       eq(m.acm.ediciones.length, 2, 'ediciones entregadas');
       const e = m.acm.ediciones[0];
-      yes(/^[0-9a-f-]{36}$/.test(e.edicion_id) && e.edicion_id !== m.acm.ediciones[1].edicion_id, 'edicion_id: un UUID distinto por edición'); eq([e.crudo_id, e.clip_id, e.review, e.caption, e.duration, e.bajado, e.portada_bajada], [42, 'c42-1', 'aprobado', 'Texto revisado', 12, VIDEO.length, true], 'entrega con archivo bajable');
-      eq(m.acm.ediciones.map((x) => x.clip_id), ['c42-1', 'c42-1'], 'las dos versiones comparten clip_id');
+      yes(/^[0-9a-f-]{36}$/.test(e.edicion_id) && e.edicion_id !== m.acm.ediciones[1].edicion_id, 'edicion_id: un UUID distinto por edición'); eq([e.crudo_id, e.clip_id, e.review, e.caption, e.duration, e.bajado, e.portada_bajada], [42, `c42-${id}-1`, 'aprobado', 'Texto revisado', 12, VIDEO.length, true], 'entrega con archivo bajable');
+      eq(m.acm.ediciones.map((x) => x.clip_id), [`c42-${id}-1`, `c42-${id}-1`], 'las dos versiones comparten clip_id');
       eq(fs.readdirSync(path.join(m.dir, 'entregas')), [], 'los archivos entregados se borran');
       const g = await (await fetch(`${m.srv.base}/trabajos/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } })).json();
       eq(g.estado, 'listo', 'GET del trabajo');
@@ -360,6 +360,53 @@ casos.push(['Analista', 'Lo dudoso se entrega siempre con review pendiente', asy
   const { hooks } = hooksAnalista(['dudoso']);
   const m = await montar({ hooks, estudioOpc: { cuadros: CUADROS } });
   try { await correr(m); eq(m.acm.ediciones.map((e) => e.review), ['pendiente'], 'pendiente'); eq(m.est.pedidos('/v1/editar-recorte').length, 1, 'sin rehacer'); } finally { await m.fin(); }
+}]);
+
+casos.push(['Seguridad', 'La clave del Estudio solo viaja al Estudio: un link absoluto de otro servidor da error y no se pide', async () => {
+  const est = await estudioFalso(), ajenos = [];
+  const otro = await escuchar((req, res) => { ajenos.push(`${req.method} ${req.url} ${req.headers.authorization || ''}`); res.writeHead(200); res.end('x'); });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'editor-banco-'));
+  try {
+    const E = crearEstudio({ url: est.base, empresa: EMPRESA, clave: CLAVE, intervaloMs: 5 });
+    for (const [que, f] of [['descargar', () => E.descargar(`${otro.base}/archivos/t1.mp4`, path.join(dir, 'a.mp4'))], ['cuadro', () => E.cuadro(`${otro.base}/cuadros/1.jpg`)], ['protocolo relativo', () => E.cuadro(`//${otro.base.slice(7)}/cuadros/1.jpg`)]]) {
+      let err; try { await f(); } catch (e) { err = e; }
+      yes(err && /otro servidor/.test(err.message), `${que}: tendría que fallar (${err?.message})`);
+    }
+    eq(ajenos, [], 'el otro servidor no recibió ningún pedido (ni la clave)');
+    await E.descargar(`${est.base}/archivos/t1.mp4`, path.join(dir, 'b.mp4')); eq(fs.statSync(path.join(dir, 'b.mp4')).size, VIDEO.length, 'mismo origen absoluto: anda');
+    await E.descargar('/archivos/t2.mp4', path.join(dir, 'c.mp4')); eq(fs.statSync(path.join(dir, 'c.mp4')).size, VIDEO.length, 'ruta relativa: anda');
+    eq((await E.cuadro('cuadros/1.jpg')).tipo, 'image/jpeg', 'cuadro relativo');
+    eq(est.log.filter((l) => l.startsWith('sin-auth')), [], 'al Estudio con autenticación');
+  } finally { await Promise.all([est.close(), otro.close()]); fs.rmSync(dir, { recursive: true, force: true }); }
+}]);
+casos.push(['Seguridad', 'El EDITOR_TOKEN solo viaja a ACM: el link de aprendizajes se arma con ACM_URL e ignora el aprendizajes_url del trabajo', async () => {
+  const ajenos = [];
+  const otro = await escuchar((req, res) => { ajenos.push(`${req.method} ${req.url} ${req.headers.authorization || ''}`); json(res, 200, { aprendizajes: [{ ritmo: 'robado' }] }); });
+  const vistos = {};
+  const m = await montar({ hooks: { ...hooksDePrueba, elegirMomentos: async (a) => { vistos.a = a.aprendizajes; vistos.i = a.investigacion; return [{ inicio_s: 0, fin_s: 12 }]; } } });
+  try {
+    m.editor.runner.arrancar({ cadaMs: 20 });
+    const id = (await (await post(m, '/trabajos', { ...TRABAJO, aprendizajes_url: `${otro.base}/robar` })).json()).id;
+    await esperarEstado(m, id, ['listo', 'error']);
+    eq(ajenos, [], 'el servidor del aprendizajes_url no recibió nada');
+    eq([vistos.a[0]?.ritmo, vistos.i], ['rapido', ['Candidato X: pide más seguridad']], 'el contexto vino de ACM_URL/api/editor/aprendizajes/7');
+    const acm = crearAcm({ url: '', token: TOKEN });
+    eq(await acm.contexto(7), { aprendizajes: [], investigacion: [] }, 'sin ACM_URL no se pide nada');
+  } finally { await m.fin(); await otro.close(); }
+}]);
+casos.push(['Tubería', 'Reenviar el mismo crudo arma clip_id nuevos (llevan el trabajo): no chocan con los del envío anterior', async () => {
+  const m = await montar({ hooks: hooksDePrueba });
+  try {
+    m.editor.runner.arrancar({ cadaMs: 20 });
+    const id1 = (await (await post(m, '/trabajos', TRABAJO)).json()).id; await esperarEstado(m, id1, ['listo', 'error']);
+    const n1 = m.acm.ediciones.length;
+    const id2 = (await (await post(m, '/trabajos', TRABAJO)).json()).id; await esperarEstado(m, id2, ['listo', 'error']);
+    yes(id2 !== id1, 'el reenvío es otro trabajo');
+    const a = new Set(m.acm.ediciones.slice(0, n1).map((e) => e.clip_id)), b = new Set(m.acm.ediciones.slice(n1).map((e) => e.clip_id));
+    yes(a.size && b.size, 'los dos envíos entregaron');
+    eq([...a].filter((x) => b.has(x)), [], 'sin clip_id repetidos entre envíos');
+    eq([...a, ...b], [`c42-${id1}-1`, `c42-${id2}-1`], 'formato c{reel}-{trabajo}-{n}');
+  } finally { await m.fin(); }
 }]);
 
 for (const [grupo, nombre, fn] of casos) {

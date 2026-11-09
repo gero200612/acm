@@ -56,7 +56,8 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     elegidos.forEach((m, i) => {
       const { inicio_s, fin_s, estado, ...datos } = m;
       if (!(Number(fin_s) > Number(inicio_s) && Number(inicio_s) >= 0)) throw new Error(`El momento ${i + 1} tiene tiempos inválidos`);
-      R.guardarMomento(t.id, i, `c${t.reel_id}-${i + 1}`, Number(inicio_s), Number(fin_s), datos, estado || 'elegido');
+      // el clip_id lleva el trabajo: reenviar el mismo crudo arma recortes nuevos que no chocan con los del envío anterior
+      R.guardarMomento(t.id, i, `c${t.reel_id}-${t.id}-${i + 1}`, Number(inicio_s), Number(fin_s), datos, estado || 'elegido');
     });
     ms = R.momentos(t.id);
     return ms;
@@ -152,7 +153,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     if (!t || TERMINALES.includes(t.estado)) return t;
     try {
       motivoSinMomentos = '';
-      const ctx = acm.contexto ? await acm.contexto(t.aprendizajes_url) : { aprendizajes: (await acm.aprendizajes?.(t.aprendizajes_url)) ?? [] };
+      const ctx = acm.contexto ? await acm.contexto(t.project_id) : { aprendizajes: (await acm.aprendizajes?.(t.project_id)) ?? [] };
       const aprendizajes = ctx.aprendizajes ?? [], investigacion = ctx.investigacion ?? [];
       const transcripcion = await transcribir(t);
       t = R.trabajo(id);
