@@ -17,6 +17,12 @@ export const hasAdsCreds = {
   tiktok: (c) => !!(c.ttAdvertiserId && c.ttAccessToken && c.ttIdentityId && c.ttBcId),
   youtube: (c) => !!(c.gCustomerId && c.gDeveloperToken && c.gRefreshToken),
 };
+// lo mínimo para pausar y leer anuncios que ya están corriendo
+export const hasPauseCreds = {
+  meta: (c) => !!(c.adAccountId && c.accessToken),
+  tiktok: (c) => !!(c.ttAdvertiserId && c.ttAccessToken),
+  youtube: (c) => !!(c.gCustomerId && c.gDeveloperToken && c.gRefreshToken),
+};
 export const parseObj = (t, d = {}) => { try { const v = typeof t === 'string' ? JSON.parse(t || 'null') : t; return v && typeof v === 'object' ? v : d; } catch { return d; } };
 
 // db: base de ACM. vault: { open }. today: () => 'YYYY-MM-DD' en hora local.
@@ -45,14 +51,20 @@ export function buildAdapters(db, vault, projectId, today = () => new Date().toI
   const make = { meta: metaAdapter, tiktok: tiktokAdapter, youtube: googleAdapter };
   const out = {};
   for (const n of Object.keys(make)) {
-    if (!((enabled[n] || active.has(n)) && hasAdsCreds[n](creds))) continue;
-    // TikTok y Google solo pautan en dólares: una cuenta probada en otra moneda no arma adaptador (y se avisa)
+    const full = hasAdsCreds[n](creds);
+    // TikTok y Google solo pautan en dólares: una cuenta probada en otra moneda no promociona (y se avisa)
     const cur = (n === 'tiktok' || n === 'youtube') ? ctx.state.get(n).currency : '';
-    if (cur && cur !== 'USD') {
+    const nonUsd = !!cur && cur !== 'USD';
+    if (full && !nonUsd && (enabled[n] || active.has(n))) { out[n] = make[n](ctx); continue; }
+    if (nonUsd && (enabled[n] || active.has(n))) {
       try { addAlert(db, 'moneda_no_usd', projectId, `La cuenta de pauta de ${n === 'tiktok' ? 'TikTok' : 'Google'} está en ${cur}: ACM solo pauta en dólares en esa red, no se promociona ahí.`); } catch {}
-      continue;
     }
-    out[n] = make[n](ctx);
+    // con anuncios activos siempre hay un adaptador capaz de pausar y leer (nunca de promocionar ni subir presupuestos)
+    if (active.has(n) && hasPauseCreds[n](creds)) {
+      const a = make[n](ctx);
+      out[n] = { pauseOnly: true, pause: a.pause, insights: a.insights,
+        async ensureCampaign() { throw new Error('Esta red solo puede pausar y leer.'); }, async promote() { throw new Error('Esta red solo puede pausar y leer.'); }, async setBudget() { throw new Error('Esta red solo puede pausar y leer.'); } };
+    }
   }
   return out;
 }

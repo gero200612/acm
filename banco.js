@@ -49,7 +49,7 @@ function mktFixture({ budget = 100, end = '2026-11-30', until = '', nets = '{"me
   d.exec(`PRAGMA foreign_keys = ON; CREATE TABLE projects (id INTEGER PRIMARY KEY, demo INTEGER DEFAULT 0, ads_networks TEXT, score_weights TEXT DEFAULT '', propaganda_until TEXT DEFAULT '', ads_blocked TEXT DEFAULT '');
     CREATE TABLE pauta (project_id INTEGER PRIMARY KEY, budget REAL, start_date TEXT DEFAULT '', end_date TEXT DEFAULT '');
     CREATE TABLE accounts (id INTEGER PRIMARY KEY, network TEXT);
-    CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INT, account_id INT, status TEXT DEFAULT 'publicado', external_id TEXT, published_at TEXT);`);
+    CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INT, account_id INT, status TEXT DEFAULT 'publicado', external_id TEXT, published_at TEXT, network_video_id TEXT DEFAULT '');`);
   initMetrics(d); initAlerts(d); initMarketing(d);
   d.prepare('INSERT INTO projects (id, demo, ads_networks, propaganda_until) VALUES (1, ?, ?, ?)').run(demo, nets, until);
   d.prepare("INSERT INTO pauta (project_id, budget, start_date, end_date) VALUES (1, ?, '2026-11-01', ?)").run(budget, end);
@@ -545,7 +545,7 @@ function cases(video, sim) {
       eq(sim.log.slice(mark).filter((l) => l.startsWith('ttads ')).length, 0, 'no llama a TikTok ni usa el publish_id');
       const g = adsFixture({ nets: '{"meta":true,"youtube":false,"tiktok":true}' }); g.post(3, 3, 'PUBLISH_ID_9'); g.post(1, 1, 'M1');
       const r = await g.run(); eq(r.promoted, 1, 'sale Meta; el post de TikTok se saltea');
-      eq(g.d.prepare("SELECT count(*) n FROM decisions WHERE kind = 'omitido'").get().n, 1, 'decisión de omisión'); eq(g.d.prepare('SELECT ads_blocked FROM projects').get().ads_blocked, '', 'la red NO queda bloqueada');
+      eq(g.d.prepare("SELECT count(*) n FROM promotions WHERE network = 'tiktok'").get().n, 0, 'sin promoción de TikTok (ya se filtra antes de elegir)'); eq(g.d.prepare('SELECT ads_blocked FROM projects').get().ads_blocked, '', 'la red NO queda bloqueada');
       const m = adsFixture(); m.d.prepare("UPDATE projects SET ads_state = ?").run(JSON.stringify({ tiktok: { currency: 'ARS' }, youtube: { currency: 'USD' } }));
       eq(Object.keys(m.adapters()).sort(), ['meta', 'youtube'], 'TikTok en ARS no arma adaptador');
       eq(m.d.prepare("SELECT count(*) n FROM alerts WHERE kind = 'moneda_no_usd'").get().n, 1, 'alerta de moneda');
@@ -563,6 +563,38 @@ function cases(video, sim) {
       eq(r.paused, 1, 'el ciclo la pausó');
       yes(sim.log.some((l) => l.startsWith('gads campaigns:mutate') && l.includes('customers/1234567890/campaigns/701') && l.includes('PAUSED')), 'pausó en Google');
       eq(f.d.prepare("SELECT status FROM promotions WHERE ad_id = '701:5'").get().status, 'pausada', 'estado');
+    }],
+    ['Pauta real', 'Cuenta que no está en dólares con un anuncio activo: el adaptador solo pausa y el ciclo lo pausa de verdad', async () => {
+      const f = adsFixture(); f.d.prepare("UPDATE projects SET ads_state = ?").run(JSON.stringify({ tiktok: { currency: 'ARS' } }));
+      f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 3, 'tiktok', 'TTG1', 5, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')");
+      const A = f.adapters().tiktok; yes(A && A.pauseOnly === true, 'hay adaptador solo de pausa');
+      let e; try { await A.promote({ id: 1, external_id: 'x', network: 'tiktok' }, 5); } catch (x) { e = x; } yes(e, 'no promociona');
+      const mark = sim.log.length, r = await f.run();
+      eq(r.paused, 1, 'pausó');
+      yes(sim.log.slice(mark).some((l) => l.startsWith('ttads adgroup/status/update/') && l.includes('DISABLE') && l.includes('TTG1')), 'pausa real en TikTok');
+      eq(f.d.prepare("SELECT status FROM promotions WHERE ad_id = 'TTG1'").get().status, 'pausada', 'estado');
+      // credenciales incompletas para promocionar (falta la identidad) pero suficientes para pausar
+      const g = adsFixture({ creds: { ...ADS_CREDS, ttIdentityId: '', ttBcId: '' } });
+      g.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 3, 'tiktok', 'TTG1', 5, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')");
+      yes(g.adapters().tiktok?.pauseOnly, 'incompleto para promocionar: solo pausa');
+      eq(Object.keys(adsFixture({ creds: { ...ADS_CREDS, ttIdentityId: '', ttBcId: '' } }).adapters()).includes('tiktok'), false, 'sin anuncios activos no hay adaptador');
+    }],
+    ['Pauta real', 'Sin adaptador no se marca pausado: el anuncio queda activo y se avisa (pausa_imposible)', async () => {
+      const f = mktFixture({ nets: '{"meta":true,"youtube":false,"tiktok":false}' }); f.post(3, 1, '2026-11-18 03:00', 3000, 300, 0.8);
+      f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 9, 'youtube', 'yt-9', 5, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')");
+      delete f.deps.adapters.youtube;
+      const r = await marketingCycle(1, f.deps);
+      eq(r.paused, 0, 'no pausó');
+      const row = f.d.prepare("SELECT status, daily_usd FROM promotions WHERE ad_id = 'yt-9'").get();
+      eq([row.status, row.daily_usd], ['activa', 5], 'sigue activa y con su presupuesto');
+      eq(f.d.prepare("SELECT count(*) n FROM alerts WHERE kind = 'pausa_imposible'").get().n, 1, 'alerta');
+    }],
+    ['Pauta real', 'Un post de TikTok sin ID de video no ocupa el lugar: se promociona el próximo que sí lo tiene', async () => {
+      const f = adsFixture({ nets: '{"meta":false,"youtube":false,"tiktok":true}' });
+      f.post(3, 3, 'PUB3'); f.post(4, 3, 'PUB4'); f.post(6, 3, 'PUB6'); f.post(7, 3, 'PUB7', 'TV7');
+      const r = await f.run();
+      eq(r.promoted, 1, 'promovió uno');
+      eq(f.d.prepare("SELECT post_id FROM promotions WHERE network = 'tiktok'").all().map((x) => x.post_id), [7], 'el que tiene ID de video');
     }],
     ['Pauta real', 'Una red sin target_reach usa el alcance total con peso 0,5', async () => {
       eq(UNTARGETED_REACH_WEIGHT, 0.5, 'peso');

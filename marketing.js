@@ -61,7 +61,9 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   // una red bloqueada (rechazó un anuncio) se trata como apagada hasta que Gero la reactive
   let blocked; try { blocked = typeof p.ads_blocked === 'string' ? JSON.parse(p.ads_blocked || '{}') : p.ads_blocked; } catch { blocked = null; }
   blocked = blocked && typeof blocked === 'object' ? blocked : {};
-  enabled = { meta: !!enabled?.meta && !blocked.meta, youtube: !!enabled?.youtube && !blocked.youtube, tiktok: !!enabled?.tiktok && !blocked.tiktok };
+  // un adaptador "solo pausa" (cuenta que no está en dólares, datos incompletos) nunca promociona: la red cuenta como apagada y lo activo se pausa
+  const on = (n) => !!enabled?.[n] && !blocked[n] && !adapters[n]?.pauseOnly;
+  enabled = { meta: on('meta'), youtube: on('youtube'), tiktok: on('tiktok') };
   const weights = weightsOf(p.score_weights);
   const to = [pa.end_date, p.propaganda_until].filter(Boolean).map((d) => d.slice(0, 10)).sort()[0] || '';
   const from = (pa.start_date || '').slice(0, 10) || today;
@@ -91,10 +93,11 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   const remaining = Math.max(0, budget - spent);
 
   const pausePromo = async (pr, kind, reason, status) => {
-    try { await adapters[pr.network]?.pause(pr.ad_id); }
+    // sin adaptador (credenciales borradas, red sin acceso) el anuncio sigue gastando: NO se marca pausado, queda activo y se avisa
+    try { if (!adapters[pr.network]) throw new Error('no hay credenciales para hablar con la red'); await adapters[pr.network].pause(pr.ad_id); }
     catch (e) {
       decide('error', pr.ad_id, { network: pr.network }, `No se pudo pausar en ${pr.network}: ${e.message}`.slice(0, 300));
-      addAlert(db, 'pauta_no_pausa', projectId, `No se pudo pausar un anuncio de ${pr.network} (${pr.ad_id}); pausalo a mano.`, `${nowStr}:00`);
+      addAlert(db, 'pausa_imposible', projectId, `No se pudo pausar un anuncio de ${pr.network} (${pr.ad_id}); pausalo a mano.`, `${nowStr}:00`);
       return false;
     }
     setPromo(pr.id, { status, daily_usd: 0 });
@@ -113,7 +116,7 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   if (!to) return { ...out, skipped: 'sin fecha de fin de la pauta' };
 
   // 3) redes apagadas: no se usan
-  for (const pr of promos()) if (!enabled[pr.network] && adapters[pr.network]) if (await pausePromo(pr, 'pausa', `La red ${pr.network} está apagada en el proyecto.`, 'pausada')) out.paused++;
+  for (const pr of promos()) if (!enabled[pr.network]) if (await pausePromo(pr, 'pausa', `La red ${pr.network} está apagada en el proyecto.`, 'pausada')) out.paused++;
 
   // 4) corte: con gasto o tiempo suficientes, se corta lo que rinde bajo el promedio o viene cayendo en 3 lecturas
   const metricsOf = (postId, pr) => {
@@ -157,9 +160,11 @@ async function cycle(db, projectId, adapters, nowStr, today) {
   // candidatos: publicados hace 24 h o más, con ID en la red, nunca promocionados ni rechazados, de una red habilitada y con adaptador
   const ever = new Set(all.map((r) => r.post_id));
   const rejected = new Set(db.prepare("SELECT target FROM decisions WHERE project_id = ? AND kind = 'rechazo'").all(projectId).map((r) => r.target));
-  const cands = db.prepare(`SELECT po.id, po.external_id, po.published_at, a.network FROM posts po JOIN accounts a ON a.id = po.account_id
+  const cands = db.prepare(`SELECT po.id, po.external_id, po.network_video_id, po.published_at, a.network FROM posts po JOIN accounts a ON a.id = po.account_id
     WHERE po.project_id = ? AND po.status = 'publicado' AND po.external_id != '' ORDER BY po.id`).all(projectId)
     .map((c) => ({ ...c, net: adNetworkOf(c.network) }))
+    // TikTok necesita el ID del video (el external_id es el publish_id): sin él no ocupa lugar y se sigue con el próximo
+    .filter((c) => c.network !== 'tiktok' || c.network_video_id)
     .filter((c) => c.net && usable[c.net] && !ever.has(c.id) && !rejected.has(`post ${c.id}`) && c.published_at && hoursBetween(c.published_at, nowStr) >= MIN_ORGANIC_HOURS)
     .map((c) => ({ ...c, s: score(metricsOf(c.id, null), weights) })).sort((a, b) => b.s - a.s || a.id - b.id);
 
