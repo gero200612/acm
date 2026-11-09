@@ -35,9 +35,10 @@ const ICON = {
 const icon = (k, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[k]}"/></svg>`;
 const netBadge = (n) => `<span class="net ${n}" title="${NETS[n]?.name || n}">${NETS[n]?.svg || ''}</span>`;
 const initials = (s) => String(s || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-const avatar = (p, lg) => p.photo
-  ? `<img class="avatar${lg ? ' lg' : ''}" src="/media/${esc(p.photo)}" alt="">`
-  : `<span class="avatar${lg ? ' lg' : ''}" style="background:${esc(p.color)}">${esc(initials(p.name))}</span>`;
+// size: true o 'lg' = grande, 'sm' = chico (barra lateral)
+const avatar = (p, size) => { const c = `avatar${size === 'sm' ? ' sm' : size ? ' lg' : ''}`; return p.photo
+  ? `<img class="${c}" src="/media/${esc(p.photo)}" alt="">`
+  : `<span class="${c}" style="background:${esc(p.color)}">${esc(initials(p.name))}</span>`; };
 function daysTo(date) {
   if (!date) return null;
   const t = new Date(date + 'T00:00:00'); const now = new Date(); now.setHours(0, 0, 0, 0);
@@ -117,7 +118,7 @@ function sideNav(r) {
     <a class="item ${r.view === 'home' ? 'active' : ''}" href="#">${icon('home', 20)}<span class="t">Inicio</span></a>
     <a class="item ${r.view === 'lab' ? 'active' : ''}" href="#/lab">${icon('flask', 20)}<span class="t">Laboratorio</span></a>
     <div class="nav-label">Proyectos</div>
-    ${state.projects.map((p) => `<a class="item ${r.id === p.id ? 'active' : ''}" href="#/p/${p.id}"><span class="dot" style="background:${esc(p.color)}"></span><span class="t">${esc(p.name)}</span>${p.review_pending ? `<span class="count" title="Recortes para aprobar">${p.review_pending}</span>` : ''}</a>`).join('')}
+    ${state.projects.map((p) => `<a class="item ${r.id === p.id ? 'active' : ''}" href="#/p/${p.id}">${avatar(p, 'sm')}<span class="t">${esc(p.name)}</span>${p.review_pending ? `<span class="count" title="Recortes para aprobar">${p.review_pending}</span>` : ''}</a>`).join('')}
     <button class="item add" data-act="new-project">${icon('plus', 20)}<span class="t">Nuevo proyecto</span></button>
   </nav>
   <div class="side-foot"><span class="live"><i></i>En línea</span><button data-act="logout">Salir</button></div>`;
