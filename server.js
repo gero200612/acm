@@ -15,7 +15,7 @@ import { initTrace, traced } from './trace.js';
 import { runBanco } from './banco.js';
 import { probe, review } from './mp4probe.js';
 import { r2Ready, putUrl, getUrl, head as r2Head, remove as r2Remove, download as r2Download, MAX_UPLOAD } from './storage.js';
-import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, withinWindow, NETWORK_CAPS } from './rules.js';
+import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, withinWindow, NETWORK_CAPS, reviewMode } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
@@ -91,6 +91,15 @@ if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD
 db.exec('DROP INDEX IF EXISTS reels_editor_edition');
 // la clave de idempotencia es un UUID de la edición del editor, y vale dentro de su crudo
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS reels_editor_edition2 ON reels(source_id, editor_edition_id) WHERE editor_edition_id IS NOT NULL');
+// opiniones de Gero sobre los recortes y lo que se aprende de ellas (la Tarea 12 suma los otros orígenes)
+db.exec(`CREATE TABLE IF NOT EXISTS learnings (
+  id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, variable TEXT NOT NULL, value TEXT NOT NULL,
+  network TEXT, wins REAL DEFAULT 0, trials REAL DEFAULT 0, origin TEXT NOT NULL DEFAULT 'opinion_dueno', updated_at TEXT DEFAULT (datetime('now')));
+CREATE INDEX IF NOT EXISTS learnings_project ON learnings(project_id, variable);
+CREATE TABLE IF NOT EXISTS clip_reviews (
+  id INTEGER PRIMARY KEY, clip_id TEXT NOT NULL, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, decision TEXT NOT NULL,
+  rechazar_ids TEXT DEFAULT '[]', comentario TEXT DEFAULT '', at TEXT DEFAULT (datetime('now')));
+CREATE INDEX IF NOT EXISTS clip_reviews_project ON clip_reviews(project_id, id);`);
 initTrace(db);
 initKnowledge(db);
 // campañas: el presupuesto total del proyecto (pauta.budget) se reparte en campañas con sus cuentas y su contenido
@@ -328,6 +337,7 @@ function projectSummary(full) {
     reels: c('SELECT count(*) n FROM reels WHERE project_id = ?'),
     scheduled: c("SELECT count(*) n FROM posts WHERE project_id = ? AND status = 'programado'"),
     published: c("SELECT count(*) n FROM posts WHERE project_id = ? AND status = 'publicado'"),
+    review_pending: c("SELECT count(DISTINCT clip_id) n FROM reels WHERE project_id = ? AND clip_id IS NOT NULL AND review = 'pendiente'"),
     pauta: get('SELECT * FROM pauta WHERE project_id = ?', p.id) || null,
   };
 }
@@ -920,6 +930,55 @@ app.put('/api/projects/:id/pauta', (req, res) => {
   const keys = Object.keys(d);
   if (keys.length) run(`UPDATE pauta SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE project_id = ?`, ...keys.map((k) => d[k]), req.params.id);
   res.json(get('SELECT * FROM pauta WHERE project_id = ?', req.params.id));
+});
+
+
+// ---------- Para aprobar: Gero revisa cada recorte (las 3 ediciones hermanas juntas) ----------
+const parseJson = (v) => { try { return v ? JSON.parse(v) : null; } catch { return null; } };
+const REVIEW_VARS = ['gancho', 'subtitulos', 'musica', 'ritmo', 'largo'];
+// las variables de la receta (el editor las manda en recipe.variables; si faltan, se leen de los campos sueltos)
+function recipeVars(recipe) {
+  const r = recipe || {}, v = r.variables || {}, out = {};
+  const fallback = { subtitulos: r.subtitulos, musica: r.musica === null ? 'sin' : r.musica?.clima, ritmo: r.ritmo };
+  for (const k of REVIEW_VARS) { const x = v[k] ?? fallback[k]; if (typeof x === 'string' && x) out[k] = x; }
+  return out;
+}
+app.get('/api/projects/:id/review', (req, res) => {
+  const p = get('SELECT id, review_mode FROM projects WHERE id = ?', req.params.id);
+  if (!p) return res.status(404).json({ error: 'No existe el proyecto' });
+  const reels = all("SELECT id, title, caption, hashtags, file, cover, duration, clip_id, moment, recipe, review, created_at FROM reels WHERE project_id = ? AND kind = 'listo' AND clip_id IS NOT NULL ORDER BY id", p.id);
+  const clips = new Map();
+  for (const r of reels) { if (!clips.has(r.clip_id)) clips.set(r.clip_id, []); clips.get(r.clip_id).push({ ...r, recipe: parseJson(r.recipe), moment: parseJson(r.moment) }); }
+  const pending = [...clips.entries()].filter(([, rs]) => rs.some((r) => r.review === 'pendiente'))
+    .map(([clip_id, rs]) => ({ clip_id, moment: rs[0].moment, reels: rs }));
+  res.json({ review_mode: p.review_mode, pending: pending.length, clips: pending });
+});
+app.post('/api/clips/:clip_id/review', (req, res) => {
+  const { decision, comentario } = req.body || {}, note = String(comentario || '').trim();
+  const reels = all("SELECT * FROM reels WHERE clip_id = ? AND kind = 'listo' ORDER BY id", req.params.clip_id);
+  if (!reels.length) return res.status(404).json({ error: 'No existe ese recorte' });
+  if (!['aprobar', 'rechazar'].includes(decision)) return res.status(400).json({ error: 'La decisión es aprobar o rechazar' });
+  if (decision === 'rechazar' && !note) return res.status(400).json({ error: 'Para rechazar contanos por qué: el comentario es obligatorio' });
+  const projectId = reels[0].project_id;
+  const ids = Array.isArray(req.body.rechazar_ids) ? req.body.rechazar_ids.map(Number) : [];
+  if (ids.some((i) => !reels.some((r) => r.id === i))) return res.status(400).json({ error: 'Alguna edición a rechazar no es de este recorte' });
+  // rechazar sin elegir ediciones rechaza las tres; eligiendo, las demás se aprueban
+  const rejected = decision === 'rechazar' ? new Set(ids.length ? ids : reels.map((r) => r.id)) : new Set();
+  const affected = [];
+  for (const r of reels) {
+    if (rejected.has(r.id)) { if (r.review !== 'rechazado') { run("UPDATE reels SET review = 'rechazado' WHERE id = ?", r.id); affected.push({ r, wins: 0 }); } }
+    else if (r.review === 'pendiente') { run("UPDATE reels SET review = 'aprobado' WHERE id = ?", r.id); affected.push({ r, wins: 1 }); }
+  }
+  // lo ya programado de una edición rechazada no sale
+  const why = 'El recorte se rechazó: ya no está aprobado.';
+  for (const id of rejected) run("UPDATE posts SET status = 'bloqueado', note = ? WHERE reel_id = ? AND status = 'programado'", why, id);
+  run('INSERT INTO clip_reviews (clip_id, project_id, decision, rechazar_ids, comentario) VALUES (?, ?, ?, ?, ?)', req.params.clip_id, projectId, decision, JSON.stringify([...rejected]), note);
+  for (const { r, wins } of affected) for (const [variable, value] of Object.entries(recipeVars(parseJson(r.recipe))))
+    run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, NULL, ?, 1, 'opinion_dueno')", projectId, variable, value, wins);
+  const mode = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
+  const next = reviewMode(mode, all('SELECT decision FROM clip_reviews WHERE project_id = ? ORDER BY id DESC LIMIT 20', projectId).map((x) => x.decision));
+  if (next !== mode) run('UPDATE projects SET review_mode = ? WHERE id = ?', next, projectId);
+  res.json({ ok: true, review_mode: next, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', req.params.clip_id) });
 });
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'No existe' }));

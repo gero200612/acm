@@ -9,8 +9,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { als } from './trace.js';
-import { withinWindow } from './rules.js';
+import { withinWindow, reviewMode } from './rules.js';
 
 const APP = path.dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -84,7 +85,7 @@ export async function startSandbox(bases) {
   const raw = (url, withCookie = true) => als.exit(() => fetch(url.startsWith('http') ? url : base + url, { redirect: 'manual', headers: withCookie ? { cookie } : {}, signal: AbortSignal.timeout(20000) }));
   const stop = async () => { child.kill(); await sleep(300); fs.rmSync(data, { recursive: true, force: true }); };
   const editorApi = (url, body) => als.exit(async () => { const r = await fetch(base + url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${EDITOR_TOKEN}` }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, j }; });
-  return { api, raw, editorApi, password, stop, base, simLog: () => bases.__log || [] };
+  return { api, raw, editorApi, password, stop, base, sql: (q, ...a) => { const d = new DatabaseSync(path.join(data, 'acm.db'), { readOnly: true }); try { return d.prepare(q).all(...a); } finally { d.close(); } }, simLog: () => bases.__log || [] };
 }
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -162,6 +163,57 @@ export function recorridoCases(sb) {
         if (inside) yes(q.status === 'bloqueado' && /aprobado/.test(q.note), `estado ${q.status}, nota ${q.note}`);
         else eq([q.status, q.note], ['programado', ''], 'fuera de horario no se publica ni se bloquea');
       } finally { await api('DELETE', `/api/projects/${c.pol}`); } // que no queden publicaciones de este recorrido para el caso de borrar
+    }],
+    [G('aprobar'), 'Modo de revisión: 19 de 20 aprobados pasa a automático; con 18 de 20 sigue manual; un rechazo en automático vuelve a manual', async () => {
+      const lista = (ok, mal) => [...Array(mal).fill('rechazar'), ...Array(ok).fill('aprobar')];
+      eq(reviewMode('manual', lista(19, 1)), 'auto', '19 de 20');
+      eq(reviewMode('manual', lista(18, 2)), 'manual', '18 de 20');
+      eq(reviewMode('manual', lista(19, 0)), 'manual', 'con 19 recortes todavía no alcanza');
+      eq(reviewMode('manual', ['rechazar', 'rechazar', ...lista(19, 1)]), 'manual', 'solo cuentan los últimos 20');
+      eq(reviewMode('auto', ['aprobar', 'rechazar']), 'auto', 'en auto, aprobar no lo cambia');
+      eq(reviewMode('auto', ['rechazar', 'aprobar']), 'manual', 'un rechazo en auto lo vuelve a manual');
+    }],
+    [G('aprobar'), 'Las 3 ediciones salen juntas en «Para aprobar»; aprobar las 3 las deja aprobadas y guarda la opinión por variable', async () => {
+      const r = await api('POST', '/api/projects', form({ name: 'Aprobar', kind: 'politica' }), true); c.ap = r.j.id;
+      const up = await api('POST', `/api/projects/${c.ap}/reels`, form({ files: [1, 2, 3].map((n) => [new Blob([fakeMp4(1080, 1920, 5 + n)], { type: 'video/mp4' }), `e${n}.mp4`]) }), true);
+      c.apReels = up.j.map((x) => x.id);
+      const rec = (n) => ({ subtitulos: ['karaoke', 'placa', 'minimo'][n], ritmo: 'normal', musica: n ? { clima: 'calido' } : null, variables: { gancho: 'directo', subtitulos: ['karaoke', 'placa', 'minimo'][n], musica: n ? 'calido' : 'sin', ritmo: 'normal', largo: 'completo' } });
+      for (const [n, id] of c.apReels.entries()) await api('PUT', `/api/reels/${id}`, { clip_id: 'clip-ap', moment: { inicio_s: 1, fin_s: 20 }, recipe: rec(n), caption: `Texto ${n}` });
+      const g = (await api('GET', `/api/projects/${c.ap}/review`)).j;
+      eq([g.review_mode, g.pending, g.clips.length, g.clips[0].reels.length], ['manual', 1, 1, 3], 'un recorte pendiente con 3 ediciones');
+      eq(g.clips[0].reels[1].recipe.subtitulos, 'placa', 'trae la receta');
+      eq((await api('POST', '/api/clips/clip-ap/review', { decision: 'quizas' })).status, 400, 'decisión inválida');
+      eq((await api('POST', '/api/clips/no-existe/review', { decision: 'aprobar' })).status, 404, 'recorte inexistente');
+      const ok = await api('POST', '/api/clips/clip-ap/review', { decision: 'aprobar' });
+      eq([ok.status, ok.j.reels.map((x) => x.review)], [200, ['aprobado', 'aprobado', 'aprobado']], 'las 3 aprobadas');
+      eq((await api('GET', `/api/projects/${c.ap}/review`)).j.pending, 0, 'ya no está pendiente');
+      eq((await api('GET', `/api/projects/${c.ap}`)).j.review_pending, 0, 'el contador del proyecto');
+    }],
+    [G('aprobar'), 'Rechazar exige comentario; una o todas; el rechazo estando en automático vuelve a manual y bloquea lo programado (no sale en el tick)', async () => {
+      eq((await api('PUT', `/api/projects/${c.ap}`, { review_mode: 'auto' })).j.review_mode, 'auto', 'modo automático');
+      const acc = (await api('POST', `/api/projects/${c.ap}/accounts`, { network: 'instagram' })).j.id;
+      const P = await api('POST', `/api/projects/${c.ap}/posts`, [{ reel_id: c.apReels[0], account_id: acc, scheduled_at: '2030-01-10 10:00' }]);
+      eq(P.status, 200, 'programado con el recorte aprobado');
+      const sin = await api('POST', '/api/clips/clip-ap/review', { decision: 'rechazar', rechazar_ids: [c.apReels[0]], comentario: '  ' });
+      eq(sin.status, 400, 'sin comentario no rechaza');
+      const mal = await api('POST', '/api/clips/clip-ap/review', { decision: 'rechazar', rechazar_ids: [999999], comentario: 'x' });
+      eq(mal.status, 400, 'una edición que no es del recorte');
+      const rr = await api('POST', '/api/clips/clip-ap/review', { decision: 'rechazar', rechazar_ids: [c.apReels[0]], comentario: 'Los subtítulos tapan la cara' });
+      eq([rr.status, rr.j.review_mode, rr.j.reels.map((x) => x.review)], [200, 'manual', ['rechazado', 'aprobado', 'aprobado']], 'rechazo en automático');
+      eq((await api('GET', `/api/projects/${c.ap}`)).j.review_mode, 'manual', 'el proyecto volvió a manual');
+      const post = (await api('GET', `/api/projects/${c.ap}/posts`)).j.find((x) => x.reel_id === c.apReels[0]);
+      yes(post.status === 'bloqueado' && /rechaz/.test(post.note), `la publicación quedó ${post.status} (${post.note})`);
+      eq((await api('POST', `/api/posts/${post.id}/now`, {})).status === 200 && (await sleep(1500), (await api('GET', `/api/projects/${c.ap}/posts`)).j.find((x) => x.id === post.id).status !== 'publicado'), true, 'no sale en el tick');
+    }],
+    [G('aprobar'), 'Las opiniones quedan en learnings (origin opinion_dueno, una fila por variable) y el comentario en clip_reviews', async () => {
+      const L = sb.box.sql("SELECT variable, value, network, wins, trials, origin FROM learnings WHERE project_id = ? ORDER BY id", c.ap);
+      eq(L.length, 20, 'tres ediciones × 5 variables al aprobar, más 5 del rechazo');
+      yes(L.every((x) => x.origin === 'opinion_dueno' && x.network === null && x.trials === 1), 'origen, red y pruebas');
+      eq(L.filter((x) => x.wins === 1).length, 15, 'aprobadas'); eq(L.filter((x) => x.wins === 0).length, 5, 'rechazada');
+      eq(L.filter((x) => x.variable === 'subtitulos' && x.wins === 0).map((x) => x.value), ['karaoke'], 'el rechazo es del karaoke');
+      const rv = sb.box.sql('SELECT decision, rechazar_ids, comentario FROM clip_reviews WHERE project_id = ? ORDER BY id', c.ap);
+      eq(rv.map((x) => x.decision), ['aprobar', 'rechazar'], 'decisiones'); eq(rv[1].comentario, 'Los subtítulos tapan la cara', 'comentario');
+      await api('DELETE', `/api/projects/${c.ap}`); // que no queden publicaciones de este caso para el de borrar
     }],
     [G('padrón'), 'CSV: cuenta socios, teléfonos y mails; rechaza .xls', async () => {
       const csv = 'Nro Socio;Apellido y Nombre;DNI;Teléfono;Email\n1;Pérez Ana;30111222;11 15 1234-5678;ANA@x.com\n2;Gómez B;30111223;;\n3;López C;30111224;0351 15 555 1234;caro@y.com.ar\n4;X;1;+54 9 11 2222 3333;malo@\n';

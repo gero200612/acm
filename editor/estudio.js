@@ -36,6 +36,16 @@ export function crearEstudio({ url, empresa, clave, intervaloMs = 2000, esperaMa
       const { id } = await pedir('POST', '/v1/editar-recorte', pedido);
       return esperar(`/v1/editar-recorte/${id}`, alAvanzar);
     },
+    // un cuadro (imagen) del Estudio, para que lo mire el analista: {tipo, base64}
+    async cuadro(ruta) {
+      const abs = /^https?:\/\//.test(ruta) ? ruta : base + (ruta.startsWith('/') ? '' : '/') + ruta;
+      const r = await fetchFn(abs, { headers: headers(), signal: AbortSignal.timeout(60000) });
+      if (!r.ok) throw new Error(`No pudimos bajar el cuadro ${ruta}: ${r.status}`);
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length > 4 * 1024 * 1024) throw new Error('El cuadro pasa de 4 MB');
+      const tipo = buf[0] === 0x89 ? 'image/png' : 'image/jpeg';
+      return { tipo, base64: buf.toString('base64') };
+    },
     // archivo y portada vienen como rutas del Estudio: se bajan con la misma autenticación
     async descargar(ruta, destino) {
       const abs = /^https?:\/\//.test(ruta) ? ruta : base + (ruta.startsWith('/') ? '' : '/') + ruta;

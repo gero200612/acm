@@ -52,3 +52,13 @@ export function scheduleBlocked(post, ctx = {}) {
   if (ctx.networkCap != null && (ctx.dayCount || 0) >= ctx.networkCap) return `Ya se llegó al tope de ${ctx.networkCap} publicaciones por día en esta red.`;
   return null;
 }
+
+// Modo de revisión de los recortes. `decisiones` son las decisiones de Gero sobre recortes, de la más nueva a la más vieja
+// ('aprobar' | 'rechazar'; rechazar una o más ediciones del recorte cuenta como rechazo).
+// manual → auto con 19 de los últimos 20 recortes aprobados; en auto, un rechazo lo vuelve a manual.
+export const REVIEW_WINDOW = 20, REVIEW_MIN_OK = 19;
+export function reviewMode(current, decisiones = []) {
+  if (current === 'auto') return decisiones[0] === 'rechazar' ? 'manual' : 'auto';
+  const last = decisiones.slice(0, REVIEW_WINDOW);
+  return last.length >= REVIEW_WINDOW && last.filter((d) => d === 'aprobar').length >= REVIEW_MIN_OK ? 'auto' : 'manual';
+}

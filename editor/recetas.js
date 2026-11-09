@@ -75,6 +75,7 @@ export function construirReceta({ v, momento, palabras = [], textos }) {
     ritmo: v.ritmo, zoom: v.ritmo === 'rapido',
     largo_s, portada: { segundo_s: r1(largo_s * POS_PORTADA[v.largo]), texto: String(textos.portada_texto || '').trim().slice(0, 40) || String(momento.datos?.tema || 'Mirá esto').slice(0, 40) },
     explora: v.explora,
+    variables: { gancho: v.gancho, subtitulos: v.subtitulos, musica: v.musica, ritmo: v.ritmo, largo: v.largo },
     caption: String(textos.caption || '').trim(), hashtags: textos.hashtags,
   };
 }

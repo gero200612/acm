@@ -15,6 +15,7 @@ import { crearArmarRecetas, elegirVariables } from './recetas.js';
 import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
+import { crearAnalista, corregirReceta, elegirCuadros } from './analista.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (c, what) => { if (!c) throw new Error(what); };
@@ -47,8 +48,9 @@ async function estudioFalso(opc = {}) {
         if (opc.falloTranscribir) return json(res, 200, { estado: 'fallo', error: 'whisper se cayó' });
         return json(res, 200, { estado: 'listo', progreso: 1, resultado: { duracion_s: 60, palabras: opc.palabras || [{ inicio_s: 1, fin_s: 2, texto: 'hola' }, { inicio_s: 10, fin_s: 11, texto: 'chau' }, { inicio_s: 30, fin_s: 31, texto: 'afuera' }], audio: { lufs: -20 } } });
       }
-      return json(res, 200, { estado: 'listo', resultado: { archivo: `/archivos/${m[2]}.mp4`, portada: `/archivos/${m[2]}.jpg`, duracion_s: t.pedido.fin_s - t.pedido.inicio_s, receta: t.pedido.receta, tecnica: {}, cuadros: [] } });
+      return json(res, 200, { estado: 'listo', resultado: { archivo: `/archivos/${m[2]}.mp4`, portada: `/archivos/${m[2]}.jpg`, duracion_s: t.pedido.fin_s - t.pedido.inicio_s, receta: t.pedido.receta, tecnica: opc.tecnica ? opc.tecnica(t.pedido) : {}, cuadros: opc.cuadros ? opc.cuadros : [] } });
     }
+    if (u.pathname.startsWith('/cuadros/')) { res.writeHead(200, { 'content-type': 'image/jpeg' }); return res.end(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])); }
     if (u.pathname.startsWith('/archivos/')) { res.writeHead(200, { 'content-type': 'application/octet-stream' }); return res.end(VIDEO); }
     json(res, 404, {});
   });
@@ -290,6 +292,60 @@ casos.push(
 );
 
 let ok = 0;
+// ---- Tarea 7: el analista (respuestas fakes, cero red) ----
+const CUADROS = Array.from({ length: 12 }, (_, i) => `/cuadros/c${i}.jpg`);
+const FRAMES = Array.from({ length: 12 }, (_, i) => ({ tipo: 'image/jpeg', base64: `AAA${i}` }));
+const RECETA_A = { gancho: { desde_s: 0 }, subtitulos: 'karaoke', musica: { clima: 'calido', volumen: 0.25 }, ritmo: 'normal', zoom: false, largo_s: 12, portada: { segundo_s: 3, texto: 'x' }, caption: 'c', hashtags: '#a' };
+const claudeAnalista = (veredictos) => { const pedidos = []; return { pedidos, async estructurado(p) { pedidos.push(p); const v = veredictos[Math.min(pedidos.length - 1, veredictos.length - 1)]; return typeof v === 'string' ? { veredicto: v, motivo: `motivo ${v}` } : v; } }; };
+
+casos.push(['Analista', 'Con una falla técnica de audio_no_mudo sale rechazado sin llamar al modelo (0 llamadas)', async () => {
+  const claude = claudeAnalista(['aprobado']);
+  const r = await crearAnalista({ claude })({ edicion: { receta: RECETA_A }, tecnica: { ok: false, fallas: [{ regla: 'audio_no_mudo', detalle: 'sin audio' }] }, cuadros: FRAMES, palabras: [] });
+  eq([r.veredicto, claude.pedidos.length], ['rechazado', 0], 'rechazado sin modelo'); yes(/audio_no_mudo/.test(r.motivo), 'el motivo nombra la regla');
+}]);
+casos.push(['Analista', 'Sin fallas, Sonnet mira entre 6 y 8 cuadros (imágenes) con la receta y las palabras', async () => {
+  const claude = claudeAnalista(['aprobado']);
+  const r = await crearAnalista({ claude })({ edicion: { receta: RECETA_A }, tecnica: { ok: true, fallas: [] }, cuadros: FRAMES, palabras: [{ texto: 'hola' }, { texto: 'chau' }] });
+  eq(r.veredicto, 'aprobado', 'veredicto'); const p = claude.pedidos[0];
+  eq(p.modelo, 'claude-sonnet-5-5', 'modelo'); eq(p.usuario.filter((b) => b.type === 'image').length, 8, '8 cuadros de 12'); yes(/hola chau/.test(p.usuario.at(-1).text), 'las palabras van al modelo');
+  eq(elegirCuadros(FRAMES.slice(0, 3)).length, 3, 'con 3 cuadros mira los 3'); eq(elegirCuadros(FRAMES)[0], FRAMES[0], 'el primero'); eq(elegirCuadros(FRAMES).at(-1), FRAMES[11], 'el último');
+  const dudoso = await crearAnalista({ claude: { async estructurado() { throw new Error('sin red'); } } })({ edicion: { receta: RECETA_A }, tecnica: { fallas: [] }, cuadros: FRAMES, palabras: [] });
+  eq(dudoso.veredicto, 'dudoso', 'si el modelo falla, lo decide una persona');
+}]);
+casos.push(['Analista', 'La receta corregida siempre cambia algo', async () => {
+  const a = corregirReceta(RECETA_A, { correccion: { subtitulos: 'placa', quitar_musica: true } });
+  eq([a.subtitulos, a.musica], ['placa', null], 'aplica la corrección'); yes(corregirReceta(RECETA_A, { correccion: {} }).subtitulos !== 'karaoke', 'sin corrección rota los subtítulos');
+}]);
+const hooksAnalista = (veredictos) => { const claude = claudeAnalista(veredictos); return { claude, hooks: { ...hooksDePrueba, armarRecetas: async () => [{ ...RECETA_A }], revisar: crearAnalista({ claude }) } }; };
+const correr = async (m) => { m.editor.runner.arrancar({ cadaMs: 20 }); const id = (await (await post(m, '/trabajos', TRABAJO)).json()).id; return esperarEstado(m, id, ['listo', 'error']); };
+casos.push(['Analista', 'Un rechazo se rehace una vez con la receta corregida y, si el segundo intento sale bien, se entrega aprobado', async () => {
+  const { claude, hooks } = hooksAnalista([{ veredicto: 'rechazado', motivo: 'subtítulos tapados', correccion: { subtitulos: 'placa' } }, 'aprobado']);
+  const m = await montar({ hooks, estudioOpc: { cuadros: CUADROS } });
+  try {
+    const j = await correr(m);
+    eq(j.estado, 'listo', 'estado'); const peds = m.est.pedidos('/v1/editar-recorte');
+    eq(peds.map((p) => p.receta.subtitulos), ['karaoke', 'placa'], 'se pidió de nuevo con la receta corregida'); eq(claude.pedidos.length, 2, 'dos miradas');
+    eq(m.acm.ediciones.length, 1, 'una sola entrega'); eq(m.acm.ediciones[0].review, 'aprobado', 'aprobada'); eq(m.acm.ediciones[0].recipe.subtitulos, 'placa', 'va la receta corregida');
+    eq(m.est.log.filter((l) => l.startsWith('sin-auth')), [], 'los cuadros se bajan con autenticación');
+  } finally { await m.fin(); }
+}]);
+casos.push(['Analista', 'Si el segundo intento también se rechaza, se descarta: no se entrega', async () => {
+  const { hooks } = hooksAnalista(['rechazado']);
+  const m = await montar({ hooks, estudioOpc: { cuadros: CUADROS } });
+  try {
+    const j = await correr(m);
+    eq(m.est.pedidos('/v1/editar-recorte').length, 2, 'solo un reintento'); eq(m.acm.ediciones.length, 0, 'nada entregado');
+    eq(j.estado, 'error', 'sin ediciones el crudo queda en error'); eq(require_ediciones(m, j.id)[0].estado, 'descartada', 'queda descartada');
+    eq(fs.readdirSync(path.join(m.dir, 'entregas')), [], 'se borran los archivos');
+  } finally { await m.fin(); }
+}]);
+const require_ediciones = (m, id) => repo(m.editor.db).ediciones(id);
+casos.push(['Analista', 'Lo dudoso se entrega siempre con review pendiente', async () => {
+  const { hooks } = hooksAnalista(['dudoso']);
+  const m = await montar({ hooks, estudioOpc: { cuadros: CUADROS } });
+  try { await correr(m); eq(m.acm.ediciones.map((e) => e.review), ['pendiente'], 'pendiente'); eq(m.est.pedidos('/v1/editar-recorte').length, 1, 'sin rehacer'); } finally { await m.fin(); }
+}]);
+
 for (const [grupo, nombre, fn] of casos) {
   const t0 = Date.now();
   try { await fn(); ok++; console.log(`  ✓ ${grupo} · ${nombre} (${Date.now() - t0} ms)`); }
@@ -297,3 +353,4 @@ for (const [grupo, nombre, fn] of casos) {
 }
 console.log(`\nPasaron ${ok} de ${casos.length} casos`);
 process.exit(ok === casos.length ? 0 : 1);
+

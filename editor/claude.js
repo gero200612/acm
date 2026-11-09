@@ -1,9 +1,10 @@
 // Cliente de Claude con salida estructurada (tool use forzado). Se inyecta: el banco usa uno falso, sin red.
+//   (`usuario` puede ser un texto o una lista de bloques, con imágenes)
 //   claude.estructurado({ modelo, system, usuario, herramienta: { name, description, input_schema } }) → objeto (el `input` de la herramienta)
 // Sin ANTHROPIC_API_KEY falla con un mensaje claro (el trabajo termina en «error», el servicio no se cae).
 import Anthropic from '@anthropic-ai/sdk';
 
-export const MODELOS = { momentos: 'claude-sonnet-5-5', textos: 'claude-haiku-5-5' };
+export const MODELOS = { momentos: 'claude-sonnet-5-5', textos: 'claude-haiku-5-5', analista: 'claude-sonnet-5-5' };
 
 export function crearClaude({ apiKey = process.env.ANTHROPIC_API_KEY, sdk } = {}) {
   let cliente = sdk;

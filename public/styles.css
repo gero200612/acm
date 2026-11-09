@@ -806,3 +806,20 @@ dialog.wide { width: min(640px, calc(100vw - 32px)); }
 .gone { aspect-ratio: 9/16; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 16px; text-align: center; background: var(--line-2); color: var(--muted); font-weight: 600; font-size: 14px; }
 .gone span { font-weight: 400; font-size: 12.5px; }
 .gone.tall { border-radius: 10px; max-height: 520px; }
+
+/* Para aprobar */
+.ap { display: flex; flex-direction: column; gap: 16px; }
+.ap-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.ap-eds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 12px 0; }
+.ap-ed { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ap-ed.no { opacity: .55; }
+.ap-ed video { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 10px; background: #0d0d0f; }
+.ap-ed-h { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.ap-recipe { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.ap-recipe li { display: flex; justify-content: space-between; gap: 8px; }
+.ap-recipe span { color: var(--muted); }
+.ap-cap { margin: 4px 0 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ap-pick { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.ap .field { display: block; margin: 8px 0; }
+.ap .row { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 760px) { .ap-eds { grid-template-columns: minmax(0, 1fr); } }

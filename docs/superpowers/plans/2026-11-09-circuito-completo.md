@@ -163,11 +163,11 @@
 - ACM: `POST /api/clips/:clip_id/review {decision:'aprobar'|'rechazar', rechazar_ids?:[reel_id], comentario}`. El comentario es obligatorio si se rechaza. Las opiniones van a `learnings` con `origin='opinion_dueno'` (Task 12).
 - `reviewMode(projectId)`: pasa a `auto` con 19 de los últimos 20 recortes aprobados. Un rechazo estando en `auto` lo vuelve a `manual`. En `auto`, lo que el analista aprueba entra como `aprobado` sin pasar por Gero, y lo `dudoso` siempre espera.
 
-- [ ] Caso: con una falla técnica de `audio_no_mudo` sale `rechazado` sin llamar al modelo (el mock cuenta 0 llamadas).
-- [ ] Caso: con 19 aprobados y 1 rechazado de 20 → `auto`. Con 18 de 20 → `manual`. Un rechazo estando en `auto` → `manual`.
-- [ ] Caso de **Review Focus 5**: estando en `auto` hay un reel aprobado y programado. Gero rechaza su recorte: el reel pasa a `rechazado`, su publicación pasa a `bloqueado` y no sale en el `tick()`.
-- [ ] UI: las 3 ediciones del recorte lado a lado (video, receta resumida, texto), con Aprobar las 3, Rechazar una o todas y comentario.
-- [ ] Implementar. `npm run banco` pasa. Commit.
+- [x] Caso: con una falla técnica de `audio_no_mudo` sale `rechazado` sin llamar al modelo (el mock cuenta 0 llamadas).
+- [x] Caso: con 19 aprobados y 1 rechazado de 20 → `auto`. Con 18 de 20 → `manual`. Un rechazo estando en `auto` → `manual`.
+- [x] Caso de **Review Focus 5**: estando en `auto` hay un reel aprobado y programado. Gero rechaza su recorte: el reel pasa a `rechazado`, su publicación pasa a `bloqueado` y no sale en el `tick()`.
+- [x] UI: las 3 ediciones del recorte lado a lado (video, receta resumida, texto), con Aprobar las 3, Rechazar una o todas y comentario.
+- [x] Implementar. `npm run banco` pasa. Commit.
 
 ---
 

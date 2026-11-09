@@ -23,7 +23,7 @@ Estados del crudo en ACM (`reels.status`): `en_cola`, `transcribiendo`, `buscand
 | --- | --- | --- |
 | `elegirMomentos` (Tarea 6) | `{ trabajo, transcripcion, aprendizajes }` | `[{ inicio_s, fin_s, ...datos }]` (`datos.caption` y `datos.hashtags` se usan como texto por defecto) |
 | `armarRecetas` (Tarea 6) | `{ trabajo, momento, transcripcion, aprendizajes }` | `[receta, ...]`, hasta 3 por momento (todas comparten el `clip_id` del momento) |
-| `revisar` (Tarea 7) | `{ trabajo, momento, edicion, resultado }` | `{ review: 'pendiente'\|'aprobado'\|'rechazado', caption?, hashtags?, notas? }` |
+| `revisar` (Tarea 7, el analista) | `{ trabajo, momento, edicion, resultado, tecnica, cuadros, palabras }` | `{ veredicto: 'aprobado'\|'rechazado'\|'dudoso', motivo, correccion? }` (el formato viejo `{ review }` sigue valiendo) |
 
 - `transcripcion` es el resultado del Estudio: `{ duracion_s, palabras: [{inicio_s, fin_s, texto}], audio: { lufs } }`.
 - `aprendizajes` es la lista que devuelve `GET {aprendizajes_url}` de ACM (hoy vacía; la llena el analista).
@@ -58,3 +58,7 @@ En ACM: `EDITOR_URL` (si falta, los crudos quedan `en_cola` y no pasa nada) y `E
 ## Pruebas
 
 `node editor/banco.mjs` (Estudio y ACM falsos en servidores locales; imprime «Pasaron X de Y»).
+
+## Analista (Tarea 7)
+
+`analista.js` (`crearAnalista`): con fallas en `tecnica` rechaza sin llamar al modelo; si no, Sonnet (`claude-sonnet-5-5`) mira de 6 a 8 cuadros (que el corredor baja del Estudio con la misma autenticación) contra la receta y las palabras. Si el modelo falla, el veredicto es `dudoso`. El corredor rehace UNA vez una edición rechazada con `corregirReceta` (siempre cambia algo); si vuelve a rechazarse queda `descartada` y no se entrega. `aprobado` se entrega con `review: 'aprobado'` (ACM lo deja así solo en modo auto) y `dudoso` siempre con `pendiente`. La receta lleva `variables` (gancho, subtitulos, musica, ritmo, largo) para que ACM aprenda de las opiniones; no va al Estudio.

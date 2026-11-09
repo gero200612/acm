@@ -94,7 +94,7 @@ async function render() {
   try {
     await loadProjects();
     if (state.storage == null) state.storage = await api('/api/storage').catch(() => ({ r2: false }));
-    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
+    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
     else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
@@ -117,7 +117,7 @@ function sideNav(r) {
     <a class="item ${r.view === 'home' ? 'active' : ''}" href="#">${icon('home', 20)}<span class="t">Inicio</span></a>
     <a class="item ${r.view === 'lab' ? 'active' : ''}" href="#/lab">${icon('flask', 20)}<span class="t">Laboratorio</span></a>
     <div class="nav-label">Proyectos</div>
-    ${state.projects.map((p) => `<a class="item ${r.id === p.id ? 'active' : ''}" href="#/p/${p.id}"><span class="dot" style="background:${esc(p.color)}"></span><span class="t">${esc(p.name)}</span></a>`).join('')}
+    ${state.projects.map((p) => `<a class="item ${r.id === p.id ? 'active' : ''}" href="#/p/${p.id}"><span class="dot" style="background:${esc(p.color)}"></span><span class="t">${esc(p.name)}</span>${p.review_pending ? `<span class="count" title="Recortes para aprobar">${p.review_pending}</span>` : ''}</a>`).join('')}
     <button class="item add" data-act="new-project">${icon('plus', 20)}<span class="t">Nuevo proyecto</span></button>
   </nav>
   <div class="side-foot"><span class="live"><i></i>En línea</span><button data-act="logout">Salir</button></div>`;
@@ -274,14 +274,46 @@ function projectHead(p) {
   return `<div class="who">${avatar(p, true)}<div style="min-width:0"><h1 class="page-title">${esc(p.name)}</h1><p class="lead">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Proyecto')}</p></div></div>
   <div class="row">${p.demo ? '<span class="chip s-pausada" title="No publica ni pauta nada">Demo · no publica</span>' : ''}${countdown(p)}${p.padron ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
 }
-const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']];
+const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']];
 function projectView(tab) {
   const p = state.project;
-  const counts = { cuentas: state.accounts.length, reels: state.reels.length, calendario: state.posts.filter((x) => x.status === 'programado').length };
+  const counts = { cuentas: state.accounts.length, reels: state.reels.length, aprobar: p.review_pending, calendario: state.posts.filter((x) => x.status === 'programado').length };
   const on = tab === 'reel' ? 'reels' : tab;
   const tabs = `<nav class="tabs">${TABS.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
-  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, pauta: pautaView, campanas: campanasView, reel: reelDetailView, investigacion: investigacionView, ajustes: ajustesView };
+  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, reel: reelDetailView, investigacion: investigacionView, ajustes: ajustesView };
   return tabs + (views[tab] || resumenView)();
+}
+
+
+// ---------- Para aprobar: cada recorte con sus 3 ediciones lado a lado ----------
+function recetaResumen(r) {
+  if (!r) return '';
+  const v = r.variables || {}, gancho = v.gancho || (r.gancho?.texto ? 'con texto' : 'directo');
+  const musica = r.musica === null ? 'sin' : (r.musica?.clima || v.musica || '—');
+  return [['Gancho', gancho + (r.gancho?.texto ? ` «${r.gancho.texto}»` : '')], ['Subtítulos', r.subtitulos || v.subtitulos], ['Música', musica], ['Ritmo', r.ritmo], ['Largo', r.largo_s ? `${Math.round(r.largo_s)} s` : v.largo]]
+    .filter(([, x]) => x).map(([k, x]) => `<li><span>${k}</span><b>${esc(x)}</b></li>`).join('');
+}
+function aprobarView() {
+  const p = state.project, R = state.review || { clips: [], pending: 0, review_mode: p.review_mode };
+  const auto = R.review_mode === 'auto';
+  const head = `<div class="ap-head"><div><h2 class="h2">Para aprobar <span class="count">${R.pending}</span></h2><p class="muted small">${R.pending ? `${R.pending} ${R.pending === 1 ? 'recorte espera' : 'recortes esperan'} tu decisión. Aprobás o rechazás las 3 versiones juntas.` : 'No hay recortes esperando.'}</p></div>
+    <span class="chip ${auto ? 's-conectada' : 'nodot'}" title="${auto ? 'Lo que el analista aprueba entra solo; lo dudoso siempre espera acá. Un rechazo tuyo la vuelve a manual.' : 'Con 19 de los últimos 20 recortes aprobados pasa a automática.'}">Revisión ${auto ? 'automática' : 'manual'}</span></div>`;
+  if (!R.clips.length) return `<section class="card">${head}<p class="muted" style="margin-top:12px">Cuando el editor entregue recortes nuevos, aparecen acá.</p></section>`;
+  return `<div class="ap">${head}${R.clips.map((c) => `
+  <section class="card ap-clip" data-clip="${esc(c.clip_id)}">
+    <div class="card-head"><h2 class="h2">${esc(c.moment?.tema || c.clip_id)}</h2><span class="small muted">${c.moment?.motivo ? esc(c.moment.motivo) : ''}</span></div>
+    <div class="ap-eds">${c.reels.map((r, i) => `
+      <article class="ap-ed ${r.review === 'rechazado' ? 'no' : ''}" data-id="${r.id}">
+        <video src="/media/${esc(r.file)}" ${r.cover ? `poster="/media/${esc(r.cover)}"` : ''} controls preload="metadata" playsinline></video>
+        <div class="ap-ed-h"><b>Versión ${i + 1}</b>${r.review === 'aprobado' ? '<span class="chip s-conectada">Aprobada</span>' : r.review === 'rechazado' ? '<span class="chip s-error">Rechazada</span>' : ''}</div>
+        <ul class="ap-recipe">${recetaResumen(r.recipe)}</ul>
+        <p class="ap-cap">${esc(r.caption || '')}</p>
+        ${r.hashtags ? `<p class="small muted">${esc(r.hashtags)}</p>` : ''}
+        ${r.review === 'rechazado' ? '' : `<label class="small ap-pick"><input type="checkbox" data-rid="${r.id}"> Rechazar solo esta</label>`}
+      </article>`).join('')}</div>
+    <label class="field">Comentario <span class="small muted">(obligatorio para rechazar; sirve para aprender qué te gusta)</span><textarea class="input ap-note" rows="2" placeholder="Por ejemplo: los subtítulos tapan la cara"></textarea></label>
+    <div class="row"><button class="btn primary" data-act="ap-ok">Aprobar las 3</button><button class="btn" data-act="ap-no">Rechazar lo marcado</button><button class="btn" data-act="ap-no-all">Rechazar las 3</button></div>
+  </section>`).join('')}</div>`;
 }
 
 // Datos fijos del cálculo (no se tocan desde la pantalla): CPM de Meta en Argentina en campaña con públicos chicos,
@@ -1265,6 +1297,16 @@ document.addEventListener('click', async (e) => {
       case 'del-account': if (await confirmBox('Borrar cuenta', 'Se quitan también sus publicaciones programadas.')) { await api(`/api/accounts/${id}`, { method: 'DELETE' }); render(); } break;
       case 'del-reel': if (await confirmBox('Borrar reel', 'Se borra el video y sus publicaciones programadas.')) { await api(`/api/reels/${id}`, { method: 'DELETE' }); render(); } break;
       case 'reel-approve': { const r = state.reels.find((x) => x.id === id); await api(`/api/reels/${id}`, { method: 'PUT', body: { status: r.status === 'aprobado' ? 'borrador' : 'aprobado' } }); render(); break; }
+      case 'ap-ok': case 'ap-no': case 'ap-no-all': {
+        const box = el.closest('.ap-clip'), clip = box.dataset.clip, note = $('.ap-note', box).value.trim();
+        const marked = $$('input[data-rid]:checked', box).map((i) => Number(i.dataset.rid));
+        if (act === 'ap-no' && !marked.length) { toast('Marcá la versión que querés rechazar, o usá «Rechazar las 3»', true); break; }
+        if (act !== 'ap-ok' && !note) { toast('Para rechazar escribí un comentario: nos ayuda a aprender', true); $('.ap-note', box).focus(); break; }
+        el.disabled = true;
+        const r = await api(`/api/clips/${encodeURIComponent(clip)}/review`, { method: 'POST', body: act === 'ap-ok' ? { decision: 'aprobar', comentario: note } : { decision: 'rechazar', rechazar_ids: act === 'ap-no' ? marked : [], comentario: note } });
+        toast(act === 'ap-ok' ? 'Recorte aprobado' : 'Recorte rechazado');
+        if (r.review_mode !== state.review?.review_mode) toast(r.review_mode === 'auto' ? 'La revisión pasó a automática: 19 de los últimos 20 aprobados' : 'La revisión volvió a manual');
+        render(); break; }
       case 'distribute': distributeDialog(state.reels.find((x) => x.id === id)); break;
       case 'del-post': await api(`/api/posts/${id}`, { method: 'DELETE' }); { const box = el.closest('.pd'); const dlg = el.closest('dialog'); box?.remove(); if (dlg && !dlg.querySelector('.pd')) dlg.close(); else render(); } break;
       case 'del-project': if (await confirmBox('Borrar proyecto', `Se borra «${esc(state.project.name)}» con todas sus cuentas, reels y publicaciones.`)) { await api(`/api/projects/${state.project.id}`, { method: 'DELETE' }); location.hash = ''; toast('Proyecto borrado'); } break;
