@@ -53,10 +53,10 @@
 - Produces, en la tabla `reels`: `clip_id TEXT` (id del recorte que comparten las 3 hermanas), `moment TEXT` (JSON `{inicio_s, fin_s, tema, motivo}`), `recipe TEXT` (JSON de la receta), `review TEXT DEFAULT 'pendiente'` (`pendiente|aprobado|rechazado`), `expires_at TEXT DEFAULT ''`, `cover TEXT DEFAULT ''`.
 - Produces, en `rules.js`: `defaultAdsNetworks(kind) -> {meta, youtube, tiktok}`.
 
-- [ ] Caso de banco: `defaultAdsNetworks('politica')` da `{meta:true,youtube:true,tiktok:false}`, y `'club'` y `'comercial'` dan las tres en `true`.
-- [ ] Caso de recorrido: crear un proyecto `politica` y leerlo devuelve `kind` y `ads_networks` con TikTok apagado. Un PUT con `kind` inválido da 400.
-- [ ] Implementar las migraciones con el patrón `cols()` ya existente, las rutas y la UI de Ajustes (select de tipo y 3 interruptores).
-- [ ] `npm run banco` pasa. Commit.
+- [x] Caso de banco: `defaultAdsNetworks('politica')` da `{meta:true,youtube:true,tiktok:false}`, y `'club'` y `'comercial'` dan las tres en `true`.
+- [x] Caso de recorrido: crear un proyecto `politica` y leerlo devuelve `kind` y `ads_networks` con TikTok apagado. Un PUT con `kind` inválido da 400.
+- [x] Implementar las migraciones con el patrón `cols()` ya existente, las rutas y la UI de Ajustes (select de tipo y 3 interruptores).
+- [x] `npm run banco` pasa. Commit.
 
 ### Task 2: Reglas duras de publicación
 
@@ -68,10 +68,10 @@
 - Produces: `scheduleBlocked(post, ctx) -> string|null` en `rules.js`. `post = {reel_id, account_id, network, scheduled_at, clip_id, review}` y `ctx = {siblings:[{network, scheduled_at, account_id}], sameReelSameNetwork:boolean, dayCount:number, networkCap:number, tz}`. Devuelve el motivo en castellano o `null`.
 - Produces: `NETWORK_CAPS = {instagram:100, facebook:30, tiktok:15, youtube:null}` y `youtubeShare(totalQuota, activeProjects) -> number`.
 
-- [ ] Casos de banco con `scheduleBlocked`, uno por regla: (a) hermana en la misma red a 2 h 59 min → bloqueado, a 3 h → `null`; (b) hermana en otra red a 0 min → `null`; (c) 07:59 y 23:01 bloqueados, 08:00 y 23:00 `null`; (d) `review !== 'aprobado'` bloqueado; (e) `dayCount >= networkCap` bloqueado; (f) `youtubeShare(100, 8) === 12`.
-- [ ] Caso de recorrido: con 2 reels de un mismo `clip_id` en 2 cuentas IG, el POST del segundo a +1 h da 400 con el motivo y a +3 h da 200.
-- [ ] En `tick()`, volver a chequear `scheduleBlocked` antes de publicar (una publicación programada antes de un rechazo no sale) y marcarla `bloqueado` con la nota.
-- [ ] `npm run banco` pasa. Commit.
+- [x] Casos de banco con `scheduleBlocked`, uno por regla: (a) hermana en la misma red a 2 h 59 min → bloqueado, a 3 h → `null`; (b) hermana en otra red a 0 min → `null`; (c) 07:59 y 23:01 bloqueados, 08:00 y 23:00 `null`; (d) `review !== 'aprobado'` bloqueado; (e) `dayCount >= networkCap` bloqueado; (f) `youtubeShare(100, 8) === 12`.
+- [x] Caso de recorrido: con 2 reels de un mismo `clip_id` en 2 cuentas IG, el POST del segundo a +1 h da 400 con el motivo y a +3 h da 200.
+- [x] En `tick()`, volver a chequear `scheduleBlocked` antes de publicar (una publicación programada antes de un rechazo no sale) y marcarla `bloqueado` con la nota.
+- [x] `npm run banco` pasa. Commit.
 
 ---
 

@@ -13,7 +13,7 @@ import { initTrace, traced } from './trace.js';
 import { runBanco } from './banco.js';
 import { probe, review } from './mp4probe.js';
 import { r2Ready, putUrl, getUrl, head as r2Head, remove as r2Remove, download as r2Download, MAX_UPLOAD } from './storage.js';
-import { postBlocked, pautaNumbers } from './rules.js';
+import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, NETWORK_CAPS } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri } from './oauth.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
@@ -78,6 +78,11 @@ for (const [c, def] of [['ads_creds', "TEXT DEFAULT ''"], ['ads_name', "TEXT DEF
 // proyecto de demostración: se ve completo pero no publica ni pauta nada
 if (!cols('projects').includes('demo')) db.exec('ALTER TABLE projects ADD COLUMN demo INTEGER DEFAULT 0');
 for (const [c, def] of [['duration', 'REAL'], ['width', 'INTEGER'], ['height', 'INTEGER'], ['kind', "TEXT DEFAULT 'listo'"], ['hashtags', "TEXT DEFAULT ''"], ['source_id', 'INTEGER'], ['storage', "TEXT DEFAULT 'local'"], ['archived_at', "TEXT DEFAULT ''"]])
+  if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
+// circuito: tipo de proyecto, redes con pauta y modelo de recortes (3 hermanas por recorte)
+for (const [c, def] of [['kind', "TEXT DEFAULT 'club'"], ['ads_networks', `TEXT DEFAULT '${JSON.stringify(defaultAdsNetworks('club'))}'`], ['review_mode', "TEXT DEFAULT 'manual'"]])
+  if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
+for (const [c, def] of [['clip_id', 'TEXT'], ['moment', 'TEXT'], ['recipe', 'TEXT'], ['review', "TEXT DEFAULT 'pendiente'"], ['expires_at', "TEXT DEFAULT ''"], ['cover', "TEXT DEFAULT ''"]])
   if (!cols('reels').includes(c)) db.exec(`ALTER TABLE reels ADD COLUMN ${c} ${def}`);
 initTrace(db);
 initKnowledge(db);
@@ -194,7 +199,18 @@ function update(table, id, data) {
   if (!keys.length) return;
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
-const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo'];
+const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode'];
+// valida tipo, redes con pauta y modo de revisión; devuelve el motivo del error o '' (y normaliza ads_networks a JSON)
+function circuitFields(d, kindBefore) {
+  if ('kind' in d && !PROJECT_KINDS.includes(d.kind)) return 'Tipo de proyecto inválido: club, politica o comercial';
+  if ('review_mode' in d && !['manual', 'auto'].includes(d.review_mode)) return 'Modo de revisión inválido: manual o auto';
+  if ('ads_networks' in d) {
+    let v = d.ads_networks; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return 'Redes con pauta inválidas'; } }
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return 'Redes con pauta inválidas';
+    d.ads_networks = JSON.stringify(Object.fromEntries(['meta', 'youtube', 'tiktok'].map((k) => [k, !!v[k]])));
+  } else if (d.kind && d.kind !== kindBefore) d.ads_networks = JSON.stringify(defaultAdsNetworks(d.kind)); // al cambiar el tipo, las redes vuelven a su valor por defecto
+  return '';
+}
 const NET_NAME = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' };
 const DEMO_MSG = 'Es un proyecto de demostración: no publica ni pauta nada. Se apaga en Ajustes.';
 const isDemo = (projectId) => !!get('SELECT demo FROM projects WHERE id = ?', projectId)?.demo;
@@ -215,6 +231,7 @@ function projectSummary(full) {
   const c = (sql) => get(sql, p.id).n;
   return {
     ...p,
+    ads_networks: (() => { try { return JSON.parse(p.ads_networks); } catch { return defaultAdsNetworks(p.kind); } })(),
     ads: { adAccountId: ac.adAccountId || '', token: !!ac.accessToken },
     accounts: c('SELECT count(*) n FROM accounts WHERE project_id = ?'),
     accounts_live: c("SELECT count(*) n FROM accounts WHERE project_id = ? AND status = 'conectada'"),
@@ -243,8 +260,12 @@ app.get('/api/projects', (req, res) => res.json(all('SELECT * FROM projects ORDE
 app.post('/api/projects', upload.single('photo'), (req, res) => {
   const b = req.body || {};
   if (!String(b.name || '').trim()) return res.status(400).json({ error: 'Falta el nombre' });
-  const r = run('INSERT INTO projects (name, role, org, election_date, propaganda_until, padron, color, notes, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    b.name.trim(), b.role || '', b.org || '', b.election_date || '', b.propaganda_until || '', Number(b.padron) || 0, b.color || '#ff5a1f', b.notes || '', req.file?.filename || '');
+  const cf = pick(b, ['kind', 'ads_networks', 'review_mode']);
+  const bad = circuitFields(cf, undefined); if (bad) return res.status(400).json({ error: bad });
+  const kind = cf.kind || 'club';
+  const r = run('INSERT INTO projects (name, role, org, election_date, propaganda_until, padron, color, notes, photo, kind, ads_networks, review_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    b.name.trim(), b.role || '', b.org || '', b.election_date || '', b.propaganda_until || '', Number(b.padron) || 0, b.color || '#ff5a1f', b.notes || '', req.file?.filename || '',
+    kind, cf.ads_networks || JSON.stringify(defaultAdsNetworks(kind)), cf.review_mode || 'manual');
   run('INSERT INTO pauta (project_id) VALUES (?)', r.lastInsertRowid);
   res.json(projectSummary(get('SELECT * FROM projects WHERE id = ?', r.lastInsertRowid)));
 });
@@ -259,6 +280,7 @@ app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
   const data = pick(req.body || {}, P_FIELDS);
   if ('padron' in data) data.padron = Number(data.padron) || 0;
   if ('demo' in data) data.demo = String(data.demo) === '1' ? 1 : 0;
+  const bad = circuitFields(data, p.kind); if (bad) return res.status(400).json({ error: bad });
   if (req.file) { rmFile(p.photo); data.photo = req.file.filename; }
   update('projects', p.id, data);
   res.json(projectSummary(get('SELECT * FROM projects WHERE id = ?', p.id)));
@@ -447,7 +469,9 @@ if (process.env.ACM_CLEANUP !== 'off') setInterval(() => cleanup().catch((e) => 
 
 app.put('/api/reels/:id', (req, res) => {
   const r = get('SELECT * FROM reels WHERE id = ?', req.params.id); if (!r) return res.status(404).json({ error: 'No existe' });
-  const d = pick(req.body || {}, ['title', 'caption', 'hashtags', 'status', 'kind', 'source_id']);
+  const d = pick(req.body || {}, ['title', 'caption', 'hashtags', 'status', 'kind', 'source_id', 'clip_id', 'moment', 'recipe', 'review', 'expires_at', 'cover']);
+  if ('review' in d && !['pendiente', 'aprobado', 'rechazado'].includes(d.review)) return res.status(400).json({ error: 'Revisión inválida: pendiente, aprobado o rechazado' });
+  for (const k of ['moment', 'recipe']) if (k in d && d[k] !== null && typeof d[k] !== 'string') d[k] = JSON.stringify(d[k]);
   if ('title' in d && !String(d.title).trim()) return res.status(400).json({ error: 'El reel necesita un título' });
   if ('hashtags' in d) d.hashtags = tags(d.hashtags);
   if ('kind' in d) {
@@ -471,6 +495,19 @@ app.delete('/api/reels/:id', (req, res) => {
 
 // publicaciones
 // el programador compara fechas como texto en hora argentina: todas van como "AAAA-MM-DD HH:MM" (sin T ni segundos)
+// reglas duras de publicación (rules.scheduleBlocked) con lo que hay en la base; solo rigen para reels que vienen de un recorte (tienen clip_id)
+function scheduleCheck({ id, reel_id, account_id, scheduled_at }) {
+  const reel = get('SELECT clip_id, review FROM reels WHERE id = ?', reel_id);
+  if (!reel?.clip_id) return null;
+  const network = get('SELECT network FROM accounts WHERE id = ?', account_id).network;
+  const live = "p.status IN ('programado', 'publicando', 'publicado')";
+  const siblings = all(`SELECT a.network, p.scheduled_at, p.account_id FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
+    WHERE r.clip_id = ? AND p.id IS NOT ? AND ${live}`, reel.clip_id, id ?? null);
+  const dayCount = get(`SELECT count(*) n FROM posts p JOIN accounts a ON a.id = p.account_id WHERE p.account_id = ? AND substr(p.scheduled_at, 1, 10) = ? AND p.id IS NOT ? AND ${live}`,
+    account_id, String(scheduled_at).slice(0, 10), id ?? null).n;
+  return scheduleBlocked({ reel_id, account_id, network, scheduled_at, clip_id: reel.clip_id, review: reel.review },
+    { siblings, sameReelSameNetwork: false, dayCount, networkCap: NETWORK_CAPS[network], tz: TZ });
+}
 const schedAt = (v) => { const m = String(v || '').trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/); return m ? `${m[1]} ${m[2]}` : ''; };
 app.get('/api/projects/:id/posts', (req, res) => res.json(all(`
   SELECT p.*, r.title AS reel_title, r.file AS reel_file, a.network, a.handle
@@ -494,6 +531,7 @@ app.post('/api/projects/:id/posts', (req, res) => {
       const net = get('SELECT network FROM accounts WHERE id = ?', it.account_id).network;
       const ya = get('SELECT a.handle, a.connected_as FROM posts p JOIN accounts a ON a.id = p.account_id WHERE p.reel_id = ? AND a.network = ?', it.reel_id, net);
       if (ya) throw new Error(`«${reel.title}» ya está en ${ya.connected_as || '@' + ya.handle} de ${NET_NAME[net]}. El mismo reel en dos cuentas de la misma red hace que la red las bloquee: subí otra edición del crudo.`);
+      const why = scheduleCheck({ reel_id: it.reel_id, account_id: it.account_id, scheduled_at: at }); if (why) throw new Error(`«${reel.title}»: ${why}`);
       ins.run(req.params.id, it.reel_id, it.account_id, at, it.options ? JSON.stringify(tiktokOptions(it.options)) : '');
     }
     db.exec('COMMIT');
@@ -509,6 +547,10 @@ app.put('/api/posts/:id', (req, res) => {
   if ('scheduled_at' in d && !(d.scheduled_at = schedAt(d.scheduled_at))) return res.status(400).json({ error: 'Fecha inválida: tiene que ser AAAA-MM-DD HH:MM' });
   if (d.status && !['programado', 'publicado', 'fallido'].includes(d.status)) return res.status(400).json({ error: 'Estado inválido' });
   if (d.status === 'programado') d.error = '';
+  if ('scheduled_at' in d || d.status === 'programado') {
+    const why = scheduleCheck({ id: p.id, reel_id: p.reel_id, account_id: p.account_id, scheduled_at: d.scheduled_at || p.scheduled_at });
+    if (why) return res.status(400).json({ error: why });
+  }
   update('posts', p.id, d);
   res.json({ ok: true });
 });
@@ -795,6 +837,9 @@ async function tick() {
       // se marca antes de subir: si dos vueltas se cruzan, solo una la toma
       if (!run("UPDATE posts SET status = 'publicando', attempts = attempts + 1 WHERE id = ? AND status = 'programado'", p.id).changes) continue;
       const fail = (msg) => run("UPDATE posts SET status = 'fallido', error = ? WHERE id = ?", msg, p.id);
+      // una publicación programada antes de un rechazo (o que ya no cumple las reglas) no sale
+      const hard = scheduleCheck({ id: p.id, reel_id: p.reel_id, account_id: p.account_id, scheduled_at: p.scheduled_at });
+      if (hard) { run("UPDATE posts SET status = 'bloqueado', note = ? WHERE id = ?", hard, p.id); console.log(`[publicar ${p.id}] bloqueada: ${hard}`); continue; }
       const blocked = p.archived_at ? 'El video ya se borró del almacenamiento: subilo de nuevo.' : postBlocked(p);
       if (blocked) { fail(blocked); continue; }
       // de R2 se baja a un archivo temporal solo para esta subida

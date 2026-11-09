@@ -87,6 +87,47 @@ export function recorridoCases(sb) {
       yes(r.j?.id, 'no devolvió el proyecto'); c.p = r.j.id;
       eq((await api('POST', '/api/projects', { name: '  ' })).status, 400, 'sin nombre');
     }],
+    [G('circuito'), 'Proyecto político: TikTok sin pauta; el tipo inválido da 400; al cambiar de tipo vuelven los valores por defecto', async () => {
+      const r = await api('POST', '/api/projects', form({ name: 'Política', kind: 'politica' }), true);
+      eq([r.status, r.j?.kind, r.j?.ads_networks, r.j?.review_mode], [200, 'politica', { meta: true, youtube: true, tiktok: false }, 'manual'], 'creado');
+      c.pol = r.j.id;
+      const g = (await api('GET', `/api/projects/${c.pol}`)).j;
+      eq([g.kind, g.ads_networks.tiktok], ['politica', false], 'leído');
+      eq((await api('PUT', `/api/projects/${c.pol}`, { kind: 'otro' })).status, 400, 'tipo inválido');
+      eq((await api('PUT', `/api/projects/${c.pol}`, { review_mode: 'x' })).status, 400, 'revisión inválida');
+      eq((await api('POST', '/api/projects', { name: 'X', kind: 'otro' })).status, 400, 'crear con tipo inválido');
+      eq((await api('PUT', `/api/projects/${c.pol}`, { kind: 'comercial' })).j?.ads_networks.tiktok, true, 'comercial con las tres');
+      const m = await api('PUT', `/api/projects/${c.pol}`, { ads_networks: { meta: true, youtube: false } });
+      eq(m.j?.ads_networks, { meta: true, youtube: false, tiktok: false }, 'interruptores a mano');
+      eq((await api('GET', `/api/projects/${c.p}`)).j.kind, 'club', 'los proyectos existentes quedan como club');
+    }],
+    [G('circuito'), 'Dos versiones del mismo recorte en dos cuentas de Instagram: a +1 h 400, a +3 h 200', async () => {
+      const mk = async (n) => (await api('POST', `/api/projects/${c.pol}/accounts`, { network: 'instagram' })).j.id;
+      const [a1, a2] = [await mk(), await mk()];
+      const up = await api('POST', `/api/projects/${c.pol}/reels`, form({ files: [[new Blob([fakeMp4(1080, 1920, 8)], { type: 'video/mp4' }), 'v1.mp4'], [new Blob([fakeMp4(1080, 1920, 9)], { type: 'video/mp4' }), 'v2.mp4']] }), true);
+      const [r1, r2] = up.j.map((x) => x.id); c.cl = [r1, r2];
+      eq((await api('PUT', `/api/reels/${r1}`, { review: 'otra' })).status, 400, 'revisión inválida');
+      for (const id of [r1, r2]) await api('PUT', `/api/reels/${id}`, { clip_id: 'clip-prueba', moment: { inicio_s: 10, fin_s: 40, tema: 't', motivo: 'm' } });
+      const P = (reel, acc, at) => api('POST', `/api/projects/${c.pol}/posts`, [{ reel_id: reel, account_id: acc, scheduled_at: at }]);
+      const sin = await P(r1, a1, '2030-01-10 10:00');
+      yes(sin.status === 400 && /aprobado/.test(sin.j?.error), `sin aprobar: ${sin.j?.error}`);
+      for (const id of [r1, r2]) eq((await api('PUT', `/api/reels/${id}`, { review: 'aprobado' })).j?.review, 'aprobado', 'aprobado');
+      eq((await P(r1, a1, '2030-01-10 07:00')).status, 400, 'fuera de horario');
+      eq((await P(r1, a1, '2030-01-10 10:00')).status, 200, 'la primera');
+      const uno = await P(r2, a2, '2030-01-10 11:00');
+      yes(uno.status === 400 && /3 horas/.test(uno.j?.error), `a +1 h: ${uno.status} ${uno.j?.error}`);
+      eq((await P(r2, a2, '2030-01-10 13:00')).status, 200, 'a +3 h');
+      c.clipAcc = [a1, a2];
+    }],
+    [G('circuito'), 'Una publicación programada antes de un rechazo no sale: queda bloqueada con la nota', async () => {
+      const posts = (await api('GET', `/api/projects/${c.pol}/posts`)).j;
+      const p = posts.find((x) => x.reel_id === c.cl[0]); yes(p, 'no está la publicación');
+      eq((await api('PUT', `/api/reels/${c.cl[0]}`, { review: 'rechazado' })).status, 200, 'rechazo');
+      eq((await api('POST', `/api/posts/${p.id}/now`, {})).status, 200, 'publicar ahora');
+      let q; for (let i = 0; i < 20; i++) { await sleep(500); q = (await api('GET', `/api/projects/${c.pol}/posts`)).j.find((x) => x.id === p.id); if (q.status !== 'programado') break; }
+      yes(q.status === 'bloqueado' && /aprobado/.test(q.note), `estado ${q.status}, nota ${q.note}`);
+      await api('DELETE', `/api/projects/${c.pol}`); // que no queden publicaciones de este recorrido para el caso de borrar
+    }],
     [G('padrón'), 'CSV: cuenta socios, teléfonos y mails; rechaza .xls', async () => {
       const csv = 'Nro Socio;Apellido y Nombre;DNI;Teléfono;Email\n1;Pérez Ana;30111222;11 15 1234-5678;ANA@x.com\n2;Gómez B;30111223;;\n3;López C;30111224;0351 15 555 1234;caro@y.com.ar\n4;X;1;+54 9 11 2222 3333;malo@\n';
       const r = await api('POST', `/api/projects/${c.p}/padron`, form({ file: [[new Blob([csv], { type: 'text/csv' }), 'padron.csv']] }), true);

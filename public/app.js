@@ -887,6 +887,9 @@ function projectForm(p = {}) {
     ${p.id ? '' : `<label class="field">Personas en el padrón<input class="input" type="number" min="0" name="padron" value="" placeholder="65000"><span class="hint">Después podés subir el archivo en Ajustes</span></label>`}
     <div class="two"><label class="field">Color<input class="input" type="color" name="color" value="${esc(p.color || '#ff5a1f')}" style="padding:4px"></label>
     <label class="field">Foto<input class="input" type="file" name="photo" accept="image/*" style="padding:8px"></label></div>
+    <div class="two"><label class="field">Tipo de proyecto<select class="input" name="kind">${[['club', 'Club o institución'], ['politica', 'Política'], ['comercial', 'Comercial']].map(([v, t]) => `<option value="${v}" ${(p.kind || 'club') === v ? 'selected' : ''}>${t}</option>`).join('')}</select><span class="hint">En política TikTok no acepta pauta</span></label>
+    <label class="field">Revisión de recortes<select class="input" name="review_mode"><option value="manual" ${p.review_mode === 'auto' ? '' : 'selected'}>Manual: apruebo yo</option><option value="auto" ${p.review_mode === 'auto' ? 'selected' : ''}>Automática</option></select></label></div>
+    <div class="field">Redes con pauta<div class="row" style="gap:16px;flex-wrap:wrap">${[['meta', 'Meta'], ['youtube', 'YouTube'], ['tiktok', 'TikTok']].map(([k, t]) => `<label class="row" style="gap:6px"><input type="checkbox" name="ads_${k}" ${(p.ads_networks || { meta: true, youtube: true, tiktok: true })[k] ? 'checked' : ''}> ${t}</label>`).join('')}</div></div>
     ${p.id ? `<label class="field">Modo demostración<select class="input" name="demo"><option value="0" ${p.demo ? '' : 'selected'}>No: publica y pauta de verdad</option><option value="1" ${p.demo ? 'selected' : ''}>Sí: se ve completo pero no publica ni pauta nada</option></select></label>` : ''}
     <label class="field">Notas<textarea class="textarea" name="notes" rows="3" placeholder="Tono, temas, lo que nunca diría…">${esc(p.notes)}</textarea></label>
     <div class="row"><span class="spacer"></span><button class="btn primary" type="submit">${p.id ? 'Guardar' : 'Crear proyecto'}</button></div>
@@ -911,11 +914,22 @@ function confirmBox(title, text, okLabel = 'Borrar') {
   });
 }
 
+// los interruptores de pauta viajan como un solo campo JSON; al cambiar el tipo vuelven a su valor por defecto (en política, TikTok apagado)
+function projectFormData(form) {
+  const fd = new FormData(form);
+  fd.set('ads_networks', JSON.stringify(Object.fromEntries(['meta', 'youtube', 'tiktok'].map((k) => [k, !!form.querySelector(`[name=ads_${k}]`)?.checked]))));
+  for (const k of ['meta', 'youtube', 'tiktok']) fd.delete(`ads_${k}`);
+  return fd;
+}
+function wireKindDefaults(form) {
+  form.querySelector('[name=kind]')?.addEventListener('change', (e) => { const t = form.querySelector('[name=ads_tiktok]'); if (t) t.checked = e.target.value !== 'politica'; });
+}
 function newProjectDialog() {
   const d = openDialog('Nuevo proyecto', projectForm());
+  wireKindDefaults(d.querySelector('form'));
   d.querySelector('form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    try { const p = await api('/api/projects', { method: 'POST', body: new FormData(e.target) }); d.close(); toast('Proyecto creado'); location.hash = `#/p/${p.id}/cuentas`; } catch (err) { fail(err); }
+    try { const p = await api('/api/projects', { method: 'POST', body: projectFormData(e.target) }); d.close(); toast('Proyecto creado'); location.hash = `#/p/${p.id}/cuentas`; } catch (err) { fail(err); }
   });
 }
 function addAccountDialog() {
@@ -1162,9 +1176,10 @@ function afterRender(r) {
     drop.addEventListener('drop', (e) => uploadReels(e.dataTransfer.files));
   }
   const pf = $('#project-form');
+  if (pf && r.view === 'project') wireKindDefaults(pf);
   if (pf && r.view === 'project') pf.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const fd = new FormData(pf); if (!fd.get('photo')?.size) fd.delete('photo');
+    const fd = projectFormData(pf); if (!fd.get('photo')?.size) fd.delete('photo');
     try { await api(`/api/projects/${state.project.id}`, { method: 'PUT', body: fd }); toast('Guardado'); render(); } catch (err) { fail(err); }
   });
   const pd = $('#pad-drop');

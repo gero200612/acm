@@ -18,3 +18,35 @@ export function pautaNumbers({ budget, from, to, padron, contacts }) {
   const freq = people ? imps / people : 0;
   return { days, net, imps, people, freq, perWeek: freq / Math.max(1, days / 7) };
 }
+
+// ---------- circuito: tipo de proyecto y reglas duras de publicación ----------
+export const PROJECT_KINDS = ['club', 'politica', 'comercial'];
+// TikTok no acepta pauta política: en un proyecto político arranca apagada
+export function defaultAdsNetworks(kind) { return { meta: true, youtube: true, tiktok: kind !== 'politica' }; }
+
+// tope diario de publicaciones por red (youtube: null = lo reparte youtubeShare según la cuota)
+export const NETWORK_CAPS = { instagram: 100, facebook: 30, tiktok: 15, youtube: null };
+export const youtubeShare = (totalQuota, activeProjects) => Math.floor((Number(totalQuota) || 0) / Math.max(1, Number(activeProjects) || 1));
+
+export const SPACING_MIN = 180;            // misma red, hermanas del mismo recorte: 3 h entre una y otra
+export const WINDOW = ['08:00', '23:00'];  // horario permitido, hora local (ambos extremos valen)
+const toMin = (s) => new Date(String(s).replace(' ', 'T') + ':00Z').getTime() / 6e4; // 'YYYY-MM-DD HH:MM' como minutos (la hora local no cambia con el huso)
+
+// Por qué no se puede programar (o publicar) esta publicación (null = se puede). Pura: todo lo que necesita viene en ctx.
+// post = {reel_id, account_id, network, scheduled_at 'YYYY-MM-DD HH:MM' local, clip_id, review}
+// ctx = {siblings:[{network, scheduled_at, account_id}], sameReelSameNetwork, dayCount, networkCap, tz}
+export function scheduleBlocked(post, ctx = {}) {
+  const at = String(post.scheduled_at || '').slice(0, 16);
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(at)) return 'La fecha no es válida.';
+  if (post.review !== 'aprobado') return 'El recorte todavía no está aprobado: aprobalo antes de programarlo.';
+  const hm = at.slice(11);
+  if (hm < WINDOW[0] || hm > WINDOW[1]) return `Solo se publica entre las ${WINDOW[0]} y las ${WINDOW[1]} (hora de Argentina).`;
+  if (ctx.sameReelSameNetwork) return 'El mismo reel en dos cuentas de la misma red hace que la red las bloquee.';
+  for (const s of ctx.siblings || []) {
+    if (s.network !== post.network) continue;
+    const gap = Math.abs(toMin(at) - toMin(String(s.scheduled_at).slice(0, 16)));
+    if (gap < SPACING_MIN) return `Tiene que haber al menos 3 horas entre las versiones del mismo recorte en la misma red (la otra sale ${String(s.scheduled_at).slice(0, 16)}).`;
+  }
+  if (ctx.networkCap != null && (ctx.dayCount || 0) >= ctx.networkCap) return `Ya se llegó al tope de ${ctx.networkCap} publicaciones por día en esta red.`;
+  return null;
+}

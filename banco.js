@@ -9,7 +9,7 @@ import { publish } from './publisher.js';
 import { uploadAudience, createCampaign, testAds } from './ads.js';
 import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
-import { postBlocked, pautaNumbers } from './rules.js';
+import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, youtubeShare, NETWORK_CAPS } from './rules.js';
 import { embed } from './knowledge.js';
 import { startSandbox, recorridoCases } from './recorrido.js';
 
@@ -95,6 +95,36 @@ function cases(video, sim) {
       eq((await testAds(c)).currency, 'ARS', 'moneda');
       const r = await createCampaign(c, { name: 'Prueba', budget: 1000, start: '2026-11-08T00:00:00-03:00', end: '2026-12-10T23:59:00-03:00', perWeek: 2.5, audienceId: 'AUD1', political: true, media: [{ id: 'M1', title: 'Reel' }] });
       eq(r.campaignId, 'CAMP1', 'campaña'); eq(r.ads.length, 1, 'anuncios');
+    }],
+    ['Circuito', 'Redes con pauta por defecto: política sin TikTok, el resto con las tres', async () => {
+      eq(defaultAdsNetworks('politica'), { meta: true, youtube: true, tiktok: false }, 'política');
+      eq(defaultAdsNetworks('club'), { meta: true, youtube: true, tiktok: true }, 'club');
+      eq(defaultAdsNetworks('comercial'), { meta: true, youtube: true, tiktok: true }, 'comercial');
+    }],
+    ['Circuito', 'Regla: dos versiones del recorte en la misma red van con 3 h de distancia, en otra red no importa', async () => {
+      const post = (at, network = 'instagram', account_id = 1) => ({ reel_id: 1, account_id, network, scheduled_at: at, clip_id: 'c1', review: 'aprobado' });
+      const ctx = (sib) => ({ siblings: sib, dayCount: 0, networkCap: 100, tz: 'America/Argentina/Buenos_Aires' });
+      const otra = { network: 'instagram', scheduled_at: '2026-12-01 10:00', account_id: 2 };
+      yes(/3 horas/.test(scheduleBlocked(post('2026-12-01 12:59'), ctx([otra]))), 'a 2 h 59 min tendría que bloquear');
+      yes(/3 horas/.test(scheduleBlocked(post('2026-12-01 09:01'), ctx([{ ...otra, scheduled_at: '2026-12-01 12:00' }]))), 'la hermana sale 2 h 59 min después: también bloquea');
+      eq(scheduleBlocked(post('2026-12-01 13:00'), ctx([otra])), null, 'a 3 h');
+      eq(scheduleBlocked(post('2026-12-01 10:00', 'facebook', 3), ctx([otra])), null, 'otra red a 0 min');
+    }],
+    ['Circuito', 'Regla: solo de 08:00 a 23:00 hora local', async () => {
+      const at = (hm) => scheduleBlocked({ reel_id: 1, account_id: 1, network: 'tiktok', scheduled_at: `2026-12-01 ${hm}`, clip_id: 'c', review: 'aprobado' }, { siblings: [], dayCount: 0, networkCap: 15 });
+      yes(at('07:59'), '07:59'); yes(at('23:01'), '23:01'); eq(at('08:00'), null, '08:00'); eq(at('23:00'), null, '23:00');
+    }],
+    ['Circuito', 'Regla: sin aprobar no se programa', async () => {
+      const p = { reel_id: 1, account_id: 1, network: 'instagram', scheduled_at: '2026-12-01 12:00', clip_id: 'c' };
+      for (const review of ['pendiente', 'rechazado', undefined]) yes(/aprobado/.test(scheduleBlocked({ ...p, review }, { siblings: [], dayCount: 0, networkCap: 100 })), `review ${review}`);
+      eq(scheduleBlocked({ ...p, review: 'aprobado' }, { siblings: [], dayCount: 0, networkCap: 100 }), null, 'aprobado');
+    }],
+    ['Circuito', 'Regla: tope diario por red y cuota de YouTube', async () => {
+      const p = { reel_id: 1, account_id: 1, network: 'tiktok', scheduled_at: '2026-12-01 12:00', clip_id: 'c', review: 'aprobado' };
+      yes(/tope/.test(scheduleBlocked(p, { siblings: [], dayCount: 15, networkCap: NETWORK_CAPS.tiktok })), 'en el tope');
+      eq(scheduleBlocked(p, { siblings: [], dayCount: 14, networkCap: NETWORK_CAPS.tiktok }), null, 'debajo del tope');
+      eq(NETWORK_CAPS, { instagram: 100, facebook: 30, tiktok: 15, youtube: null }, 'topes');
+      eq(youtubeShare(100, 8), 12, 'cuota de YouTube');
     }],
   ];
 }
