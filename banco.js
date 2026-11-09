@@ -159,6 +159,20 @@ function cases(video, sim) {
       await compareSiblings('c1', { db: roto.d, now: roto.now, hypothesize: async () => { throw new Error('caído'); } });
       yes(/^La versión 2 ganó/.test(roto.d.prepare('SELECT hypothesis FROM comparisons').get().hypothesis), 'si Sonnet falla queda el texto armado con los números');
     }],
+    ['Memoria', 'R20: con 2 hermanas publicadas (la tercera rechazada) se compara; con 3 publicadas y una a 30 h se espera; ya comparado con 2 ediciones', async () => {
+      const f = memFixture(); f.clip('c1', 1, 10, [1000, 5000, 2000]);
+      f.d.prepare('DELETE FROM posts WHERE reel_id = 12').run(); // la tercera nunca se publicó
+      const r = await compareSiblings('c1', { db: f.d, now: f.now, hypothesize: hypo });
+      eq([r.compared, r.winner_reel_id], [true, 11], 'compara con 2');
+      eq((await compareSiblings('c1', { db: f.d, now: f.now, hypothesize: hypo })).skipped, 'ya comparado', 'ya comparado con 2');
+      const g = memFixture(); g.clip('c2', 1, 20, [1000, 5000, 2000]);
+      g.d.prepare("UPDATE posts SET published_at = ? WHERE reel_id = 22").run('2026-11-19 06:00'); // ~30 h antes de now
+      yes(/48 h/.test((await compareSiblings('c2', { db: g.d, now: g.now, hypothesize: hypo })).skipped), 'espera a la inmadura');
+      eq(g.d.prepare('SELECT count(*) n FROM comparisons').get().n, 0, 'sin comparación');
+      eq((await memoryCycle(g.d, { now: g.now, hypothesize: hypo })).compared, 0, 'el ciclo también espera');
+      const h = memFixture(); h.clip('c3', 1, 30, [1, 2, 3]); h.d.prepare('DELETE FROM posts WHERE reel_id IN (31, 32)').run();
+      eq((await compareSiblings('c3', { db: h.d, now: h.now, hypothesize: hypo })).skipped, 'menos de 2 hermanas publicadas', 'con 1 no compara');
+    }],
     ['Memoria', 'Un 👎 de Gero cuenta 3×; winningVariables no devuelve nada con menos de 5 intentos, elige la mayor tasa y no mezcla proyectos', async () => {
       const f = memFixture(); const d = f.d;
       const L = (p, variable, value, wins, trials, origin, network = null) => d.prepare('INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, ?, ?, ?, ?)').run(p, variable, value, network, wins, trials, origin);

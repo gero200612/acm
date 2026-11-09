@@ -217,7 +217,7 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
   const w = winningVariables(db, pid);
   res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid) });
 });
-app.get('/api/projects/:id/memory', (req, res) => {
+app.get('/api/projects/:id/memory', requireAuth, (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe el proyecto' });
   res.json(memoryOf(db, Number(req.params.id)));
 });

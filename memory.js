@@ -105,7 +105,7 @@ export async function compareSiblings(clipId, deps = {}) {
   const { db } = deps, now = (typeof deps.now === 'function' ? deps.now() : deps.now) || nowLocal();
   if (db.prepare('SELECT 1 FROM comparisons WHERE clip_id = ?').get(clipId)) return { skipped: 'ya comparado' };
   const reels = db.prepare("SELECT id, project_id, recipe FROM reels WHERE clip_id = ? AND kind = 'listo' ORDER BY id").all(clipId);
-  if (reels.length !== 3) return { skipped: 'no hay 3 hermanas' };
+  if (reels.length < 2) return { skipped: 'no hay hermanas para comparar' };
   const projectId = reels[0].project_id;
   if (reels.some((r) => r.project_id !== projectId)) return { skipped: 'hermanas de proyectos distintos' };
   const p = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
@@ -113,9 +113,11 @@ export async function compareSiblings(clipId, deps = {}) {
   if (p.demo) return { skipped: 'proyecto de demostración' };
   const weights = weightsOf(p.score_weights);
   const eds = [];
+  // las hermanas que nunca se publicaron (rechazadas, sin programar) quedan afuera; las publicadas tienen que tener todas 48 h de datos
   for (const [i, r] of reels.entries()) {
-    const posts = db.prepare("SELECT po.id, po.scheduled_at, po.published_at, a.network FROM posts po LEFT JOIN accounts a ON a.id = po.account_id WHERE po.reel_id = ? AND po.published_at IS NOT NULL AND po.published_at != ''").all(r.id)
-      .filter((po) => minutes(now) - minutes(po.published_at) >= MIN_DATA_HOURS * 60);
+    const publicados = db.prepare("SELECT po.id, po.scheduled_at, po.published_at, a.network FROM posts po LEFT JOIN accounts a ON a.id = po.account_id WHERE po.reel_id = ? AND po.published_at IS NOT NULL AND po.published_at != ''").all(r.id);
+    if (!publicados.length) continue;
+    const posts = publicados.filter((po) => minutes(now) - minutes(po.published_at) >= MIN_DATA_HOURS * 60);
     const scores = [], hours = [];
     for (const po of posts) {
       const m = db.prepare("SELECT * FROM post_metrics WHERE post_id = ? AND views IS NOT NULL AND note != 'pauta' ORDER BY id DESC LIMIT 1").get(po.id);
@@ -123,9 +125,10 @@ export async function compareSiblings(clipId, deps = {}) {
       scores.push(score(m, weights));
       if (po.network) hours.push({ network: po.network, hour: `${String(po.scheduled_at || po.published_at).slice(11, 13)}:00` });
     }
-    if (!scores.length) return { skipped: `la versión ${i + 1} todavía no tiene ${MIN_DATA_HOURS} h de datos` };
+    if (!scores.length) return { skipped: `la versión ${i + 1} todavía no tiene ${MIN_DATA_HOURS} h de datos` }; // la comparación es definitiva: se espera
     eds.push({ n: i + 1, reel_id: r.id, recipe: parse(r.recipe), vars: recipeVars(parse(r.recipe)), score: scores.reduce((a, b) => a + b, 0) / scores.length, hours });
   }
+  if (eds.length < 2) return { skipped: 'menos de 2 hermanas publicadas' };
   const sorted = [...eds].sort((a, b) => b.score - a.score || a.reel_id - b.reel_id);
   const winner = sorted[0], others = eds.filter((e) => e !== winner);
   const diff = Math.round((winner.score - sorted[1].score) * 10000) / 10000;
@@ -156,7 +159,8 @@ export async function memoryCycle(db, deps = {}) {
   const clips = db.prepare(`SELECT DISTINCT r.clip_id FROM reels r JOIN projects p ON p.id = r.project_id
     WHERE p.demo = 0 AND r.kind = 'listo' AND r.clip_id IS NOT NULL AND r.clip_id != ''
       AND NOT EXISTS (SELECT 1 FROM comparisons c WHERE c.clip_id = r.clip_id)
-      AND EXISTS (SELECT 1 FROM posts po WHERE po.reel_id = r.id AND po.published_at IS NOT NULL AND po.published_at != '')`).all();
+      AND EXISTS (SELECT 1 FROM posts po WHERE po.reel_id = r.id AND po.published_at IS NOT NULL AND po.published_at != '')
+    GROUP BY r.clip_id HAVING count(DISTINCT r.id) >= 2`).all();
   let compared = 0;
   for (const { clip_id } of clips) {
     try { if ((await compareSiblings(clip_id, { ...deps, db })).compared) compared++; } catch (e) { console.error('memoria:', e.message); }

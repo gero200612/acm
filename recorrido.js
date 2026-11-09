@@ -173,6 +173,8 @@ export function recorridoCases(sb) {
       sb.box.write("INSERT INTO knowledge (project_id, kind, title, text) VALUES (?, 'tema', 'Ficha de A', 'texto de A')", A);
       sb.box.write("INSERT INTO knowledge (project_id, kind, title, text) VALUES (?, 'tema', 'Ficha de B', 'texto de B')", B);
       eq((await sb.box.editorGet(`/api/editor/aprendizajes/${A}`, '')).status, 401, 'sin token');
+      const sinSesion = await als.exit(() => fetch(`${sb.box.base}/api/projects/${A}/memory`));
+      eq(sinSesion.status, 401, 'memoria sin sesión');
       eq((await sb.box.editorGet(`/api/editor/aprendizajes/${A}`, 'otro')).status, 401, 'token malo');
       const a = await sb.box.editorGet(`/api/editor/aprendizajes/${A}`);
       eq([a.status, a.j.project_id, a.j.aprendizajes, a.j.investigacion], [200, A, [{ gancho: 'directo', horario: { instagram: '20:00' } }], ['Ficha de A: texto de A']], 'solo lo de A');
