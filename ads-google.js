@@ -6,6 +6,9 @@
 import { bases, getGoogleToken } from './connections.js';
 import { AdRejected, callJson } from './ads-iface.js';
 
+// solo el pedido que crea el anuncio puede ser un rechazo de política: cualquier otro error nunca bloquea la red
+export const isPolicyReject = (path, txt) => path === 'adGroupAds:mutate' && /policyViolationError|policyFindingError|POLICY_/i.test(txt);
+
 const API = 'v18';
 const SUBTYPE = 'VIDEO_ACTION';
 const micros = (usd) => Math.round(usd * 1e6);
@@ -23,7 +26,7 @@ export function googleAdapter(ctx) {
     if (res.ok) return out;
     const txt = JSON.stringify(out.error || {});
     const msg = out.error?.message || `error ${res.status}`;
-    if (/policyViolationError|policyFindingError|POLICY_/i.test(txt)) throw new AdRejected(fail(msg).message);
+    if (isPolicyReject(path, txt)) throw new AdRejected(fail(msg).message);
     throw fail(msg);
   };
   const mutate = async (resource, operation) => (await call(`${resource}:mutate`, { operations: [operation] })).results?.[0]?.resourceName;
@@ -41,15 +44,16 @@ export function googleAdapter(ctx) {
     return list;
   };
 
+  // Google no tiene "una campaña por proyecto": cada Short lleva la suya. Lo que se reusa es la lista de Customer Match del padrón.
+  // Devuelve { campaignId: null, listId }; listId es null mientras no haya padrón cargado (se arma apenas aparece).
   const ensureCampaign = async (project) => {
     const st = ctx.state.get('youtube');
-    if (st.campaignId) return { campaignId: st.campaignId };
-    const p = project || ctx.project(), rows = ctx.padron();
-    // sin padrón cargado no hay lista: los anuncios salen por geografía
-    const list = rows.length ? await uploadList(`ACM · ${p.name} · padrón`, rows) : '';
-    const campaignId = list ? idOf(list) : 'sin-lista';
-    ctx.state.set('youtube', { ...st, campaignId, userList: list });
-    return { campaignId };
+    if (st.userList) return { campaignId: null, listId: idOf(st.userList) };
+    const rows = ctx.padron();
+    if (!rows.length) return { campaignId: null, listId: null };
+    const list = await uploadList(`ACM · ${(project || ctx.project()).name} · padrón`, rows);
+    ctx.state.set('youtube', { ...st, userList: list });
+    return { campaignId: null, listId: idOf(list) };
   };
 
   return {

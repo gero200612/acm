@@ -4,6 +4,7 @@
 import { metaAdapter } from './ads.js';
 import { tiktokAdapter } from './ads-tiktok.js';
 import { googleAdapter } from './ads-google.js';
+import { addAlert } from './alerts.js';
 
 // campos de pauta que acepta cada red (true = secreto: nunca vuelve a la pantalla)
 export const ADS_FIELDS = {
@@ -37,11 +38,21 @@ export function buildAdapters(db, vault, projectId, today = () => new Date().toI
       return [pa.end_date, project().propaganda_until].filter(Boolean).map((d) => d.slice(0, 10)).sort()[0] || '';
     },
     accountCreds: (network) => { const a = db.prepare("SELECT creds FROM accounts WHERE project_id = ? AND network = ? AND status = 'conectada' ORDER BY id LIMIT 1").get(projectId, network); return a ? vault.open(a.creds) : null; },
-    videoId: (postId) => { const r = db.prepare('SELECT network_video_id, external_id FROM posts WHERE id = ?').get(postId); return r?.network_video_id || r?.external_id || ''; },
+    // solo el ID real del video (network_video_id); el external_id de TikTok es el publish_id y no sirve
+    videoId: (postId) => db.prepare('SELECT network_video_id FROM posts WHERE id = ?').get(postId)?.network_video_id || '',
     padron: () => db.prepare('SELECT em, ph FROM padron WHERE project_id = ?').all(projectId),
   };
   const make = { meta: metaAdapter, tiktok: tiktokAdapter, youtube: googleAdapter };
   const out = {};
-  for (const n of Object.keys(make)) if ((enabled[n] || active.has(n)) && hasAdsCreds[n](creds)) out[n] = make[n](ctx);
+  for (const n of Object.keys(make)) {
+    if (!((enabled[n] || active.has(n)) && hasAdsCreds[n](creds))) continue;
+    // TikTok y Google solo pautan en dólares: una cuenta probada en otra moneda no arma adaptador (y se avisa)
+    const cur = (n === 'tiktok' || n === 'youtube') ? ctx.state.get(n).currency : '';
+    if (cur && cur !== 'USD') {
+      try { addAlert(db, 'moneda_no_usd', projectId, `La cuenta de pauta de ${n === 'tiktok' ? 'TikTok' : 'Google'} está en ${cur}: ACM solo pauta en dólares en esa red, no se promociona ahí.`); } catch {}
+      continue;
+    }
+    out[n] = make[n](ctx);
+  }
   return out;
 }

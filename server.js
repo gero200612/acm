@@ -12,6 +12,7 @@ import { publish, tiktokOptions, tiktokCreator } from './publisher.js';
 import { testAds, uploadAudience, createCampaign, campaignInsights } from './ads.js';
 import { testTikTokAds } from './ads-tiktok.js';
 import { testGoogleAds } from './ads-google.js';
+import { AD_NETWORKS } from './ads-iface.js';
 import { buildAdapters, ADS_FIELDS, hasAdsCreds, parseObj } from './ads-factory.js';
 import { ask, askError, agentReady } from './agent.js';
 import { initTrace, traced } from './trace.js';
@@ -761,6 +762,9 @@ app.post('/api/projects/:id/ads/test', async (req, res, next) => {
   const c = vault.open(p.ads_creds), tester = net === 'tiktok' ? testTikTokAds : testGoogleAds, who = net === 'tiktok' ? 'TikTok Ads' : 'Google Ads';
   try {
     const r = await traced({ kind: 'pauta', title: `Probar ${who}`, project_id: p.id, network: net, secrets: Object.values(c) }, async () => { const x = await tester(c); return { ...x, summary: `${x.name} (${x.currency})` }; });
+    // la moneda queda guardada: el ciclo no arma adaptador para cuentas que no estén en dólares
+    const st = parseObj(p.ads_state); st[net] = { ...(st[net] || {}), currency: r.currency };
+    run('UPDATE projects SET ads_state = ? WHERE id = ?', JSON.stringify(st), p.id);
     if (r.currency !== 'USD') return res.status(400).json({ error: `La cuenta de ${who} está en ${r.currency}: por ahora ACM solo pauta en dólares en esa red.` });
     sendProject(res, p.id);
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -769,6 +773,7 @@ app.post('/api/projects/:id/ads/test', async (req, res, next) => {
 app.post('/api/projects/:id/ads/unblock', (req, res) => {
   const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
   const b = parseObj(p.ads_blocked), net = req.body?.network;
+  if (!AD_NETWORKS.includes(net)) return res.status(400).json({ error: 'Red desconocida.' });
   if (!b[net]) return res.status(400).json({ error: 'Esa red no está bloqueada.' });
   delete b[net];
   run('UPDATE projects SET ads_blocked = ? WHERE id = ?', JSON.stringify(b), p.id);

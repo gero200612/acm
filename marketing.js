@@ -2,7 +2,7 @@
 // Los límites de plata los pone el código (budget.js: guardSpend); acá nada gasta sin pasar por ahí.
 import { score, weightsOf } from './metrics.js';
 import { addAlert } from './alerts.js';
-import { AD_NETWORKS, AdRejected, adNetworkOf } from './ads-iface.js';
+import { AD_NETWORKS, AdRejected, AdSkip, adNetworkOf } from './ads-iface.js';
 import { dailyCap, splitNetworks, canJudge, guardSpend } from './budget.js';
 
 export const MIN_ORGANIC_HOURS = 24;   // un reel se promociona recién con 24 h de vida orgánica
@@ -220,7 +220,8 @@ async function cycle(db, projectId, adapters, nowStr, today) {
         continue;
       }
       if (rowId) db.prepare('DELETE FROM promotions WHERE id = ?').run(rowId);
-      if (e instanceof AdRejected) {
+      if (e instanceof AdSkip) decide('omitido', `post ${c.id}`, { network: c.net }, `Se saltea el post ${c.id} en ${c.net} por este ciclo: ${e.message}.`.slice(0, 300));
+      else if (e instanceof AdRejected) {
         decide('rechazo', `post ${c.id}`, { network: c.net }, `${c.net} rechazó el anuncio del post ${c.id}: ${e.message}`.slice(0, 300));
         // la red queda bloqueada en el proyecto: sin reparto y sin reintentos hasta que Gero la reactive
         blocked[c.net] = { at: nowStr, post_id: c.id, reason: String(e.message).slice(0, 200) };

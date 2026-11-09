@@ -7,6 +7,8 @@ import { mask } from './trace.js';
 //   pause(adId)
 //   insights(adId) -> { spend, impressions, reach, target_reach | null }   (acumulados desde que arrancó)
 export class AdRejected extends Error {}
+// la red no puede promocionar ESTE post todavía (p. ej. falta el ID del video): se saltea en este ciclo, sin bloquear la red
+export class AdSkip extends Error {}
 export const AD_NETWORKS = ['meta', 'youtube', 'tiktok'];
 // red de la cuenta -> red de pauta
 export const adNetworkOf = (accountNetwork) => ({ instagram: 'meta', facebook: 'meta', youtube: 'youtube', tiktok: 'tiktok' })[accountNetwork] || null;

@@ -21,6 +21,7 @@ async function send(url, opt) {
   if (res.ok && !body.error) return body;
   const err = new Error(`Meta respondió: ${body.error?.error_user_msg || body.error?.message || 'error ' + res.status}`);
   err.metaCode = body.error?.code;
+  err.metaSub = body.error?.error_subcode;
   throw err;
 }
 const act = (id) => (String(id).startsWith('act_') ? String(id) : 'act_' + id);
@@ -80,7 +81,9 @@ export async function campaignInsights(c, id) {
 }
 
 // ---- Adaptador del ciclo de marketing (interfaz de ads-iface.js): promociona una publicación que YA existe ----
-const policyError = (e) => e.metaCode === 368 || /\bpolicy\b|pol[ií]ticas de (anuncios|publicidad)/i.test(e.message || '');
+// Rechazo de política: por código de error de Meta (368 = bloqueo temporal por infringir políticas) y, de respaldo y solo al crear el
+// creativo o el anuncio, por el texto del mensaje. Cualquier otro error nunca bloquea la red.
+export const isPolicyReject = (e, creating) => e.metaCode === 368 || (!!creating && /\bpolicy\b|pol[ií]ticas de (anuncios|publicidad)/i.test(e.message || ''));
 
 export function metaAdapter(ctx) {
   const c = ctx.creds, secrets = [c.accessToken];
@@ -88,7 +91,7 @@ export function metaAdapter(ctx) {
     try { return await g(...a); }
     catch (e) {
       const msg = mask(e.message, secrets);
-      if (policyError(e)) throw new AdRejected(msg);
+      if (isPolicyReject(e, /\/(adcreatives|ads)$/.test(String(a[1])))) throw new AdRejected(msg);
       throw new Error(msg);
     }
   };

@@ -18,8 +18,10 @@ import { initMetrics, readMetrics, readDue, score, DEFAULT_WEIGHTS } from './met
 import { makeVault } from './connections.js';
 import { dailyCap, splitNetworks, canJudge, guardSpend } from './budget.js';
 import { initMarketing, marketingCycle, UNTARGETED_REACH_WEIGHT } from './marketing.js';
-import { AdRejected } from './ads-iface.js';
-import { metaAdapter } from './ads.js';
+import { AdRejected, AdSkip } from './ads-iface.js';
+import { isPolicyReject as metaPolicy } from './ads.js';
+import { isPolicyReject as ttPolicy } from './ads-tiktok.js';
+import { isPolicyReject as gPolicy } from './ads-google.js';
 import { tiktokAdapter } from './ads-tiktok.js';
 import { googleAdapter } from './ads-google.js';
 import { buildAdapters } from './ads-factory.js';
@@ -475,10 +477,11 @@ function cases(video, sim) {
       await A.pause(ad.adId); yes(sim.log.some((l) => l.startsWith('ttads adgroup/status/update/') && l.includes('DISABLE')), 'pausa');
       eq(await A.insights(ad.adId), { spend: 7.5, impressions: 3000, reach: 2100, target_reach: null }, 'insights sin alcance dentro del padrón');
     }],
-    ['Pauta real', 'Google Ads (Shorts): lista Customer Match del padrón, campaña con presupuesto y end_date, cambia, pausa y lee', async () => {
+    ['Pauta real', 'Google Ads (Shorts): reusa la lista Customer Match del padrón (una campaña por Short), campaña con presupuesto y end_date, cambia, pausa y lee', async () => {
       const f = adsFixture(); const A = f.adapters().youtube; const mark = sim.log.length;
       const c1 = await A.ensureCampaign({ name: 'P' }), c2 = await f.adapters().youtube.ensureCampaign({ name: 'P' });
-      eq(c1.campaignId, c2.campaignId, 'la segunda llamada reusa'); eq(sim.log.slice(mark).filter((l) => l.startsWith('gads userLists:mutate')).length, 1, 'una sola lista');
+      eq([c1.campaignId, c2.campaignId], [null, null], 'Google no tiene campaña por proyecto: cada Short lleva la suya');
+      yes(c1.listId && c1.listId === c2.listId, 'la segunda llamada reusa la LISTA de Customer Match'); eq(sim.log.slice(mark).filter((l) => l.startsWith('gads userLists:mutate')).length, 1, 'una sola lista');
       const up = sim.log.slice(mark).find((l) => l.startsWith('gads offlineUserDataJobs/J1:addOperations'));
       yes(up && up.includes('hashedEmail') && !up.includes('@'), 'sube solo huellas');
       const ad = await A.promote({ id: 4, external_id: 'YOK', network: 'youtube' }, 5);
@@ -524,6 +527,42 @@ function cases(video, sim) {
       f.d.prepare("UPDATE projects SET ads_blocked = ''").run(); f.d.prepare("DELETE FROM decisions WHERE kind = 'rechazo'").run();
       await f.run({ now: () => '2026-11-21 22:00' });
       eq(JSON.parse(f.d.prepare("SELECT data FROM decisions WHERE kind = 'reparto' ORDER BY id DESC LIMIT 1").get().data).split.tiktok > 0, true, 'reactivada, vuelve a recibir parte del reparto');
+    }],
+    ['Pauta real', 'Google: si el padrón se carga después de la primera promoción, el siguiente ensureCampaign arma la lista', async () => {
+      const f = adsFixture(); f.d.exec('DELETE FROM padron'); const mark = sim.log.length;
+      eq(await f.adapters().youtube.ensureCampaign({ name: 'P' }), { campaignId: null, listId: null }, 'sin padrón no hay lista');
+      const ad = await f.adapters().youtube.promote({ id: 4, external_id: 'YOK', network: 'youtube' }, 5);
+      yes(ad.adId, 'promueve igual, por geografía'); eq(sim.log.slice(mark).filter((l) => l.startsWith('gads userLists:mutate')).length, 0, 'todavía sin lista');
+      for (let i = 0; i < 5; i++) f.d.prepare('INSERT INTO padron VALUES (1, ?, ?)').run(`z${i}`.padEnd(16, 'a'), `y${i}`.padEnd(16, 'b'));
+      const r = await f.adapters().youtube.ensureCampaign({ name: 'P' });
+      yes(r.listId, 'ahora arma la lista'); eq(sim.log.slice(mark).filter((l) => l.startsWith('gads userLists:mutate')).length, 1, 'una lista creada');
+      eq((await f.adapters().youtube.ensureCampaign({ name: 'P' })).listId, r.listId, 'y después la reusa');
+    }],
+    ['Pauta real', 'TikTok sin ID de video se saltea sin llamar a la red; cuentas que no están en dólares no arman adaptador; rechazos solo por código o al crear', async () => {
+      const f = adsFixture(); f.post(3, 3, 'PUBLISH_ID_9'); const mark = sim.log.length;
+      let e; try { await f.adapters().tiktok.promote({ id: 3, external_id: 'PUBLISH_ID_9', network: 'tiktok' }, 5); } catch (x) { e = x; }
+      yes(e instanceof AdSkip && /todavía no tiene ID/.test(e.message), 'AdSkip con motivo en español');
+      eq(sim.log.slice(mark).filter((l) => l.startsWith('ttads ')).length, 0, 'no llama a TikTok ni usa el publish_id');
+      const g = adsFixture({ nets: '{"meta":true,"youtube":false,"tiktok":true}' }); g.post(3, 3, 'PUBLISH_ID_9'); g.post(1, 1, 'M1');
+      const r = await g.run(); eq(r.promoted, 1, 'sale Meta; el post de TikTok se saltea');
+      eq(g.d.prepare("SELECT count(*) n FROM decisions WHERE kind = 'omitido'").get().n, 1, 'decisión de omisión'); eq(g.d.prepare('SELECT ads_blocked FROM projects').get().ads_blocked, '', 'la red NO queda bloqueada');
+      const m = adsFixture(); m.d.prepare("UPDATE projects SET ads_state = ?").run(JSON.stringify({ tiktok: { currency: 'ARS' }, youtube: { currency: 'USD' } }));
+      eq(Object.keys(m.adapters()).sort(), ['meta', 'youtube'], 'TikTok en ARS no arma adaptador');
+      eq(m.d.prepare("SELECT count(*) n FROM alerts WHERE kind = 'moneda_no_usd'").get().n, 1, 'alerta de moneda');
+      const E = (code, message) => Object.assign(new Error(message), { metaCode: code });
+      eq([metaPolicy(E(368, 'x'), false), metaPolicy(E(100, 'violates policy'), false), metaPolicy(E(100, 'violates policy'), true)], [true, false, true], 'Meta: código siempre; texto solo al crear');
+      eq([ttPolicy('ad/create/', 40911, 'x'), ttPolicy('adgroup/create/', 40911, 'rejected policy'), ttPolicy('report/integrated/get/', 0, 'reject'), ttPolicy('ad/create/', 40002, 'Ad rejected')], [true, false, false, true], 'TikTok: solo ad/create');
+      eq([gPolicy('adGroupAds:mutate', 'POLICY_ERROR'), gPolicy('campaigns:mutate', 'POLICY_ERROR')], [true, false], 'Google: solo adGroupAds');
+    }],
+    ['Pauta real', 'Una red apagada con un anuncio activo conserva el adaptador y el ciclo lo pausa', async () => {
+      const f = adsFixture({ nets: '{"meta":true,"youtube":false,"tiktok":false}' });
+      eq(Object.keys(f.adapters()), ['meta'], 'apagada y sin anuncios: no hay adaptador');
+      f.d.exec("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (1, 4, 'youtube', '701:5', 5, 'activa', '2026-11-19 10:00', '2026-11-19 10:00')");
+      eq(Object.keys(f.adapters()).sort(), ['meta', 'youtube'], 'con anuncio activo sí');
+      const r = await f.run();
+      eq(r.paused, 1, 'el ciclo la pausó');
+      yes(sim.log.some((l) => l.startsWith('gads campaigns:mutate') && l.includes('customers/1234567890/campaigns/701') && l.includes('PAUSED')), 'pausó en Google');
+      eq(f.d.prepare("SELECT status FROM promotions WHERE ad_id = '701:5'").get().status, 'pausada', 'estado');
     }],
     ['Pauta real', 'Una red sin target_reach usa el alcance total con peso 0,5', async () => {
       eq(UNTARGETED_REACH_WEIGHT, 0.5, 'peso');

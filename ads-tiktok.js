@@ -1,11 +1,15 @@
 // TikTok Ads (Marketing API v1.3): Spark Ads con el video orgánico ya publicado. Todo lo que depende de la forma de la API está acá,
 // aislado para corregirlo sin tocar el resto. Credenciales de pauta del proyecto: ttAdvertiserId, ttAccessToken, ttIdentityId, ttBcId.
 import { bases } from './connections.js';
-import { AdRejected, callJson, endOfDay } from './ads-iface.js';
+import { AdRejected, AdSkip, callJson, endOfDay } from './ads-iface.js';
 
 const V = 'v1.3';
 const AR_LOCATION = '3865483'; // Argentina
-const REJECT = /reject|polic|violat|disapprov|prohibit|rechaz/i;
+// Rechazo de política: solo al crear el anuncio (ad/create). Por código de error de la API (40911 es el que usa el simulador; confirmar con la API real)
+// y, de respaldo y solo en ese pedido, por el texto del mensaje. Cualquier otro error nunca bloquea la red.
+const REJECT_CODES = new Set([40911]);
+const REJECT = /reject|polic|violat|disapprov|prohibit/i;
+export const isPolicyReject = (path, code, msg) => path === 'ad/create/' && (REJECT_CODES.has(code) || REJECT.test(msg));
 // TikTok manda la fecha como 'YYYY-MM-DD HH:MM:SS' en UTC
 const utc = (iso) => new Date(iso).toISOString().slice(0, 19).replace('T', ' ');
 
@@ -20,7 +24,7 @@ export function tiktokAdapter(ctx) {
     const { res, body, fail } = await callJson('TikTok Ads', u, opt, secrets);
     if (res.ok && body.code === 0) return body.data || {};
     const msg = body.message || `error ${res.status}`;
-    if (REJECT.test(msg)) throw new AdRejected(fail(msg).message);
+    if (isPolicyReject(path, body.code, msg)) throw new AdRejected(fail(msg).message);
     throw fail(msg);
   };
   const adv = { advertiser_id: c.ttAdvertiserId };
@@ -36,10 +40,12 @@ export function tiktokAdapter(ctx) {
     ensureCampaign,
     // el adId es el ID del grupo de anuncios (presupuesto diario y fin de la programación viven ahí)
     async promote(post, dailyUsd) {
+      const video = ctx.videoId(post.id);
+      // el external_id de TikTok es el publish_id: no sirve como ID de video. Sin ID de video se espera al próximo ciclo
+      if (!video) throw new AdSkip('el video de TikTok todavía no tiene ID');
       const { campaignId } = await ensureCampaign();
       const end = ctx.endDate();
       if (!end) throw new Error('Falta la fecha de fin de la pauta.');
-      const video = ctx.videoId(post.id) || post.external_id;
       const group = await call('POST', 'adgroup/create/', {
         ...adv, campaign_id: campaignId, adgroup_name: `ACM · post ${post.id}`, placement_type: 'PLACEMENT_TYPE_NORMAL', placements: ['PLACEMENT_TIKTOK'],
         budget_mode: 'BUDGET_MODE_DAY', budget: Number(dailyUsd.toFixed(2)),
