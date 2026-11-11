@@ -346,9 +346,9 @@ function memoriaView() {
   </div>`;
 }
 
-// Datos fijos del cálculo (no se tocan desde la pantalla): CPM de Meta en Argentina en campaña con públicos chicos,
+// Datos fijos del cálculo (no se tocan desde la pantalla): CPM de Meta en Argentina (mediana jul-2025/jul-2026 según Superads, ver investigación 2026-11-11),
 // parte del padrón que Meta reconoce con teléfono o mail, e IVA de servicios digitales del exterior.
-const PAUTA_DATOS = { cpm: 6, match_pct: 60, iva: 0.21 };
+const PAUTA_DATOS = { cpm: 3.6, match_pct: 60, iva: 0.21 };
 const today = () => localInput(new Date()).slice(0, 10);
 function pautaCalc(p, pa) {
   pa = pa || {};
@@ -671,7 +671,7 @@ function adsCard(p) {
 }
 function pautaDatos(p, c) {
   return `<dl class="pz-dl">
-    <div><dt>CPM de Meta</dt><dd>USD ${fmt(PAUTA_DATOS.cpm)}</dd></div>
+    <div><dt>CPM de Meta</dt><dd>USD ${fmt(PAUTA_DATOS.cpm, 1)}</dd></div>
     <div><dt>Padrón</dt><dd>${fmt(p.padron)}</dd></div>
     <div><dt>Con teléfono o mail</dt><dd>${p.padron_contacts ? fmt(p.padron_contacts) : 'sin archivo'}</dd></div>
     <div><dt>Meta reconoce</dt><dd>${PAUTA_DATOS.match_pct} %</dd></div>

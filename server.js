@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS posts (
   scheduled_at TEXT NOT NULL, status TEXT DEFAULT 'programado', created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS pauta (
   project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-  match_pct REAL DEFAULT 60, frequency REAL DEFAULT 10, cpm REAL DEFAULT 6, iva INTEGER DEFAULT 1,
+  match_pct REAL DEFAULT 60, frequency REAL DEFAULT 10, cpm REAL DEFAULT 3.6, iva INTEGER DEFAULT 1,
   start_date TEXT DEFAULT '', networks TEXT DEFAULT 'meta');
 `);
 

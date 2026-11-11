@@ -9,7 +9,7 @@ export function postBlocked(p) {
 }
 
 // Números de la pauta (los mismos que muestra la pestaña Pauta). Fechas YYYY-MM-DD.
-export const PAUTA = { cpm: 6, match: 0.6, iva: 0.21 };
+export const PAUTA = { cpm: 3.6, match: 0.6, iva: 0.21 };
 export function pautaNumbers({ budget, from, to, padron, contacts }) {
   const days = Math.max(1, Math.round((new Date(to + 'T00:00') - new Date(from + 'T00:00')) / 864e5) + 1);
   const net = (Number(budget) || 0) / (1 + PAUTA.iva);

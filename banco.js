@@ -334,7 +334,7 @@ function cases(video, sim) {
     }],
     ['Pauta', 'USD 3.000 en 33 días sobre el padrón de 65.000', async () => {
       const n = pautaNumbers({ budget: 3000, from: '2026-11-08', to: '2026-12-10', padron: 65000, contacts: 59584 });
-      eq(n.days, 33, 'días'); eq(n.people, 35750, 'socios alcanzados'); eq(Math.round(n.freq), 12, 'veces por socio');
+      eq(n.days, 33, 'días'); eq(n.people, 35750, 'socios alcanzados'); eq(Math.round(n.freq), 19, 'veces por socio');
     }],
     ['Investigación', 'El modelo de vectores está y busca por significado', async () => {
       const docs = ['Gaudio promete el sponsor más grande de la historia del club', 'La FIFA inhibió al club por la deuda con Bragantino', 'Nakis es prosecretario de la AFA y cercano a Tapia'];
