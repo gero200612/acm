@@ -1145,7 +1145,7 @@ function knDraw() {
   const A = D.accounts || [];
   const O = K.outliers || [];
   const outCard = O.length ? `<div class="card kn-out"><h2 class="h2">Lo que mejor les funcionó</h2><p class="small muted">Publicaciones con el doble o más de las interacciones normales de su cuenta${K.handle ? ` (@${esc(K.handle)})` : ''}.</p>
-    ${O.map((x) => `<a class="kn-o" ${x.url ? `href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"` : ''}><span class="kn-score">×${x.score.toLocaleString('es-AR', { maximumFractionDigits: 1 })}</span>
+    ${O.map((x) => `<a class="kn-o" ${/^https?:\/\//i.test(x.url || '') ? `href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"` : ''}><span class="kn-score">×${x.score.toLocaleString('es-AR', { maximumFractionDigits: 1 })}</span>
       <span><b>@${esc(x.handle)}</b> <span class="small muted">· ${esc(x.type || '')} · ${esc(x.date || '')}</span><span class="kn-ot">${esc(x.text)}</span>
       <span class="small muted">${fmt(x.eng)} interacciones · lo normal en la cuenta: ${fmt(x.median)}</span></span></a>`).join('')}</div>` : '';
   $('#kn-side').innerHTML = outCard + `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa.</p>

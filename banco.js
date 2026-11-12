@@ -391,6 +391,8 @@ function cases(video, sim) {
       const o = outliers(1);
       eq([o.length, o[0].handle, o[0].score >= 5, o[0].url], [1, 'rival', true, 'https://instagram.com/p/0'], 'solo el posteo que se destaca, de la cuenta con datos suficientes');
       eq(outliers(1, { handle: 'chica' }).length, 0, 'con pocas publicaciones no se calcula');
+      addInstagram(1, { username: 'mala', followers_count: 1000, posts: posts(12, true).map((x, i) => (i === 0 ? { ...x, permalink: 'javascript:alert(1)' } : x)) });
+      eq(outliers(1, { handle: 'mala' })[0].url, '', 'un link que no es http(s) no se devuelve');
     }],
     ['Circuito', 'withinWindow: la hora real también respeta 08:00-23:00', async () => {
       eq(['07:59', '08:00', '23:00', '23:01'].map(withinWindow), [false, true, true, false], 'ventana');

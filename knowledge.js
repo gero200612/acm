@@ -171,7 +171,7 @@ export function outliers(projectId, { limit = 12, handle = '' } = {}) {
     if (med <= 0) continue;
     for (const r of L) {
       const score = (Number(r.eng) || 0) / med;
-      if (score >= OUTLIER_MIN_SCORE) out.push({ id: r.id, handle: h, date: r.date, url: r.source, text: String(r.text || '').slice(0, 280), type: r.type, eng: r.eng, likes: r.likes, comments: r.comments, median: med, score: Math.round(score * 10) / 10 });
+      if (score >= OUTLIER_MIN_SCORE) out.push({ id: r.id, handle: h, date: r.date, url: /^https?:\/\//i.test(r.source || '') ? r.source : '', text: String(r.text || '').slice(0, 280), type: r.type, eng: r.eng, likes: r.likes, comments: r.comments, median: med, score: Math.round(score * 10) / 10 });
     }
   }
   return out.sort((a, b) => b.score - a.score).slice(0, Math.max(1, Math.min(50, limit)));
