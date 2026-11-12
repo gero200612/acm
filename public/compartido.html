@@ -17,7 +17,8 @@
     .sh-head { display: flex; align-items: center; gap: 14px; }
     .sh-av { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 18px; overflow: hidden; flex: none; }
     .sh-av img { width: 100%; height: 100%; object-fit: cover; }
-    .sh-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+    .sh-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+    .sh-tabs button { white-space: nowrap; }
     .sh-tabs button { border: 0; background: transparent; padding: 10px 14px; font-weight: 600; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -1px; }
     .sh-tabs button[aria-selected='true'] { color: var(--ink); border-bottom-color: var(--blue); }
     .clip { display: grid; gap: 14px; transition: opacity .3s ease, transform .3s ease, max-height .4s ease; }
@@ -39,6 +40,14 @@
     .reveal { opacity: 0; transform: translateY(16px); transition: opacity .45s ease, transform .45s cubic-bezier(.2, .8, .2, 1); }
     .reveal.in { opacity: 1; transform: none; }
     .empty { text-align: center; padding: 40px 16px; }
+    .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .kpi { display: grid; gap: 2px; padding: 14px; background: var(--bg); border-radius: 12px; }
+    .kv { font-size: 28px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+    .rb { display: grid; grid-template-columns: 90px 1fr auto; gap: 10px; align-items: center; font-size: 14px; }
+    .rb .bar { height: 10px; background: var(--line-2); border-radius: 999px; overflow: hidden; }
+    .rb .bar i { display: block; height: 100%; background: var(--blue); border-radius: inherit; transform-origin: left; animation: grow .7s cubic-bezier(.2, .8, .2, 1) both; }
+    @keyframes grow { from { transform: scaleX(0); } }
+    @media (max-width: 480px) { .kv { font-size: 22px; } .rb { grid-template-columns: 70px 1fr; } .rb > span:last-child { grid-column: 1 / -1; } }
     .gate { max-width: 360px; margin: 12vh auto; display: grid; gap: 12px; }
     #toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: grid; gap: 8px; z-index: 50; }
     @media (prefers-reduced-motion: reduce) { .reveal, .clip { transition: none; opacity: 1; transform: none; } }
@@ -79,15 +88,15 @@
     const pdate = (s) => new Date(s.replace(' ', 'T'));
     function render() {
       const p = data.project, review = data.can === 'revisar';
-      const tabs = [['aprobar', `Para aprobar${data.pending.length ? ` (${data.pending.length})` : ''}`]].concat(data.calendar ? [['calendario', 'Lo que viene']] : []);
+      const tabs = [['aprobar', `Para aprobar${data.pending.length ? ` (${data.pending.length})` : ''}`]].concat(data.calendar ? [['calendario', 'Lo que viene']] : [], data.report ? [['informe', 'Cómo viene']] : []);
       app.innerHTML = `
         <header class="sh-head reveal"><span class="sh-av" style="background:${esc(p.color || '#ff5a1f')}">${p.photo ? `<img src="${esc(p.photo)}" alt="">` : esc(initials(p.name))}</span>
           <div><h1 class="page-title">${esc(p.name)}</h1><p class="small muted">${esc([p.role, p.org].filter(Boolean).join(' · '))}${review ? ' · Podés aprobar o pedir cambios' : ' · Solo para mirar'}</p></div></header>
         ${tabs.length > 1 ? `<nav class="sh-tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${tab === k}" data-tab="${k}">${l}</button>`).join('')}</nav>` : ''}
-        <div id="body">${tab === 'calendario' ? calendar() : pending(review)}</div>`;
+        <div id="body">${tab === 'calendario' ? calendar() : tab === 'informe' ? report() : pending(review)}</div>`;
       app.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
       app.querySelectorAll('.clip').forEach(wireClip);
-      reveal();
+      reveal(); countUp();
     }
     function pending(review) {
       if (!data.pending.length) return `<section class="card empty reveal"><h2 class="h2">No hay nada esperando</h2><p class="muted small">Cuando haya recortes nuevos para revisar, aparecen acá.</p></section>`;
@@ -118,6 +127,24 @@
           setTimeout(() => { data.pending = data.pending.filter((c) => c.clip_id !== el.dataset.clip); render(); }, 380);
         } catch (e) { b.disabled = false; toast(e.message, true); }
       }));
+    }
+    const fmtN = (n) => Number(n || 0).toLocaleString('es-AR');
+    function report() {
+      const R = data.report;
+      if (!R.posts) return `<section class="card empty reveal"><h2 class="h2">Todavía no hay publicaciones en los últimos ${R.days} días</h2></section>`;
+      const nets = Object.entries(R.byNet).sort((a, b) => b[1].views - a[1].views), maxV = Math.max(1, ...nets.map(([, x]) => x.views));
+      return `<section class="card reveal" style="display:grid;gap:18px">
+        <div class="kpis">${[['Publicaciones', R.posts], ['Vistas', R.views], ['Me gusta', R.likes]].map(([l, v]) => `<div class="kpi"><span class="kv" data-count="${v}">0</span><span class="small muted">${l}</span></div>`).join('')}</div>
+        <div style="display:grid;gap:8px"><h3 class="h2">Por red</h3>${nets.map(([n, x]) => `<div class="rb"><span>${esc(NET[n] || n)}</span><span class="bar"><i style="width:${Math.round(x.views / maxV * 100)}%"></i></span><span class="small muted">${fmtN(x.views)} vistas · ${x.posts}</span></div>`).join('')}</div>
+        <div style="display:grid;gap:8px"><h3 class="h2">Lo que mejor anduvo</h3>${R.top.map((x, i) => `<div class="ev"><span class="t">${i + 1}</span><span>${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a>` : esc(x.title)}</span><span class="small muted">${esc(NET[x.network] || x.network)} · ${esc(pdate(x.at).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }))}</span><span class="chip">${fmtN(x.views)} vistas</span></div>`).join('')}</div>
+        <p class="small muted">Últimos ${R.days} días. Las vistas son la última medición de cada publicación.</p></section>`;
+    }
+    function countUp() {
+      app.querySelectorAll('[data-count]').forEach((el) => {
+        const end = Number(el.dataset.count) || 0, t0 = performance.now(), dur = 900;
+        const step = (t) => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3); el.textContent = fmtN(Math.round(end * e)); if (k < 1) requestAnimationFrame(step); };
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) el.textContent = fmtN(end); else requestAnimationFrame(step);
+      });
     }
     function calendar() {
       if (!data.upcoming.length) return `<section class="card empty reveal"><h2 class="h2">No hay publicaciones programadas</h2></section>`;

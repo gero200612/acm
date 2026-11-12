@@ -754,6 +754,31 @@ app.get('/api/projects/:id/best-times', (req, res) => {
     WHERE p.project_id = ? AND p.status = 'publicado'`, req.params.id);
   res.json(bestSlots(rows));
 });
+// Correr un día entero: todas las publicaciones que todavía se pueden mover pasan a otro día con la misma hora. Todo o nada:
+// si una no pasa las reglas en el día nuevo, no se mueve ninguna y se dice cuál y por qué.
+app.post('/api/projects/:id/posts/move-day', (req, res) => {
+  const from = String(req.body?.from || ''), to = String(req.body?.to || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Las fechas tienen que ser AAAA-MM-DD' });
+  if (from === to) return res.status(400).json({ error: 'Elegí otro día' });
+  const now = localNow(15);
+  const L = all("SELECT * FROM posts WHERE project_id = ? AND substr(scheduled_at, 1, 10) = ? AND status IN ('programado', 'fallido') AND scheduled_at > ? ORDER BY scheduled_at", req.params.id, from, now);
+  if (!L.length) return res.status(400).json({ error: 'Ese día no tiene publicaciones que se puedan mover' });
+  const moved = [];
+  db.exec('BEGIN');
+  try {
+    for (const p of L) {
+      const at = `${to} ${p.scheduled_at.slice(11, 16)}`;
+      if (at <= now) throw new Error(`La de las ${at.slice(11)} ya no llega: tiene que faltar más de 15 minutos.`);
+      const why = scheduleCheck({ id: p.id, reel_id: p.reel_id, account_id: p.account_id, scheduled_at: at });
+      if (why) throw new Error(`La de las ${at.slice(11)}: ${why}`);
+      run('UPDATE posts SET scheduled_at = ? WHERE id = ?', at, p.id);
+      moved.push({ id: p.id, from: p.scheduled_at, to: at });
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); return res.status(400).json({ error: e.message }); }
+  const left = get("SELECT count(*) n FROM posts WHERE project_id = ? AND substr(scheduled_at, 1, 10) = ? AND status IN ('programado', 'fallido')", req.params.id, from).n;
+  res.json({ ok: true, moved, left });
+});
 // Intercambiar el horario de dos publicaciones (la grilla de una cuenta: las horas quedan, cambian los reels).
 app.post('/api/posts/swap', (req, res) => {
   const ids = [Number(req.body?.a), Number(req.body?.b)];

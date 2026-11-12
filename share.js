@@ -16,6 +16,7 @@ export function initShare(db) {
     expires_at TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')), revoked_at TEXT DEFAULT '', last_seen_at TEXT DEFAULT '');
   CREATE INDEX IF NOT EXISTS share_links_project ON share_links(project_id);`);
   if (!db.prepare('PRAGMA table_info(projects)').all().some((c) => c.name === 'ics_token')) db.exec("ALTER TABLE projects ADD COLUMN ics_token TEXT DEFAULT ''");
+  if (!db.prepare('PRAGMA table_info(share_links)').all().some((c) => c.name === 'report')) db.exec('ALTER TABLE share_links ADD COLUMN report INTEGER NOT NULL DEFAULT 0');
 }
 
 const icsEsc = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
@@ -36,7 +37,7 @@ export function mountShare(app, d) {
   setInterval(() => { const now = Date.now(); for (const [k, v] of tries) if (v.until <= now) tries.delete(k); }, 10 * 60 * 1000).unref();
 
   const view = (l) => ({
-    id: l.id, can: l.can, calendar: !!l.calendar, label: l.label, has_code: !!l.code_hash, expires_at: l.expires_at, created_at: l.created_at,
+    id: l.id, can: l.can, calendar: !!l.calendar, report: !!l.report, label: l.label, has_code: !!l.code_hash, expires_at: l.expires_at, created_at: l.created_at,
     last_seen_at: l.last_seen_at, path: `/s/${l.token}`,
   });
 
@@ -55,8 +56,8 @@ export function mountShare(app, d) {
     if (!Number.isFinite(days) || days < 0 || days > 365) return res.status(400).json({ error: 'El vencimiento va de 0 (nunca) a 365 días' });
     const expires = days ? new Date(Date.now() + days * 864e5).toISOString().slice(0, 19).replace('T', ' ') : '';
     const token = crypto.randomBytes(24).toString('base64url');
-    const r = run('INSERT INTO share_links (project_id, token, can, calendar, code_hash, label, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      p.id, token, can, b.calendar === false ? 0 : 1, code ? sha(token + code) : '', String(b.label || '').slice(0, 80), expires);
+    const r = run('INSERT INTO share_links (project_id, token, can, calendar, report, code_hash, label, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      p.id, token, can, b.calendar === false ? 0 : 1, b.report === true ? 1 : 0, code ? sha(token + code) : '', String(b.label || '').slice(0, 80), expires);
     res.json(view(get('SELECT * FROM share_links WHERE id = ?', r.lastInsertRowid)));
   });
   app.delete('/api/shares/:id', (req, res) => {
@@ -143,7 +144,22 @@ export function mountShare(app, d) {
     const upcoming = l.calendar ? all(`SELECT p.id, p.scheduled_at, p.status, a.network, a.handle, a.connected_as, r.title
       FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id
       WHERE p.project_id = ? AND p.scheduled_at >= datetime('now', '-1 day') AND p.status IN ('programado', 'publicado', 'publicando') ORDER BY p.scheduled_at LIMIT 200`, p.id) : [];
+    // Informe de los últimos 30 días: lo publicado, las vistas (la última medición de cada publicación) y lo que mejor anduvo.
+    let report = null;
+    if (l.report) {
+      const pub = all(`SELECT p.id, p.published_at, p.scheduled_at, p.external_url, a.network, r.title, COALESCE(m.views, m.reach, 0) AS views, COALESCE(m.likes, 0) AS likes
+        FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id
+        LEFT JOIN post_metrics m ON m.id = (SELECT max(id) FROM post_metrics WHERE post_id = p.id)
+        WHERE p.project_id = ? AND p.status = 'publicado' AND COALESCE(p.published_at, p.scheduled_at) >= datetime('now', '-30 days')`, p.id);
+      const byNet = {};
+      for (const x of pub) { const n = (byNet[x.network] ||= { posts: 0, views: 0 }); n.posts++; n.views += x.views; }
+      report = {
+        days: 30, posts: pub.length, views: pub.reduce((a, x) => a + x.views, 0), likes: pub.reduce((a, x) => a + x.likes, 0), byNet,
+        top: [...pub].sort((a, b) => b.views - a.views).slice(0, 5).map((x) => ({ title: x.title, network: x.network, views: x.views, at: x.published_at || x.scheduled_at, url: /^https?:\/\//i.test(x.external_url || '') ? x.external_url : '' })),
+      };
+    }
     res.json({
+      report,
       project: { name: p.name, role: p.role, org: p.org, color: p.color, photo: p.photo ? `/s/${l.token}/media/${p.photo}` : '', election_date: p.election_date, propaganda_until: p.propaganda_until },
       can: l.can, calendar: !!l.calendar, pending, upcoming,
     });

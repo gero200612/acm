@@ -694,6 +694,17 @@ export function recorridoCases(sb) {
       const M = Object.fromEntries((await api('GET', `/api/projects/${c.sh}/posts`)).j.map((x) => [x.id, x.scheduled_at]));
       eq([M[a.id], M[b.id]], [b.scheduled_at, a.scheduled_at], 'horas cruzadas');
       eq((await api('POST', '/api/posts/swap', { a: a.id, b: a.id })).status, 404, 'consigo misma');
+      // correr el día entero: las dos pasan al día siguiente con su hora; un día sin publicaciones da 400
+      const day = a.scheduled_at.slice(0, 10), next = new Date(new Date(day + 'T12:00:00Z').getTime() + 864e5).toISOString().slice(0, 10);
+      const mv = await api('POST', `/api/projects/${c.sh}/posts/move-day`, { from: day, to: next });
+      eq([mv.status, mv.j.moved.length, mv.j.moved.every((m) => m.to.startsWith(next) && m.to.slice(11) === m.from.slice(11))], [200, 2, true], 'día corrido con las mismas horas');
+      eq((await api('POST', `/api/projects/${c.sh}/posts/move-day`, { from: day, to: next })).status, 400, 'el día ya quedó vacío');
+      // el informe del link: solo si se pidió
+      const rep = (await api('POST', `/api/projects/${c.sh}/shares`, { can: 'ver', report: true })).j.path.split('/')[2];
+      const sin = (await api('POST', `/api/projects/${c.sh}/shares`, { can: 'ver' })).j.path.split('/')[2];
+      const gr = await als.exit(async () => (await fetch(sb.box.base + `/pub/share/${rep}`)).json());
+      const gs = await als.exit(async () => (await fetch(sb.box.base + `/pub/share/${sin}`)).json());
+      eq([gr.report?.days, gs.report], [30, null], 'el informe solo en el link que lo pide');
       eq((await api('DELETE', `/api/projects/${c.sh}`)).j?.ok, true, 'se borra el proyecto de prueba (no deja publicaciones para los casos que siguen)');
     }],
     [G('proyecto'), 'Con anuncios activos no se puede borrar el proyecto (409, pausá la pauta primero); pausados, sí', async () => {

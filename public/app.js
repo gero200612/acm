@@ -542,7 +542,7 @@ function calendarioView() {
         const drop = d >= todayD && !after;
         const max = week ? 99 : 3;
         return `<div class="cal-day ${cls}" data-day="${ymd(d)}" ${drop ? 'data-drop="1"' : ''}>
-          <div class="cal-dn">${week ? '' : `<span>${d.getDate()}</span>`}${isE ? '<em class="tag e">Elección</em>' : isL ? '<em class="tag l">Fin de propaganda</em>' : ''}</div>
+          <div class="cal-dn">${week ? '' : `<span>${d.getDate()}</span>`}${isE ? '<em class="tag e">Elección</em>' : isL ? '<em class="tag l">Fin de propaganda</em>' : ''}${L.filter(movable).length > 1 ? `<button class="cal-mvday" data-act="move-day" data-day="${ymd(d)}" title="Mover todo el día a otra fecha" aria-label="Mover todo el día">${icon('move', 13)}</button>` : ''}</div>
           ${L.slice(0, max).map(ev).join('')}
           ${L.length > max ? `<button class="cal-more" data-act="open-day" data-day="${ymd(d)}">+${L.length - max} más</button>` : ''}
         </div>`; }).join('')}
@@ -1224,7 +1224,7 @@ async function shareDialog() {
     const L = await api(`/api/projects/${pid}/shares`);
     return L.length ? L.map((l) => `<div class="sh-row" data-id="${l.id}">
       <div><b>${esc(l.label || (l.can === 'revisar' ? 'Para aprobar' : 'Solo mirar'))}</b>
-        <span class="small muted">${l.can === 'revisar' ? 'Aprueba o pide cambios' : 'Solo mira'}${l.calendar ? ' · ve el calendario' : ''}${l.has_code ? ' · con código' : ''}${l.expires_at ? ` · vence ${fmtDay(l.expires_at)}` : ''}${l.last_seen_at ? ` · lo abrieron ${fmtDay(l.last_seen_at)}` : ' · todavía no lo abrieron'}</span></div>
+        <span class="small muted">${l.can === 'revisar' ? 'Aprueba o pide cambios' : 'Solo mira'}${l.calendar ? ' · ve el calendario' : ''}${l.report ? ' · ve el informe' : ''}${l.has_code ? ' · con código' : ''}${l.expires_at ? ` · vence ${fmtDay(l.expires_at)}` : ''}${l.last_seen_at ? ` · lo abrieron ${fmtDay(l.last_seen_at)}` : ' · todavía no lo abrieron'}</span></div>
       <button class="btn sm" data-copy="${esc(location.origin + l.path)}">${icon('link', 14)} Copiar</button><button class="btn sm danger" data-revoke="${l.id}">Desactivar</button></div>`).join('') : '<p class="small muted">Todavía no hay links.</p>';
   };
   const d = openDialog('Compartir para aprobar', `
@@ -1233,6 +1233,7 @@ async function shareDialog() {
       <label class="field">Para quién <input class="input" name="label" maxlength="80" placeholder="Por ejemplo: Juan (candidato)"></label>
       <div class="field">Puede <div class="seg" role="group"><button type="button" aria-pressed="true" data-can="revisar">Aprobar o pedir cambios</button><button type="button" aria-pressed="false" data-can="ver">Solo mirar</button></div></div>
       <label class="small"><input type="checkbox" name="calendar" checked> Que vea el calendario de lo que viene</label>
+      <label class="small"><input type="checkbox" name="report"> Que vea el informe: lo publicado en los últimos 30 días, las vistas y lo que mejor anduvo</label>
       <div class="grid2"><label class="field">Código (opcional) <input class="input" name="code" minlength="6" maxlength="40" autocomplete="off" placeholder="Sin código (mínimo 6)"></label>
       <label class="field">Vence <select class="input" name="days"><option value="7">En 7 días</option><option value="30" selected>En 30 días</option><option value="0">Nunca</option></select></label></div>
       <button class="btn primary">Crear link</button>
@@ -1245,7 +1246,7 @@ async function shareDialog() {
     e.preventDefault();
     const f = e.target;
     try {
-      const l = await api(`/api/projects/${pid}/shares`, { method: 'POST', body: { label: f.label.value.trim(), can, calendar: f.calendar.checked, code: f.code.value.trim(), days: Number(f.days.value) } });
+      const l = await api(`/api/projects/${pid}/shares`, { method: 'POST', body: { label: f.label.value.trim(), can, calendar: f.calendar.checked, report: f.report.checked, code: f.code.value.trim(), days: Number(f.days.value) } });
       const url = location.origin + l.path;
       try { await navigator.clipboard.writeText(url); toast('Link creado y copiado'); } catch { toast('Link creado'); }
       f.reset(); await refresh();
@@ -1275,6 +1276,28 @@ async function icsDialog(nuevo) {
   d.querySelector('[data-copy-ics]').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('Link copiado'); } catch { d.querySelector('input').select(); } };
   d.querySelector('[data-ics-new]').onclick = async () => { if (await confirmBox('Cambiar link', 'El link anterior deja de andar: hay que volver a agregar el nuevo en el calendario.', 'Cambiar')) { d.close(); icsDialog(true); } };
   d.querySelector('[data-ics-off]').onclick = async () => { if (await confirmBox('Desactivar link', 'El calendario deja de recibir las publicaciones.', 'Desactivar')) { await api(`/api/projects/${pid}/ics`, { method: 'DELETE' }); d.close(); toast('Link desactivado'); } };
+}
+// Correr un día entero (por ejemplo, se suspende un acto): todas las que se pueden mover van a otra fecha con la misma hora.
+function moveDayDialog(day) {
+  const L = state.posts.filter((x) => x.scheduled_at.startsWith(day) && movable(x));
+  const today = ymd(new Date());
+  const d = openDialog(`Mover el ${fmtDay(day + ' 12:00')}`, `
+    <p class="muted small">Se mueven las ${L.length} publicaciones que todavía no salieron, cada una con su misma hora. Si alguna no puede ir ese día, no se mueve ninguna y te digo por qué.</p>
+    <ul class="small" style="padding-left:18px;margin:10px 0">${L.map((x) => `<li><b>${fmtTime(x.scheduled_at)}</b> · ${esc(x.reel_title)} · ${NETS[x.network].name}</li>`).join('')}</ul>
+    <label class="field">Al día <input class="input" type="date" name="to" min="${today}" value="${ymd(new Date(pdate(day + ' 12:00').getTime() + 864e5))}"></label>`,
+    `<button class="btn" data-close>Cancelar</button><button class="btn primary" data-go>Mover</button>`);
+  d.querySelector('[data-go]').onclick = async (e) => {
+    const to = d.querySelector('[name=to]').value;
+    e.target.disabled = true;
+    try {
+      const r = await api(`/api/projects/${state.project.id}/posts/move-day`, { method: 'POST', body: { from: day, to } });
+      for (const m of r.moved) { const p = state.posts.find((x) => x.id === m.id); if (p) p.scheduled_at = m.to; }
+      d.close(); render();
+      toast(`${r.moved.length} publicaciones movidas al ${fmtDay(to + ' 12:00')}`, false, { label: 'Deshacer', fn: async () => {
+        try { for (const m of r.moved) await api(`/api/posts/${m.id}`, { method: 'PUT', body: { scheduled_at: m.from } }); await loadProject(state.project.id); render(); toast('Volvieron a su día'); } catch (err) { fail(err); }
+      } });
+    } catch (err) { e.target.disabled = false; fail(err); }
+  };
 }
 function confirmBox(title, text, okLabel = 'Borrar') {
   return new Promise((res) => {
@@ -1622,6 +1645,7 @@ document.addEventListener('click', async (e) => {
       case 'share-open': shareDialog(); break;
       case 'ics-open': icsDialog(); break;
       case 'grid-acc': state.gridAccount = id; render(); break;
+      case 'move-day': moveDayDialog(el.dataset.day); break;
       case 'camp-new': campDialog(); break;
       case 'up-kind': state.upKind = el.dataset.k; render(); break;
       case 'reel-filter': state.reelFilter = el.dataset.k; render(); break;
@@ -1677,7 +1701,19 @@ document.addEventListener('click', async (e) => {
         if (r.review_mode !== state.review?.review_mode) toast(r.review_mode === 'auto' ? 'La revisión pasó a automática: 19 de los últimos 20 aprobados' : 'La revisión volvió a manual');
         render(); break; }
       case 'distribute': distributeDialog(state.reels.find((x) => x.id === id)); break;
-      case 'del-post': await api(`/api/posts/${id}`, { method: 'DELETE' }); { const box = el.closest('.pd'); const dlg = el.closest('dialog'); box?.remove(); if (dlg && !dlg.querySelector('.pd')) dlg.close(); else render(); } break;
+      case 'del-post': {
+        const old = state.posts.find((x) => x.id === id);
+        await api(`/api/posts/${id}`, { method: 'DELETE' });
+        state.posts = state.posts.filter((x) => x.id !== id);
+        const box = el.closest('.pd'); const dlg = el.closest('dialog'); box?.remove(); if (dlg && !dlg.querySelector('.pd')) dlg.close(); render();
+        // un borrado por error se recupera: se vuelve a programar igual (pasa otra vez por todas las reglas)
+        if (old && (old.status === 'programado' || old.status === 'fallido')) toast('Publicación borrada', false, { label: 'Deshacer', fn: async () => {
+          try {
+            await api(`/api/projects/${old.project_id}/posts`, { method: 'POST', body: [{ reel_id: old.reel_id, account_id: old.account_id, scheduled_at: old.scheduled_at, ...(old.options ? { options: JSON.parse(old.options) } : {}) }] });
+            await loadProject(old.project_id); render(); toast('Volvió al calendario');
+          } catch (err) { fail(err); }
+        } });
+        break; }
       case 'del-project': if (await confirmBox('Borrar proyecto', `Se borra «${esc(state.project.name)}» con todas sus cuentas, reels y publicaciones.`)) { await api(`/api/projects/${state.project.id}`, { method: 'DELETE' }); location.hash = ''; toast('Proyecto borrado'); } break;
     }
   } catch (err) { fail(err); }

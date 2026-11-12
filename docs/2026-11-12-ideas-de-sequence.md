@@ -11,16 +11,18 @@ Sequence Social (sequencesocial.com) es una herramienta parecida a ACM, pensada 
 5. **Calendario sincronizable**: un link para ver las publicaciones de cada proyecto en Google Calendar, el iPhone u Outlook, que se actualiza solo.
 6. **Mejores horarios**: según las vistas de lo ya publicado, qué franja rinde más en cada red (por ejemplo, 17 a 20 h rinde ×2,5). Con pocas publicaciones medidas no inventa nada.
 7. **Lo que mejor les funcionó**: en Investigación, las publicaciones de las cuentas relevadas (rivales o afines) que tuvieron el doble o más de las interacciones normales de esa cuenta.
-8. **Animaciones**: entrada suave al cambiar de pestaña y en la página del link, y las barras de los mejores horarios que crecen.
+8. **Mover un día entero**: si se suspende un acto, todas las publicaciones del día pasan a otra fecha con su misma hora (todo o nada, con Deshacer).
+9. **Deshacer al borrar** una publicación programada.
+10. **Informe para el dirigente** en el link compartido (opcional): lo publicado en los últimos 30 días, vistas, por red y lo que mejor anduvo.
+11. **Animaciones**: entrada suave al cambiar de pestaña y en la página del link, y las barras de los mejores horarios que crecen.
 
 ## Se puede armar después
 
 - **Bandeja de mensajes y comentarios** de todas las cuentas en un solo lugar, con respuestas automáticas por palabra clave (por ejemplo: alguien comenta «PROPUESTAS» y le llega un mensaje con el PDF). Necesita permisos de Meta para mensajes.
-- **Informes para el dirigente que se mandan solos**: un resumen semanal por mail o WhatsApp, o una página para compartir, con lo publicado, las vistas y lo que mejor anduvo.
+- **Informes que se mandan solos**: el informe del link, enviado cada semana por mail o WhatsApp.
 - **Programar en el mejor horario automáticamente**: que el planificador use los mejores horarios de cada red en lugar de horarios fijos.
-- **Mover varias publicaciones a la vez**: elegir un día entero y correrlo, por ejemplo si se suspende un acto.
 - **Comentarios sobre el video en un segundo exacto**, para pedir un cambio puntual («en el 0:12 tapa la cara»).
 - **Alertas de cuentas vigiladas**: aviso cuando un rival publica algo que rinde muy por encima de lo normal.
 - **Guardar referencias**: links de reels de otros (de cualquier red) en una biblioteca, para que el editor los tome de inspiración.
 - **Plantillas de campaña**: armar un proyecto nuevo con la estructura de uno que ya funcionó.
-- **Papelera**: recuperar una publicación o un reel borrado por error.
+- **Papelera completa**: recuperar también un reel borrado por error (las publicaciones ya se pueden deshacer).
