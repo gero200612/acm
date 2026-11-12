@@ -910,3 +910,73 @@ a.kn-o[href]:hover { background: var(--line-2); }
 .cal-day:hover .cal-mvday, .cal-mvday:focus-visible { opacity: 1; }
 .cal-mvday:hover { background: var(--line-2); color: var(--ink); }
 @media (hover: none) { .cal-mvday { opacity: 1; } }
+
+/* ---------- rendimiento y tablero del resumen ---------- */
+.perf, .pl { display: grid; gap: 14px; }
+.card-head .perf-seg { display: inline-flex; flex-wrap: nowrap; gap: 2px; margin: 0; grid-template-columns: none; }
+.perf-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.perf-k { display: grid; gap: 2px; padding: 14px; background: var(--bg); border-radius: 12px; }
+.perf-k b { font-size: 26px; }
+.dl { font-size: 12px; font-weight: 700; }
+.dl.up { color: var(--ok); } .dl.down { color: var(--red); }
+.perf-spark { width: 100%; height: 90px; display: block; }
+.perf-line { stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: perf-draw 1.1s cubic-bezier(.2, .8, .2, 1) forwards; }
+@keyframes perf-draw { to { stroke-dashoffset: 0; } }
+.perf-h { font-size: 15px; font-weight: 700; }
+.perf-best { display: grid; gap: 6px; }
+.perf-row { display: grid; grid-template-columns: 22px 40px 1fr auto; gap: 12px; align-items: center; padding: 6px; border-radius: 10px; color: inherit; text-decoration: none; transition: background .15s; }
+.perf-row:hover { background: var(--line-2); }
+.perf-row img, .perf-row video { width: 40px; height: 54px; object-fit: cover; border-radius: 6px; background: #111; }
+.perf-row .rk { font-weight: 800; color: var(--faint); text-align: center; }
+.perf-row .tt, .perf-row .vv { display: grid; min-width: 0; } .perf-row .vv { text-align: right; }
+.perf-row .tt b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.pl-col { background: var(--bg); border-radius: 12px; padding: 10px; display: grid; gap: 8px; align-content: start; min-height: 120px; }
+.pl-h { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; }
+.pl-h b { background: #fff; border-radius: 999px; padding: 0 8px; font-size: 12px; }
+.pl-col.s-aprobar.has .pl-h b { background: var(--blue); color: #fff; }
+.pl-col.s-problema.has .pl-h b { background: var(--red); color: #fff; }
+.pl-card { display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 9px; padding: 6px; color: inherit; text-decoration: none; transition: transform .15s ease, box-shadow .15s ease; }
+.pl-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(18, 19, 22, .1); }
+.pl-card img, .pl-card video, .pl-ph { width: 34px; height: 46px; object-fit: cover; border-radius: 5px; background: #111; display: grid; place-items: center; color: #fff; }
+.pl-card > span:last-child { display: grid; min-width: 0; font-size: 12.5px; }
+.pl-card b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-more { padding: 2px 4px; }
+@media (max-width: 700px) { .perf-kpis { grid-template-columns: 1fr 1fr; } .perf-k b { font-size: 22px; } }
+
+.perf-row .tt .net { width: 16px; height: 16px; display: inline-grid; vertical-align: -3px; }
+.perf-row .tt .net svg { width: 16px; height: 16px; }
+
+/* ---------- lista de publicaciones ---------- */
+.lq-bar { display: flex; gap: 8px; padding: 14px 20px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid var(--line); }
+.lq-bar .input { height: 36px; width: auto; }
+.lq-bar #lq-q { flex: 1; min-width: 200px; }
+.lq-wrap { overflow-x: auto; }
+.lq { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.lq th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 10px 20px; border-bottom: 1px solid var(--line); }
+.lq td { padding: 9px 20px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+.lq td:nth-child(2) { white-space: normal; }
+.lq tr[data-pid] { cursor: pointer; transition: background .12s; }
+.lq tr[data-pid]:hover, .lq tr[data-pid]:focus-visible { background: var(--line-2); }
+.lq .net { width: 18px; height: 18px; display: inline-grid; vertical-align: -4px; }
+.lq .net svg { width: 18px; height: 18px; }
+
+/* ---------- buscador global ---------- */
+dialog.pal { width: min(620px, calc(100vw - 32px)); padding: 0; border: 0; border-radius: 16px; box-shadow: 0 30px 80px rgba(18, 19, 22, .35); margin-top: 12vh; animation: pal-in .16s ease; }
+dialog.pal::backdrop { background: rgba(18, 19, 22, .35); backdrop-filter: blur(2px); }
+@keyframes pal-in { from { opacity: 0; transform: translateY(-8px) scale(.98); } }
+.pal-in { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); color: var(--muted); }
+.pal-in input { flex: 1; border: 0; outline: 0; font-size: 16px; color: var(--ink); background: transparent; }
+kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; color: var(--muted); background: var(--bg); }
+.pal-res { max-height: 52vh; overflow: auto; padding: 6px; }
+.pal-g { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding: 10px 10px 4px; }
+.pal-it { display: grid; padding: 8px 10px; border-radius: 9px; color: inherit; text-decoration: none; }
+.pal-it.on, .pal-it:hover { background: var(--line-2); }
+.side .pal-btn { border: 0; background: transparent; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.side .pal-btn kbd { margin-left: auto; background: transparent; border-color: rgba(255, 255, 255, .2); color: rgba(255, 255, 255, .55); }
+.side .item .pin { margin-left: auto; border: 0; background: transparent; color: rgba(255, 255, 255, .35); width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; opacity: 0; transition: opacity .15s, color .15s; }
+.side .item:hover .pin, .side .item .pin:focus-visible, .side .item.pinned .pin { opacity: 1; }
+.side .item.pinned .pin { color: #ffb48f; }
+.side .item.pinned .pin svg { fill: currentColor; }
+.side .item .count + .pin { margin-left: 4px; }
+@media (hover: none) { .side .item .pin { opacity: 1; } }

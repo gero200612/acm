@@ -745,6 +745,56 @@ app.put('/api/posts/:id', (req, res) => {
   update('posts', p.id, d);
   res.json({ ok: true });
 });
+// Buscador global (⌘K): proyectos, reels y cuentas de todos los proyectos.
+app.get('/api/search', (req, res) => {
+  const q = String(req.query.q || '').trim().slice(0, 80);
+  if (q.length < 2) return res.json({ projects: [], reels: [], accounts: [] });
+  const like = `%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+  res.json({
+    projects: all("SELECT id, name, role, org, color FROM projects WHERE name LIKE ? ESCAPE '\\' OR role LIKE ? ESCAPE '\\' OR org LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT 6", like, like, like),
+    reels: all("SELECT r.id, r.title, r.kind, r.project_id, p.name AS project FROM reels r JOIN projects p ON p.id = r.project_id WHERE r.title LIKE ? ESCAPE '\\' OR r.caption LIKE ? ESCAPE '\\' ORDER BY r.id DESC LIMIT 8", like, like),
+    accounts: all("SELECT a.id, a.network, a.handle, a.connected_as, a.project_id, p.name AS project FROM accounts a JOIN projects p ON p.id = a.project_id WHERE a.handle LIKE ? ESCAPE '\\' OR a.connected_as LIKE ? ESCAPE '\\' ORDER BY a.id DESC LIMIT 6", like, like),
+  });
+});
+// Rendimiento del proyecto en un período (7, 30 o 90 días) y en qué etapa está cada reel (el tablero del Resumen).
+app.get('/api/projects/:id/performance', (req, res) => {
+  const pid = Number(req.params.id);
+  if (!get('SELECT 1 FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe el proyecto' });
+  const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+  const since = localNow(-days * 24 * 60).slice(0, 10), prevSince = localNow(-2 * days * 24 * 60).slice(0, 10);
+  const pub = (from, to) => all(`SELECT p.id, p.reel_id, COALESCE(p.published_at, p.scheduled_at) AS at, p.external_url, a.network, a.handle, a.connected_as, r.title, r.cover, r.file,
+      COALESCE(m.views, m.reach, 0) AS views, COALESCE(m.likes, 0) AS likes, COALESCE(m.comments, 0) AS comments, COALESCE(m.shares, 0) AS shares
+    FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id
+    LEFT JOIN post_metrics m ON m.id = (SELECT max(id) FROM post_metrics WHERE post_id = p.id)
+    WHERE p.project_id = ? AND p.status = 'publicado' AND substr(COALESCE(p.published_at, p.scheduled_at), 1, 10) >= ? AND substr(COALESCE(p.published_at, p.scheduled_at), 1, 10) < ?`, pid, from, to);
+  const cur = pub(since, '9999'), prev = pub(prevSince, since);
+  const tot = (L) => ({ posts: L.length, views: L.reduce((a, x) => a + x.views, 0), likes: L.reduce((a, x) => a + x.likes, 0), interactions: L.reduce((a, x) => a + x.likes + x.comments + x.shares, 0) });
+  const daily = {};
+  for (const x of cur) { const d = x.at.slice(0, 10); daily[d] = (daily[d] || 0) + x.views; }
+  const series = Array.from({ length: days }, (_, i) => { const d = localNow(-(days - 1 - i) * 24 * 60).slice(0, 10); return { day: d, views: daily[d] || 0 }; });
+  const best = [...cur].sort((a, b) => b.views - a.views).slice(0, 5).map((x) => ({
+    id: x.id, reel_id: x.reel_id, title: x.title, network: x.network, who: x.connected_as || (x.handle ? '@' + x.handle : ''), at: x.at, views: x.views, likes: x.likes,
+    eng: x.views ? Math.round(((x.likes + x.comments + x.shares) / x.views) * 1000) / 10 : null, cover: x.cover, file: x.file, url: /^https?:\/\//i.test(x.external_url || '') ? x.external_url : '',
+  }));
+  // etapas de los reels
+  const reels = all(`SELECT r.id, r.title, r.kind, r.status, r.status_detail, r.review, r.clip_id, r.cover, r.file, r.archived_at, r.created_at,
+      sum(p.status = 'programado') prog, sum(p.status IN ('publicado', 'publicando')) pub, sum(p.status = 'fallido') fail
+    FROM reels r LEFT JOIN posts p ON p.reel_id = r.id WHERE r.project_id = ? GROUP BY r.id ORDER BY r.id DESC`, pid);
+  const EDITING = ['en_cola', 'transcribiendo', 'buscando_momentos', 'editando', 'revisando'];
+  const stage = (r) => {
+    if (r.kind === 'crudo') return EDITING.includes(r.status) ? 'editor' : ['error', 'sin_momentos'].includes(r.status) ? 'problema' : null;
+    if (r.archived_at) return null;
+    if (r.fail) return 'problema';
+    if (r.clip_id && r.review === 'pendiente') return 'aprobar';
+    if (r.clip_id && r.review === 'rechazado') return null;
+    if (r.prog) return 'programado';
+    if (r.pub) return 'publicado';
+    return 'listo';
+  };
+  const pipeline = { editor: [], aprobar: [], listo: [], programado: [], publicado: [], problema: [] };
+  for (const r of reels) { const st = stage(r); if (st) pipeline[st].push({ id: r.id, title: r.title, kind: r.kind, detail: r.status_detail || (r.kind === 'crudo' ? r.status : ''), cover: r.cover, file: r.kind === 'listo' ? r.file : '', prog: r.prog || 0, pub: r.pub || 0 }); }
+  res.json({ days, totals: tot(cur), previous: tot(prev), series, best, pipeline });
+});
 // Lo que mejor les funcionó a las cuentas investigadas: publicaciones con 2× o más las interacciones normales de su cuenta.
 app.get('/api/projects/:id/knowledge/outliers', (req, res) => res.json(outliers(Number(req.params.id), { handle: String(req.query.handle || ''), limit: Number(req.query.limit) || 12 })));
 // Mejores franjas para publicar en cada red, según las vistas de lo ya publicado del proyecto (la última medición de cada publicación).

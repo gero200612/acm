@@ -29,6 +29,8 @@ const ICON = {
   play: 'M7 5v14l11-7Z',
   left: 'm15 6-6 6 6 6',
   right: 'm9 6 6 6-6 6',
+  star: 'm12 3 2.7 5.6 6.2.9-4.5 4.4 1.1 6.1L12 17l-5.5 3 1.1-6.1L3.1 9.5l6.2-.9z',
+  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5',
   link: 'M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1',
   move: 'M12 3v18M3 12h18M12 3l-3 3m3-3 3 3M12 21l-3-3m3 3 3-3M3 12l3-3m-3 3 3 3M21 12l-3-3m3 3-3 3',
   file: 'M7 3h7l5 5v13H7zM14 3v5h5',
@@ -103,7 +105,7 @@ async function render() {
   try {
     await loadProjects();
     if (state.storage == null) state.storage = await api('/api/storage').catch(() => ({ r2: false }));
-    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario') state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
+    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario') state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if ((r.tab || 'resumen') === 'resumen' && !r.sub) state.perf = await api(`/api/projects/${r.id}/performance?days=${state.perfDays || 30}`).catch(() => null); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
     else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
@@ -125,8 +127,9 @@ function sideNav(r) {
   <nav aria-label="Principal">
     <a class="item ${r.view === 'home' ? 'active' : ''}" href="#">${icon('home', 20)}<span class="t">Inicio</span></a>
     <a class="item ${r.view === 'lab' ? 'active' : ''}" href="#/lab">${icon('flask', 20)}<span class="t">Laboratorio</span></a>
+    <button class="item pal-btn" data-act="palette">${icon('search', 20)}<span class="t">Buscar</span><kbd>⌘K</kbd></button>
     <div class="nav-label">Proyectos</div>
-    ${state.projects.map((p) => `<a class="item ${r.id === p.id ? 'active' : ''}" href="#/p/${p.id}">${avatar(p, 'sm')}<span class="t">${esc(p.name)}</span>${p.review_pending ? `<span class="count" title="Recortes para aprobar">${p.review_pending}</span>` : ''}</a>`).join('')}
+    ${pinnedFirst(state.projects).map((p) => `<a class="item ${r.id === p.id ? 'active' : ''} ${isPinned(p.id) ? 'pinned' : ''}" href="#/p/${p.id}">${avatar(p, 'sm')}<span class="t">${esc(p.name)}</span>${p.review_pending ? `<span class="count" title="Recortes para aprobar">${p.review_pending}</span>` : ''}<button class="pin" data-act="pin" data-pin="${p.id}" title="${isPinned(p.id) ? 'Desfijar' : 'Fijar arriba'}" aria-label="${isPinned(p.id) ? 'Desfijar' : 'Fijar arriba'}" aria-pressed="${isPinned(p.id)}">${icon('star', 14)}</button></a>`).join('')}
     <button class="item add" data-act="new-project">${icon('plus', 20)}<span class="t">Nuevo proyecto</span></button>
   </nav>
   <div class="side-foot"><span class="live"><i></i>En línea</span><button data-act="logout">Salir</button></div>`;
@@ -381,6 +384,40 @@ const pautaVerdict = (f) => f < 3 ? ['poco', 'Poco', 'Con menos de 3 vistas por 
   : f < 8 ? ['justo', 'Justo', 'Alcanza para que la vean, pero queda corto para que se instale el mensaje.']
   : ['bien', 'Bien', 'Cada persona la ve las veces suficientes para recordarla sin cansarse.'];
 
+// Rendimiento: vistas, me gusta e interacciones del período contra el anterior, la curva por día y lo que mejor anduvo.
+function perfCard(p) {
+  const P = state.perf;
+  if (!P) return '';
+  const delta = (a, b) => { if (!b) return a ? '<span class="dl up">nuevo</span>' : ''; const d = Math.round(((a - b) / b) * 100); return `<span class="dl ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '▲' : '▼'} ${Math.abs(d)} %</span>`; };
+  const k = [['Vistas', P.totals.views, P.previous.views], ['Interacciones', P.totals.interactions, P.previous.interactions], ['Publicaciones', P.totals.posts, P.previous.posts]];
+  const S = P.series, max = Math.max(1, ...S.map((x) => x.views)), W = 600, H = 90;
+  const pts = S.map((x, i) => [(i / Math.max(1, S.length - 1)) * W, H - (x.views / max) * (H - 8) - 4]);
+  const line = pts.map((q, i) => `${i ? 'L' : 'M'}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(' ');
+  return `<section class="card perf">
+    <div class="card-head"><h2 class="h2">Rendimiento</h2><div class="seg perf-seg" role="group" aria-label="Período">${[7, 30, 90].map((d) => `<button aria-pressed="${P.days === d}" data-act="perf-days" data-k="${d}">${d} días</button>`).join('')}</div></div>
+    <div class="perf-kpis">${k.map(([l, v, pv]) => `<div class="perf-k"><span class="small muted">${l}</span><b class="num" data-count="${v}">${fmt(v)}</b>${delta(v, pv)}</div>`).join('')}</div>
+    ${P.totals.views ? `<svg class="perf-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Vistas por día"><defs><linearGradient id="pg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--blue)" stop-opacity=".28"/><stop offset="1" stop-color="var(--blue)" stop-opacity="0"/></linearGradient></defs>
+      <path d="${line} L${W},${H} L0,${H} Z" fill="url(#pg)"/><path class="perf-line" d="${line}" fill="none" stroke="var(--blue)" stroke-width="2.2" vector-effect="non-scaling-stroke"/></svg>` : `<p class="small muted">Todavía no hay vistas medidas en estos ${P.days} días.</p>`}
+    ${P.best.length ? `<h3 class="h3 perf-h">Lo que mejor anduvo</h3><div class="perf-best">${P.best.map((x, i) => `<a class="perf-row" href="#/p/${p.id}/reel/${x.reel_id}"><span class="rk">${i + 1}</span>
+      ${x.cover ? `<img src="/media/${esc(x.cover)}" alt="" loading="lazy">` : `<video src="/media/${esc(x.file)}#t=0.8" preload="metadata" muted playsinline></video>`}
+      <span class="tt"><b>${esc(x.title)}</b><span class="small muted">${netBadge(x.network)} ${esc(x.who)} · ${fmtDay(x.at)}</span></span>
+      <span class="vv"><b class="num">${fmt(x.views)}</b><span class="small muted">vistas${x.eng ? ` · ${fmt(x.eng, 1)} % interacción` : ''}</span></span></a>`).join('')}</div>` : ''}
+  </section>`;
+}
+// En qué etapa está cada reel: del crudo en el editor hasta publicado (como el tablero de Sequence, pero las etapas las marca ACM solo).
+const STAGES = [['editor', 'En el editor'], ['aprobar', 'Para aprobar'], ['listo', 'Listo, sin programar'], ['programado', 'Programado'], ['publicado', 'Publicado'], ['problema', 'Con problemas']];
+function pipelineCard(p) {
+  const B = state.perf?.pipeline;
+  if (!B) return '';
+  const card = (r, st) => `<a class="pl-card" href="#/p/${p.id}/${st === 'aprobar' ? 'aprobar' : 'reel/' + r.id}">
+    ${r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : r.file ? `<video src="/media/${esc(r.file)}#t=0.8" preload="metadata" muted playsinline></video>` : `<span class="pl-ph">${icon('up', 18)}</span>`}
+    <span><b>${esc(r.title)}</b><span class="small muted">${st === 'programado' ? `${r.prog} programadas` : st === 'publicado' ? `${r.pub} publicadas` : esc(r.detail || '')}</span></span></a>`;
+  return `<section class="card pl">
+    <div class="card-head"><h2 class="h2">Tablero</h2><span class="small muted">En qué etapa está cada reel</span></div>
+    <div class="pl-cols">${STAGES.map(([k, l]) => `<div class="pl-col s-${k} ${B[k].length ? 'has' : ''}"><div class="pl-h"><span>${l}</span><b>${B[k].length}</b></div>
+      ${B[k].slice(0, 5).map((r) => card(r, k)).join('')}${B[k].length > 5 ? `<span class="small muted pl-more">y ${B[k].length - 5} más</span>` : ''}${B[k].length ? '' : '<span class="small muted pl-more">—</span>'}</div>`).join('')}</div>
+  </section>`;
+}
 function resumenView() {
   const p = state.project, A = state.accounts, S = state.posts;
   const c = pautaCalc(p, p.pauta);
@@ -409,6 +446,8 @@ function resumenView() {
     <a class="rs-stat" href="#/p/${p.id}/pauta"><span class="lbl">Pauta</span><b>${c.budget ? usd(c.budget) : '—'}</b><span class="sub">${c.budget ? `cada socio la ve ${fmt(c.freq, c.freq < 10 ? 1 : 0)} veces <span class="chip v-${v[0]}">${v[1]}</span>` : 'cargá la inversión'}</span></a>
   </div>
 
+  ${perfCard(p)}
+  ${pipelineCard(p)}
   <section class="card">
     <div class="card-head"><h2 class="h2">Próximos 7 días</h2><a class="btn sm" href="#/p/${p.id}/calendario">Abrir calendario</a></div>
     <div class="rs-week">${week.map((d) => { const L = dayPosts(d); const isE = p.election_date && sameDay(d, new Date(p.election_date + 'T00:00')); return `
@@ -500,9 +539,14 @@ function reelsView() {
 const LOCK_MS = 15 * 60 * 1000;
 const movable = (x) => (x.status === 'programado' || x.status === 'fallido') && pdate(x.scheduled_at) - Date.now() > LOCK_MS;
 const viewKey = () => location.hash.split('?')[0] + '|' + (state.calMode || '');
-const calModes = () => `<div class="seg" role="group" aria-label="Vista">${[['mes', 'Mes'], ['semana', 'Semana'], ['grilla', 'Grilla']].map(([k, l]) => `<button aria-pressed="${state.calMode === k}" data-act="cal-mode" data-k="${k}">${l}</button>`).join('')}</div>`;
+// Proyectos fijados arriba (preferencia de quien usa este navegador).
+const pins = () => { try { return JSON.parse(localStorage.getItem('acm.pins') || '[]'); } catch { return []; } };
+const isPinned = (id) => pins().includes(id);
+const pinnedFirst = (L) => { const P = pins(); return [...L].sort((a, b) => (P.includes(b.id) - P.includes(a.id)) || (P.indexOf(a.id) - P.indexOf(b.id))); };
+const calModes = () => `<div class="seg" role="group" aria-label="Vista">${[['mes', 'Mes'], ['semana', 'Semana'], ['lista', 'Lista'], ['grilla', 'Grilla']].map(([k, l]) => `<button aria-pressed="${state.calMode === k}" data-act="cal-mode" data-k="${k}">${l}</button>`).join('')}</div>`;
 function calendarioView() {
   if (state.calMode === 'grilla') return grillaView();
+  if (state.calMode === 'lista') return listaView();
   const p = state.project, S = state.posts;
   const week = state.calMode === 'semana';
   const m = state.calMonth || (state.calMonth = (() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; })());
@@ -565,6 +609,42 @@ function bestTimesCard() {
         : `<p class="small muted">${x.missing === 1 ? 'Falta 1 publicación medida' : `Faltan ${x.missing || 'más'} publicaciones medidas`} para decir algo con seguridad.</p>`}
     </div>`).join('')}</div>
   </section>`;
+}
+
+// ---------- lista: todas las publicaciones en una tabla, con búsqueda, filtros y orden ----------
+const LQ = { q: '', st: '', net: '', asc: true };
+function listaView() {
+  const nets = [...new Set(state.posts.map((x) => x.network))];
+  return `<section class="card cal">
+    <div class="cal-head"><h2 class="h2">Lista</h2><span class="small muted" id="lq-n"></span><span class="spacer"></span>${calModes()}</div>
+    <div class="lq-bar">
+      <input class="input" id="lq-q" type="search" placeholder="Buscar por reel o cuenta" value="${esc(LQ.q)}" aria-label="Buscar">
+      <select class="input" id="lq-st" aria-label="Estado"><option value="">Todos los estados</option>${Object.entries(POST_ST).map(([k, l]) => `<option value="${k}" ${LQ.st === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select class="input" id="lq-net" aria-label="Red"><option value="">Todas las redes</option>${nets.map((n) => `<option value="${n}" ${LQ.net === n ? 'selected' : ''}>${NETS[n].name}</option>`).join('')}</select>
+      <button class="btn sm" id="lq-sort">${LQ.asc ? 'Más viejas primero' : 'Más nuevas primero'}</button>
+    </div>
+    <div class="lq-wrap"><table class="lq"><thead><tr><th>Cuándo</th><th>Reel</th><th>Cuenta</th><th>Estado</th></tr></thead><tbody id="lq-body"></tbody></table></div>
+  </section>`;
+}
+function drawLista() {
+  const body = $('#lq-body'); if (!body) return;
+  const q = LQ.q.trim().toLowerCase();
+  const L = state.posts.filter((x) => (!LQ.st || x.status === LQ.st) && (!LQ.net || x.network === LQ.net)
+    && (!q || `${x.reel_title} ${x.handle || ''} ${x.connected_as || ''}`.toLowerCase().includes(q)))
+    .sort((a, b) => (LQ.asc ? 1 : -1) * a.scheduled_at.localeCompare(b.scheduled_at));
+  $('#lq-n').textContent = `${L.length} de ${state.posts.length}`;
+  body.innerHTML = L.slice(0, 400).map((x) => `<tr data-act="open-post" data-pid="${x.id}" tabindex="0"><td><b>${fmtDay(x.scheduled_at)}</b> ${fmtTime(x.scheduled_at)}</td><td>${esc(x.reel_title)}</td>
+    <td>${netBadge(x.network)} ${esc(x.connected_as || (x.handle ? '@' + x.handle : NETS[x.network].name))}</td><td><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span></td></tr>`).join('')
+    || '<tr><td colspan="4" class="muted">Nada con esos filtros.</td></tr>';
+}
+function wireLista() {
+  if (!$('#lq-body')) return;
+  drawLista();
+  $('#lq-q').addEventListener('input', (e) => { LQ.q = e.target.value; drawLista(); });
+  $('#lq-st').addEventListener('change', (e) => { LQ.st = e.target.value; drawLista(); });
+  $('#lq-net').addEventListener('change', (e) => { LQ.net = e.target.value; drawLista(); });
+  $('#lq-sort').addEventListener('click', (e) => { LQ.asc = !LQ.asc; e.target.textContent = LQ.asc ? 'Más viejas primero' : 'Más nuevas primero'; drawLista(); });
+  $('#lq-body').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset.pid) postDialog([Number(e.target.dataset.pid)]); });
 }
 
 // ---------- grilla: cómo se ve el perfil de cada cuenta ----------
@@ -1299,6 +1379,44 @@ function moveDayDialog(day) {
     } catch (err) { e.target.disabled = false; fail(err); }
   };
 }
+// ---------- buscador global (⌘K / Ctrl+K) ----------
+function paletteOpen() {
+  if ($('dialog.pal')) return;
+  const d = document.createElement('dialog'); d.className = 'pal';
+  d.innerHTML = `<div class="pal-in">${icon('search', 18)}<input id="pal-q" placeholder="Buscar proyectos, reels o cuentas… o ir a una pestaña" autocomplete="off" aria-label="Buscar"><kbd>Esc</kbd></div><div class="pal-res" id="pal-res" role="listbox"></div>`;
+  document.body.append(d); d.addEventListener('close', () => d.remove());
+  d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
+  d.showModal();
+  const input = d.querySelector('#pal-q'), box = d.querySelector('#pal-res');
+  let items = [], sel = 0, seq = 0;
+  const p = state.project && location.hash.startsWith(`#/p/${state.project.id}`) ? state.project : null;
+  const goTo = p ? TABS.map(([k, l]) => ({ g: `Ir a · ${p.name}`, t: l, href: `#/p/${p.id}/${k}` })) : [];
+  const draw = () => {
+    box.innerHTML = items.length ? items.map((it, i) => `${i === 0 || items[i - 1].g !== it.g ? `<p class="pal-g">${esc(it.g)}</p>` : ''}<a class="pal-it ${i === sel ? 'on' : ''}" href="${esc(it.href)}" role="option" data-i="${i}"><b>${esc(it.t)}</b>${it.s ? `<span class="small muted">${esc(it.s)}</span>` : ''}</a>`).join('') : `<p class="small muted pal-g">${input.value.trim().length < 2 ? 'Escribí al menos 2 letras' : 'Nada encontrado'}</p>`;
+    box.querySelector('.pal-it.on')?.scrollIntoView({ block: 'nearest' });
+  };
+  const search = async () => {
+    const q = input.value.trim(), my = ++seq;
+    const local = goTo.filter((it) => !q || it.t.toLowerCase().includes(q.toLowerCase()));
+    if (q.length < 2) { items = local; sel = 0; draw(); return; }
+    let r; try { r = await api(`/api/search?q=${encodeURIComponent(q)}`); } catch { r = { projects: [], reels: [], accounts: [] }; }
+    if (my !== seq) return;
+    items = [...local,
+      ...r.projects.map((x) => ({ g: 'Proyectos', t: x.name, s: [x.role, x.org].filter(Boolean).join(' · '), href: `#/p/${x.id}` })),
+      ...r.reels.map((x) => ({ g: 'Reels', t: x.title, s: `${x.project}${x.kind === 'crudo' ? ' · crudo' : ''}`, href: `#/p/${x.project_id}/reel/${x.id}` })),
+      ...r.accounts.map((x) => ({ g: 'Cuentas', t: x.connected_as || '@' + x.handle, s: `${NETS[x.network]?.name || x.network} · ${x.project}`, href: `#/p/${x.project_id}/cuentas` }))];
+    sel = 0; draw();
+  };
+  input.addEventListener('input', search);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(items.length - 1, sel + 1); draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); draw(); }
+    else if (e.key === 'Enter' && items[sel]) { e.preventDefault(); location.hash = items[sel].href.slice(1); d.close(); }
+  });
+  box.addEventListener('click', () => setTimeout(() => d.close(), 0));
+  search(); input.focus();
+}
+document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.authed) { e.preventDefault(); paletteOpen(); } });
 function confirmBox(title, text, okLabel = 'Borrar') {
   return new Promise((res) => {
     const d = openDialog(title, `<p class="muted">${text}</p>`, `<button class="btn" data-close>Cancelar</button><button class="btn danger" data-ok>${okLabel}</button>`);
@@ -1565,8 +1683,10 @@ function afterRender(r) {
   const ct = $('#cg-total');
   if (ct) { ct.addEventListener('change', () => { (async () => { try { state.project.pauta = await api(`/api/projects/${state.project.id}/pauta`, { method: 'PUT', body: { ...(state.project.pauta || {}), budget: Number(ct.value) || 0 } }); render(); } catch (e) { fail(e); } })(); }); }
   state.lastView = viewKey();
+  document.querySelectorAll('.perf [data-count]').forEach((el) => { const end = Number(el.dataset.count) || 0, t0 = performance.now(); if (matchMedia('(prefers-reduced-motion: reduce)').matches || !end) return; const st = (t) => { const k = Math.min(1, (t - t0) / 800), e = 1 - Math.pow(1 - k, 3); el.textContent = fmt(Math.round(end * e)); if (k < 1) requestAnimationFrame(st); }; requestAnimationFrame(st); });
   $('main.page.enter')?.querySelectorAll(':scope > *, :scope > * > .card, :scope > * > section').forEach((el, i) => el.style.setProperty('--i', Math.min(i, 8)));
   wireCalDrag();
+  wireLista();
   wireGridDrag();
   const drop = $('#drop');
   if (drop) {
@@ -1645,6 +1765,9 @@ document.addEventListener('click', async (e) => {
       case 'share-open': shareDialog(); break;
       case 'ics-open': icsDialog(); break;
       case 'grid-acc': state.gridAccount = id; render(); break;
+      case 'pin': { e.preventDefault(); const pid = Number(el.dataset.pin); const P = pins(); const next = P.includes(pid) ? P.filter((x) => x !== pid) : [...P, pid]; try { localStorage.setItem('acm.pins', JSON.stringify(next)); } catch {} render(); break; }
+      case 'palette': paletteOpen(); break;
+      case 'perf-days': state.perfDays = Number(el.dataset.k); render(); break;
       case 'move-day': moveDayDialog(el.dataset.day); break;
       case 'camp-new': campDialog(); break;
       case 'up-kind': state.upKind = el.dataset.k; render(); break;
