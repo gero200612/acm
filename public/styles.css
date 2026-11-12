@@ -885,3 +885,16 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 main.page.enter > *, main.page.enter > * > .card, main.page.enter > * > section { animation: acm-up .38s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 45ms); }
 @keyframes acm-up { from { opacity: 0; transform: translateY(14px); } }
 @media (prefers-reduced-motion: reduce) { main.page.enter > *, main.page.enter > * > .card, main.page.enter > * > section { animation: none; } }
+
+/* ---------- mejores horarios ---------- */
+.card.best { margin-top: 16px; }
+.best-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; margin-top: 12px; }
+.best-net { display: grid; gap: 6px; align-content: start; }
+.best-row { display: grid; grid-template-columns: 62px 1fr 44px; align-items: center; gap: 8px; font-size: 13px; }
+.best-row .t { font-weight: 600; font-variant-numeric: tabular-nums; }
+.best-row .bar { height: 8px; background: var(--line-2); border-radius: 999px; overflow: hidden; }
+.best-row .bar i { display: block; height: 100%; background: #c9c6bf; border-radius: inherit; transform-origin: left; animation: best-grow .6s cubic-bezier(.2, .8, .2, 1) both; }
+.best-row.top .bar i { background: var(--blue); }
+.best-row.top .t, .best-row.top .l { color: var(--blue); font-weight: 700; }
+.best-row .l { text-align: right; font-variant-numeric: tabular-nums; }
+@keyframes best-grow { from { transform: scaleX(0); } }

@@ -19,7 +19,7 @@ import { initTrace, traced, mask } from './trace.js';
 import { runBanco } from './banco.js';
 import { probe, review } from './mp4probe.js';
 import { r2Ready, putUrl, getUrl, head as r2Head, remove as r2Remove, download as r2Download, MAX_UPLOAD } from './storage.js';
-import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, withinWindow, NETWORK_CAPS, reviewMode } from './rules.js';
+import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, withinWindow, NETWORK_CAPS, reviewMode, bestSlots } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri, PUBLIC_URL } from './oauth.js';
 import { initAlerts, addAlert } from './alerts.js';
@@ -744,6 +744,13 @@ app.put('/api/posts/:id', (req, res) => {
   }
   update('posts', p.id, d);
   res.json({ ok: true });
+});
+// Mejores franjas para publicar en cada red, según las vistas de lo ya publicado del proyecto (la última medición de cada publicación).
+app.get('/api/projects/:id/best-times', (req, res) => {
+  const rows = all(`SELECT a.network, p.scheduled_at, COALESCE(m.views, m.reach) AS views FROM posts p JOIN accounts a ON a.id = p.account_id
+    JOIN post_metrics m ON m.id = (SELECT max(id) FROM post_metrics WHERE post_id = p.id)
+    WHERE p.project_id = ? AND p.status = 'publicado'`, req.params.id);
+  res.json(bestSlots(rows));
 });
 // Intercambiar el horario de dos publicaciones (la grilla de una cuenta: las horas quedan, cambian los reels).
 app.post('/api/posts/swap', (req, res) => {

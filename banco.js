@@ -10,7 +10,7 @@ import { publish } from './publisher.js';
 import { uploadAudience, createCampaign, testAds } from './ads.js';
 import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
-import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS } from './rules.js';
+import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS, bestSlots, BEST_MIN_NET } from './rules.js';
 import { embed } from './knowledge.js';
 import { DatabaseSync } from 'node:sqlite';
 import { planDay, planProject, initPlanner, expiredBlocked, localExpiry } from './planner.js';
@@ -371,6 +371,15 @@ function cases(video, sim) {
     ['Circuito', 'Regla: solo de 08:00 a 23:00 hora local', async () => {
       const at = (hm) => scheduleBlocked({ reel_id: 1, account_id: 1, network: 'tiktok', scheduled_at: `2026-12-01 ${hm}`, clip_id: 'c', review: 'aprobado' }, { siblings: [], dayCount: 0, networkCap: 15 });
       yes(at('07:59'), '07:59'); yes(at('23:01'), '23:01'); eq(at('08:00'), null, '08:00'); eq(at('23:00'), null, '23:00');
+    }],
+    ['Reglas', 'Mejores horarios: franja que rinde más arriba, con pocas medidas no se inventa nada y fuera de horario no cuenta', async () => {
+      const rows = [];
+      for (let i = 0; i < 30; i++) { const h = [9, 12, 15, 18, 21][i % 5]; rows.push({ network: 'instagram', scheduled_at: `2026-11-0${1 + (i % 9)} ${String(h).padStart(2, '0')}:10`, views: h === 18 ? 3000 : 1000 }); }
+      rows.push({ network: 'instagram', scheduled_at: '2026-11-01 03:00', views: 999999 });
+      for (let i = 0; i < BEST_MIN_NET - 1; i++) rows.push({ network: 'tiktok', scheduled_at: '2026-11-01 18:00', views: 100 });
+      const b = bestSlots(rows);
+      eq([b.instagram.measured, b.instagram.slots[0].from, b.instagram.slots[0].lift], [30, '17:00', 3], 'la franja de las 18 rinde ×3');
+      eq([b.tiktok.missing, b.tiktok.slots.length], [1, 0], 'con 9 medidas en TikTok no dice nada');
     }],
     ['Circuito', 'withinWindow: la hora real también respeta 08:00-23:00', async () => {
       eq(['07:59', '08:00', '23:00', '23:01'].map(withinWindow), [false, true, true, false], 'ventana');

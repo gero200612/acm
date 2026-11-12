@@ -62,3 +62,31 @@ export function reviewMode(current, decisiones = []) {
   const last = decisiones.slice(0, REVIEW_WINDOW);
   return last.length >= REVIEW_WINDOW && last.filter((d) => d === 'aprobar').length >= REVIEW_MIN_OK ? 'auto' : 'manual';
 }
+
+// Mejores franjas para publicar, según lo ya publicado. `rows`: [{ network, scheduled_at 'YYYY-MM-DD HH:MM', views }] (la última medición
+// de cada publicación). Franjas de 3 horas dentro del horario permitido. Para cada red: la mediana de vistas de cada franja contra la
+// mediana de la red (×1,4 = rinde 40 % más que lo normal). Con menos de MIN_NET publicaciones medidas en la red no se dice nada, y una
+// franja necesita al menos MIN_SLOT para contar: sin datos suficientes no se inventa un «mejor horario».
+export const BEST_MIN_NET = 10, BEST_MIN_SLOT = 3;
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : 0; };
+export function bestSlots(rows) {
+  const start = Number(WINDOW[0].slice(0, 2)), end = Number(WINDOW[1].slice(0, 2));
+  const slots = []; for (let h = start; h < end; h += 3) slots.push([h, Math.min(h + 3, end)]);
+  const byNet = new Map();
+  for (const r of rows) {
+    if (!Number.isFinite(r.views) || r.views < 0 || !withinWindow(r.scheduled_at)) continue;
+    if (!byNet.has(r.network)) byNet.set(r.network, []);
+    byNet.get(r.network).push(r);
+  }
+  const out = {};
+  for (const [net, L] of byNet) {
+    const base = median(L.map((r) => r.views));
+    if (L.length < BEST_MIN_NET || base <= 0) { out[net] = { measured: L.length, missing: Math.max(0, BEST_MIN_NET - L.length), slots: [] }; continue; }
+    const res = slots.map(([a, b]) => {
+      const inSlot = L.filter((r) => { const h = Number(r.scheduled_at.slice(11, 13)); return h >= a && h < b; });
+      return { from: `${String(a).padStart(2, '0')}:00`, to: `${String(b).padStart(2, '0')}:00`, posts: inSlot.length, median: median(inSlot.map((r) => r.views)), lift: inSlot.length ? Math.round((median(inSlot.map((r) => r.views)) / base) * 100) / 100 : null };
+    });
+    out[net] = { measured: L.length, missing: 0, base, slots: res.filter((s) => s.posts >= BEST_MIN_SLOT).sort((x, y) => y.lift - x.lift) };
+  }
+  return out;
+}

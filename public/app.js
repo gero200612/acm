@@ -103,7 +103,7 @@ async function render() {
   try {
     await loadProjects();
     if (state.storage == null) state.storage = await api('/api/storage').catch(() => ({ r2: false }));
-    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
+    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario') state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
     else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
@@ -548,6 +548,22 @@ function calendarioView() {
         </div>`; }).join('')}
     </div>
     <div class="cal-legend small muted"><span><i class="lgd prog"></i>Programado</span><span><i class="lgd pub"></i>Publicado</span><span><i class="lgd fail"></i>Falló</span><span><i class="lgd publ"></i>Publicándose</span>${lim ? '<span><i class="lgd veda"></i>Sin propaganda</span>' : ''}</div>
+  </section>${bestTimesCard()}`;
+}
+// Mejores franjas según las vistas de lo ya publicado (no se inventa: con pocos datos dice cuántas faltan).
+function bestTimesCard() {
+  const B = state.best;
+  if (!B || !Object.keys(B).length) return '';
+  const nets = Object.entries(B).sort((a, b) => b[1].measured - a[1].measured);
+  const fmtLift = (x) => '×' + x.toLocaleString('es-AR', { maximumFractionDigits: 1 });
+  return `<section class="card best">
+    <div class="card-head"><h2 class="h2">Mejores horarios</h2><span class="small muted">Según las vistas de lo que ya se publicó en este proyecto</span></div>
+    <div class="best-grid">${nets.map(([n, x]) => `<div class="best-net">
+      <div class="row">${netBadge(n)}<b>${NETS[n]?.name || n}</b><span class="small muted">${x.measured} medidas</span></div>
+      ${x.slots.length ? x.slots.slice(0, 5).map((sl, i) => `<div class="best-row ${i === 0 && sl.lift > 1.05 ? 'top' : ''}"><span class="t">${sl.from.slice(0, 2)}–${sl.to.slice(0, 2)} h</span>
+        <span class="bar"><i style="width:${Math.min(100, Math.round((sl.lift / Math.max(...x.slots.map((y) => y.lift))) * 100))}%"></i></span><span class="l">${fmtLift(sl.lift)}</span></div>`).join('')
+        : `<p class="small muted">${x.missing === 1 ? 'Falta 1 publicación medida' : `Faltan ${x.missing || 'más'} publicaciones medidas`} para decir algo con seguridad.</p>`}
+    </div>`).join('')}</div>
   </section>`;
 }
 
