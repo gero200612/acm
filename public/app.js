@@ -601,7 +601,7 @@ function bestTimesCard() {
   const nets = Object.entries(B).sort((a, b) => b[1].measured - a[1].measured);
   const fmtLift = (x) => '×' + x.toLocaleString('es-AR', { maximumFractionDigits: 1 });
   return `<section class="card best">
-    <div class="card-head"><h2 class="h2">Mejores horarios</h2><span class="small muted">Según las vistas de lo que ya se publicó en este proyecto</span></div>
+    <div class="card-head"><h2 class="h2">Mejores horarios</h2><span class="small muted">Según las vistas de lo publicado. El planificador las usa en cada red donde todavía no aprendió un horario.</span></div>
     <div class="best-grid">${nets.map(([n, x]) => `<div class="best-net">
       <div class="row">${netBadge(n)}<b>${NETS[n]?.name || n}</b><span class="small muted">${x.measured} medidas</span></div>
       ${x.slots.length ? x.slots.slice(0, 5).map((sl, i) => `<div class="best-row ${i === 0 && sl.lift > 1.05 ? 'top' : ''}"><span class="t">${sl.from.slice(0, 2)}–${sl.to.slice(0, 2)} h</span>

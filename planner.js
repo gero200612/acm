@@ -1,6 +1,6 @@
 // Planificador del día del agente de marketing: reparte el banco de ediciones aprobadas entre las cuentas conectadas.
 // planDay es puro (se prueba en el banco); planProject lo conecta con la base. Las reglas duras viven en rules.js (scheduleBlocked).
-import { scheduleBlocked, NETWORK_CAPS, youtubeShare, WINDOW } from './rules.js';
+import { scheduleBlocked, NETWORK_CAPS, youtubeShare, WINDOW, bestSlots } from './rules.js';
 import { addAlert } from './alerts.js';
 import { winningVariables } from './memory.js';
 
@@ -137,7 +137,7 @@ export function initPlanner(db) {
 }
 
 // lo que dicen los aprendizajes del proyecto: mejor horario por red y puntaje (0..1) por valor de cada variable
-function learningsOf(db, projectId) {
+export function learningsOf(db, projectId) {
   const rows = db.prepare('SELECT variable, value, network, wins, trials FROM learnings WHERE project_id = ?').all(projectId);
   const valores = {};
   for (const r of rows) {
@@ -145,7 +145,26 @@ function learningsOf(db, projectId) {
     const v = (valores[r.variable] ||= {}); const t = (v[r.value] ||= { w: 0, n: 0 }); t.w += r.wins; t.n += r.trials;
   }
   for (const k of Object.keys(valores)) for (const x of Object.keys(valores[k])) valores[k][x] = (valores[k][x].w + 1) / (valores[k][x].n + 2); // suavizado: sin datos vale 0,5
-  return { horario: winningVariables(db, projectId).horario || {}, valores };
+  const horario = { ...(winningVariables(db, projectId).horario || {}) };
+  // sin un horario aprendido por la memoria, la franja que más vistas da según lo ya publicado (si rinde al menos 15 % sobre lo normal)
+  for (const [net, x] of Object.entries(bestSlotsOf(db, projectId))) {
+    const top = x.slots?.[0];
+    if (!horario[net] && top && top.lift >= BEST_MIN_LIFT) {
+      const mid = Math.round((hmMin(top.from) + hmMin(top.to)) / 2 / GRID) * GRID;
+      horario[net] = `${String(Math.floor(mid / 60)).padStart(2, '0')}:${String(mid % 60).padStart(2, '0')}`;
+    }
+  }
+  return { horario, valores };
+}
+export const BEST_MIN_LIFT = 1.15;
+// las vistas de lo ya publicado del proyecto (última medición de cada publicación), por franja y red
+export function bestSlotsOf(db, projectId) {
+  // sin la tabla de métricas (bases de prueba viejas) no hay de dónde sacar horarios
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_metrics'").get()) return {};
+  const rows = db.prepare(`SELECT a.network, p.scheduled_at, COALESCE(m.views, m.reach) AS views FROM posts p JOIN accounts a ON a.id = p.account_id
+    JOIN post_metrics m ON m.id = (SELECT max(id) FROM post_metrics WHERE post_id = p.id)
+    WHERE p.project_id = ? AND p.status = 'publicado'`).all(projectId);
+  return bestSlots(rows);
 }
 
 // Reparte el día de un proyecto y guarda las publicaciones. now = 'YYYY-MM-DD HH:MM' local. Devuelve lo programado.

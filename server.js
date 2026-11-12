@@ -24,7 +24,7 @@ import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri, PUBLIC_URL } from './oauth.js';
 import { initAlerts, addAlert } from './alerts.js';
 import { flushAlerts, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR } from './notify.js';
-import { initPlanner, planProject, expiredBlocked, localExpiry } from './planner.js';
+import { initPlanner, planProject, expiredBlocked, localExpiry, bestSlotsOf } from './planner.js';
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initMarketing, marketingCycle, projectsToCycle } from './marketing.js';
 import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars } from './memory.js';
@@ -798,12 +798,7 @@ app.get('/api/projects/:id/performance', (req, res) => {
 // Lo que mejor les funcionó a las cuentas investigadas: publicaciones con 2× o más las interacciones normales de su cuenta.
 app.get('/api/projects/:id/knowledge/outliers', (req, res) => res.json(outliers(Number(req.params.id), { handle: String(req.query.handle || ''), limit: Number(req.query.limit) || 12 })));
 // Mejores franjas para publicar en cada red, según las vistas de lo ya publicado del proyecto (la última medición de cada publicación).
-app.get('/api/projects/:id/best-times', (req, res) => {
-  const rows = all(`SELECT a.network, p.scheduled_at, COALESCE(m.views, m.reach) AS views FROM posts p JOIN accounts a ON a.id = p.account_id
-    JOIN post_metrics m ON m.id = (SELECT max(id) FROM post_metrics WHERE post_id = p.id)
-    WHERE p.project_id = ? AND p.status = 'publicado'`, req.params.id);
-  res.json(bestSlots(rows));
-});
+app.get('/api/projects/:id/best-times', (req, res) => res.json(bestSlotsOf(db, req.params.id)));
 // Correr un día entero: todas las publicaciones que todavía se pueden mover pasan a otro día con la misma hora. Todo o nada:
 // si una no pasa las reglas en el día nuevo, no se mueve ninguna y se dice cuál y por qué.
 app.post('/api/projects/:id/posts/move-day', (req, res) => {

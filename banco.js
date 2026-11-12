@@ -13,7 +13,7 @@ import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS, bestSlots, BEST_MIN_NET } from './rules.js';
 import { embed, initKnowledge, addInstagram, outliers, OUTLIER_MIN_POSTS } from './knowledge.js';
 import { DatabaseSync } from 'node:sqlite';
-import { planDay, planProject, initPlanner, expiredBlocked, localExpiry } from './planner.js';
+import { planDay, planProject, initPlanner, expiredBlocked, localExpiry, learningsOf } from './planner.js';
 import { initAlerts, addAlert } from './alerts.js';
 import { initMetrics, readMetrics, readDue, score, DEFAULT_WEIGHTS } from './metrics.js';
 import { makeVault } from './connections.js';
@@ -393,6 +393,24 @@ function cases(video, sim) {
       eq(outliers(1, { handle: 'chica' }).length, 0, 'con pocas publicaciones no se calcula');
       addInstagram(1, { username: 'mala', followers_count: 1000, posts: posts(12, true).map((x, i) => (i === 0 ? { ...x, permalink: 'javascript:alert(1)' } : x)) });
       eq(outliers(1, { handle: 'mala' })[0].url, '', 'un link que no es http(s) no se devuelve');
+    }],
+    ['Reglas', 'El planificador usa la franja que más vistas da en una red cuando la memoria todavía no aprendió un horario (y respeta el aprendido)', async () => {
+      const m = new DatabaseSync(':memory:');
+      m.exec(`CREATE TABLE accounts (id INTEGER PRIMARY KEY, project_id INTEGER, network TEXT);
+        CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INTEGER, account_id INTEGER, scheduled_at TEXT, status TEXT);
+        CREATE TABLE post_metrics (id INTEGER PRIMARY KEY, post_id INTEGER, views INTEGER, reach INTEGER);
+        CREATE TABLE learnings (id INTEGER PRIMARY KEY, project_id INTEGER, variable TEXT, value TEXT, network TEXT, wins REAL, trials REAL, origin TEXT);
+        INSERT INTO accounts VALUES (1, 1, 'instagram'), (2, 1, 'tiktok');`);
+      let id = 0;
+      for (let i = 0; i < 30; i++) for (const acc of [1, 2]) {
+        const h = [9, 12, 15, 18, 21][i % 5]; id++;
+        m.prepare("INSERT INTO posts VALUES (?, 1, ?, ?, 'publicado')").run(id, acc, `2026-11-0${1 + (i % 9)} ${String(h).padStart(2, '0')}:00`);
+        m.prepare('INSERT INTO post_metrics (post_id, views) VALUES (?, ?)').run(id, h === 18 ? 3000 : 1000);
+      }
+      // en TikTok la memoria ya aprendió 12:00 (5 pruebas ganadas): ese manda
+      for (let i = 0; i < 5; i++) m.prepare("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (1, 'horario', '12:00', 'tiktok', 1, 1, 'metricas')").run();
+      const L = learningsOf(m, 1);
+      eq([L.horario.instagram, L.horario.tiktok], ['18:30', '12:00'], 'Instagram toma la franja de 17 a 20; TikTok queda con lo aprendido');
     }],
     ['Circuito', 'withinWindow: la hora real también respeta 08:00-23:00', async () => {
       eq(['07:59', '08:00', '23:00', '23:01'].map(withinWindow), [false, true, true, false], 'ventana');
