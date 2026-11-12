@@ -28,7 +28,7 @@ import { initPlanner, planProject, expiredBlocked, localExpiry } from './planner
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initMarketing, marketingCycle, projectsToCycle } from './marketing.js';
 import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars } from './memory.js';
-import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
+import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS, outliers } from './knowledge.js';
 import { initShare, mountShare } from './share.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -745,6 +745,8 @@ app.put('/api/posts/:id', (req, res) => {
   update('posts', p.id, d);
   res.json({ ok: true });
 });
+// Lo que mejor les funcionó a las cuentas investigadas: publicaciones con 2× o más las interacciones normales de su cuenta.
+app.get('/api/projects/:id/knowledge/outliers', (req, res) => res.json(outliers(Number(req.params.id), { handle: String(req.query.handle || ''), limit: Number(req.query.limit) || 12 })));
 // Mejores franjas para publicar en cada red, según las vistas de lo ya publicado del proyecto (la última medición de cada publicación).
 app.get('/api/projects/:id/best-times', (req, res) => {
   const rows = all(`SELECT a.network, p.scheduled_at, COALESCE(m.views, m.reach) AS views FROM posts p JOIN accounts a ON a.id = p.account_id

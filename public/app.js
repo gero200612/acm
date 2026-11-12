@@ -1127,9 +1127,9 @@ async function knLoad() {
   const qs = new URLSearchParams({ q: K.q, kind: K.kind, handle: K.handle, limit: '60' });
   const seq = (K.seq = (K.seq || 0) + 1); // solo pinta la última respuesta si se cruzan dos búsquedas
   const meta = $('.kn-meta'); if (meta) meta.textContent = 'Buscando…';
-  let d; try { d = await api(`/api/projects/${pid}/knowledge?${qs}`); } catch (e) { return fail(e); }
+  let d, o; try { [d, o] = await Promise.all([api(`/api/projects/${pid}/knowledge?${qs}`), api(`/api/projects/${pid}/knowledge/outliers?${new URLSearchParams({ handle: K.handle, limit: '6' })}`).catch(() => [])]); } catch (e) { return fail(e); }
   if (seq !== K.seq) return;
-  K.data = d; knDraw();
+  K.data = d; K.outliers = o; knDraw();
 }
 function knDraw() {
   const D = K.data, list = $('#kn-list'); if (!D || !list) return;
@@ -1143,7 +1143,12 @@ function knDraw() {
     : `<p class="small muted kn-meta">${fmt(D.items.length)} resultados · ${mode}${D.pending ? ` · ${fmt(D.pending)} fichas calculando su vector` : ''}</p>` +
     (D.items.length ? D.items.map(knCard).join('') : '<div class="card muted">Nada parecido. Probá con otras palabras.</div>');
   const A = D.accounts || [];
-  $('#kn-side').innerHTML = `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa.</p>
+  const O = K.outliers || [];
+  const outCard = O.length ? `<div class="card kn-out"><h2 class="h2">Lo que mejor les funcionó</h2><p class="small muted">Publicaciones con el doble o más de las interacciones normales de su cuenta${K.handle ? ` (@${esc(K.handle)})` : ''}.</p>
+    ${O.map((x) => `<a class="kn-o" ${x.url ? `href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"` : ''}><span class="kn-score">×${x.score.toLocaleString('es-AR', { maximumFractionDigits: 1 })}</span>
+      <span><b>@${esc(x.handle)}</b> <span class="small muted">· ${esc(x.type || '')} · ${esc(x.date || '')}</span><span class="kn-ot">${esc(x.text)}</span>
+      <span class="small muted">${fmt(x.eng)} interacciones · lo normal en la cuenta: ${fmt(x.median)}</span></span></a>`).join('')}</div>` : '';
+  $('#kn-side').innerHTML = outCard + `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa.</p>
     <div class="kn-acc">${A.map((a) => `<button data-act="kn-handle" data-h="${esc(a.handle)}" class="${K.handle === a.handle ? 'sel' : ''}"><b>@${esc(a.handle)}</b><span>${fmt(a.followers)} seg. · ${fmt(a.posts)} publ.</span><span>${fmt(a.avg_eng)} interacciones prom. · ${a.followers ? fmt(a.avg_eng / a.followers * 100, 1) : 0} %</span></button>`).join('') || '<p class="small muted">Ninguna todavía.</p>'}</div></div>
     <div class="card"><h2 class="h2">Importar</h2><p class="small muted">JSON con <code>items</code> (fichas) y/o <code>instagram</code> (cuentas con sus publicaciones).</p>
     <label class="btn">${icon('up')} Elegir archivo<input type="file" id="kn-file" accept=".json,application/json" hidden></label>

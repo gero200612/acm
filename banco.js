@@ -11,7 +11,7 @@ import { uploadAudience, createCampaign, testAds } from './ads.js';
 import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS, bestSlots, BEST_MIN_NET } from './rules.js';
-import { embed } from './knowledge.js';
+import { embed, initKnowledge, addInstagram, outliers, OUTLIER_MIN_POSTS } from './knowledge.js';
 import { DatabaseSync } from 'node:sqlite';
 import { planDay, planProject, initPlanner, expiredBlocked, localExpiry } from './planner.js';
 import { initAlerts, addAlert } from './alerts.js';
@@ -380,6 +380,17 @@ function cases(video, sim) {
       const b = bestSlots(rows);
       eq([b.instagram.measured, b.instagram.slots[0].from, b.instagram.slots[0].lift], [30, '17:00', 3], 'la franja de las 18 rinde ×3');
       eq([b.tiktok.missing, b.tiktok.slots.length], [1, 0], 'con 9 medidas en TikTok no dice nada');
+    }],
+    ['Reglas', 'Lo que mejor les funcionó: una publicación con 6× lo normal de su cuenta sale arriba; una cuenta con pocas publicaciones no da resultados', async () => {
+      const mem = new DatabaseSync(':memory:');
+      mem.exec('CREATE TABLE projects (id INTEGER PRIMARY KEY)'); mem.exec('INSERT INTO projects (id) VALUES (1)');
+      initKnowledge(mem);
+      const posts = (n, big) => Array.from({ length: n }, (_, i) => ({ caption: `Post ${i}`, like_count: big && i === 0 ? 600 : 90 + i, comments_count: 10, timestamp: `2026-10-${String(1 + i).padStart(2, '0')}T12:00:00+0000`, permalink: `https://instagram.com/p/${i}`, media_product_type: 'REELS' }));
+      addInstagram(1, { username: 'rival', followers_count: 10000, posts: posts(12, true) });
+      addInstagram(1, { username: 'chica', followers_count: 500, posts: posts(OUTLIER_MIN_POSTS - 1, true) });
+      const o = outliers(1);
+      eq([o.length, o[0].handle, o[0].score >= 5, o[0].url], [1, 'rival', true, 'https://instagram.com/p/0'], 'solo el posteo que se destaca, de la cuenta con datos suficientes');
+      eq(outliers(1, { handle: 'chica' }).length, 0, 'con pocas publicaciones no se calcula');
     }],
     ['Circuito', 'withinWindow: la hora real también respeta 08:00-23:00', async () => {
       eq(['07:59', '08:00', '23:00', '23:01'].map(withinWindow), [false, true, true, false], 'ventana');

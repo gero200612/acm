@@ -154,3 +154,25 @@ export function stats(projectId) {
   const pending = db.prepare('SELECT count(*) n FROM knowledge WHERE project_id = ? AND vec IS NULL').get(projectId).n;
   return { kinds, accounts, pending, model: modelStatus() };
 }
+
+// Publicaciones que rindieron muy por encima de lo normal de su propia cuenta (como el «outlier score»): interacciones de la publicación
+// contra la mediana de esa cuenta. Solo cuentas con al menos MIN_POSTS publicaciones leídas (con menos, la mediana no dice nada).
+export const OUTLIER_MIN_POSTS = 8, OUTLIER_MIN_SCORE = 2;
+export function outliers(projectId, { limit = 12, handle = '' } = {}) {
+  const rows = db.prepare(`SELECT id, handle, date, source, text, json_extract(data, '$.eng') eng, json_extract(data, '$.type') type, json_extract(data, '$.likes') likes, json_extract(data, '$.comments') comments
+    FROM knowledge WHERE project_id = ? AND kind = 'publicacion' AND (? = '' OR handle = ?)`).all(projectId, handle, handle);
+  const byHandle = new Map();
+  for (const r of rows) { if (!byHandle.has(r.handle)) byHandle.set(r.handle, []); byHandle.get(r.handle).push(r); }
+  const out = [];
+  for (const [h, L] of byHandle) {
+    if (L.length < OUTLIER_MIN_POSTS) continue;
+    const s = L.map((r) => Number(r.eng) || 0).sort((a, b) => a - b), n = s.length;
+    const med = n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+    if (med <= 0) continue;
+    for (const r of L) {
+      const score = (Number(r.eng) || 0) / med;
+      if (score >= OUTLIER_MIN_SCORE) out.push({ id: r.id, handle: h, date: r.date, url: r.source, text: String(r.text || '').slice(0, 280), type: r.type, eng: r.eng, likes: r.likes, comments: r.comments, median: med, score: Math.round(score * 10) / 10 });
+    }
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, Math.max(1, Math.min(50, limit)));
+}

@@ -898,3 +898,11 @@ main.page.enter > *, main.page.enter > * > .card, main.page.enter > * > section 
 .best-row.top .t, .best-row.top .l { color: var(--blue); font-weight: 700; }
 .best-row .l { text-align: right; font-variant-numeric: tabular-nums; }
 @keyframes best-grow { from { transform: scaleX(0); } }
+
+/* ---------- lo que mejor les funcionó (outliers) ---------- */
+.kn-out { display: grid; gap: 8px; }
+.kn-o { display: grid; grid-template-columns: 52px 1fr; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line-2); color: inherit; text-decoration: none; transition: background .15s; border-radius: 8px; }
+a.kn-o[href]:hover { background: var(--line-2); }
+.kn-o > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.kn-score { align-self: start; text-align: center; font-weight: 800; font-size: 15px; color: var(--blue); background: color-mix(in srgb, var(--blue) 10%, #fff); border-radius: 9px; padding: 6px 0; font-variant-numeric: tabular-nums; }
+.kn-ot { font-size: 13px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
