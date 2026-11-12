@@ -104,3 +104,25 @@ export function cuentaAlert(db, projectId, network, handle, msg) {
   const quien = `${NETS[network] || network}${handle ? ` (${handle})` : ''}`;
   return addAlert(db, 'cuenta', projectId, `La cuenta de ${quien} dejó de funcionar: ${mask(String(msg), []).slice(0, 200)} Reconectala en Cuentas.`);
 }
+
+// Informe semanal de un proyecto (lo recibe Gero por Telegram y lo reenvía): publicaciones y vistas de los últimos 7 días contra los 7 anteriores,
+// lo que mejor anduvo y el link para el dirigente. now: 'YYYY-MM-DD HH:MM' local.
+export function weeklyReport(db, projectId, now, link) {
+  const p = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId);
+  const day = (n) => new Date(Date.parse(now.slice(0, 10) + 'T12:00:00Z') - n * 864e5).toISOString().slice(0, 10);
+  const span = (from, to) => db.prepare(`SELECT a.network, r.title, COALESCE(m.views, m.reach, 0) AS views FROM posts po JOIN accounts a ON a.id = po.account_id JOIN reels r ON r.id = po.reel_id
+    LEFT JOIN post_metrics m ON m.id = (SELECT max(id) FROM post_metrics WHERE post_id = po.id)
+    WHERE po.project_id = ? AND po.status = 'publicado' AND substr(COALESCE(po.published_at, po.scheduled_at), 1, 10) >= ? AND substr(COALESCE(po.published_at, po.scheduled_at), 1, 10) < ?`).all(projectId, from, to);
+  const cur = span(day(7), now.slice(0, 10)), prev = span(day(14), day(7));
+  const v = (L) => L.reduce((a, x) => a + x.views, 0);
+  const n = (x) => Number(x).toLocaleString('es-AR');
+  const pct = (a, b) => (b ? ` (${a >= b ? '+' : ''}${Math.round(((a - b) / b) * 100)} % contra la semana anterior)` : '');
+  const top = [...cur].sort((a, b) => b.views - a.views)[0];
+  return [
+    `Informe semanal de ${p?.name || 'el proyecto'} (del ${day(7)} al ${day(1)})`,
+    `Publicaciones: ${cur.length}${pct(cur.length, prev.length)}.`,
+    `Vistas: ${n(v(cur))}${pct(v(cur), v(prev))}.`,
+    top ? `Lo que mejor anduvo: «${top.title}» en ${NETS[top.network] || top.network}, ${n(top.views)} vistas.` : 'Esta semana no hubo publicaciones medidas.',
+    link ? `Para reenviar al dirigente (lo abre sin cuenta, ve el informe y lo que viene): ${link}` : '',
+  ].filter(Boolean).join('\n');
+}

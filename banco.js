@@ -11,6 +11,7 @@ import { uploadAudience, createCampaign, testAds } from './ads.js';
 import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
 import { postBlocked, pautaNumbers, defaultAdsNetworks, scheduleBlocked, withinWindow, youtubeShare, NETWORK_CAPS, bestSlots, BEST_MIN_NET } from './rules.js';
+import { initShare, ensureReportLink } from './share.js';
 import { embed, initKnowledge, addInstagram, outliers, OUTLIER_MIN_POSTS } from './knowledge.js';
 import { DatabaseSync } from 'node:sqlite';
 import { planDay, planProject, initPlanner, expiredBlocked, localExpiry, learningsOf } from './planner.js';
@@ -27,7 +28,7 @@ import { tiktokAdapter } from './ads-tiktok.js';
 import { googleAdapter } from './ads-google.js';
 import { buildAdapters } from './ads-factory.js';
 import { initMemory, compareSiblings, winningVariables, memoryCycle } from './memory.js';
-import { flushAlerts, alert as alert_, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR } from './notify.js';
+import { flushAlerts, alert as alert_, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR, weeklyReport } from './notify.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -411,6 +412,21 @@ function cases(video, sim) {
       for (let i = 0; i < 5; i++) m.prepare("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (1, 'horario', '12:00', 'tiktok', 1, 1, 'metricas')").run();
       const L = learningsOf(m, 1);
       eq([L.horario.instagram, L.horario.tiktok], ['18:30', '12:00'], 'Instagram toma la franja de 17 a 20; TikTok queda con lo aprendido');
+    }],
+    ['Reglas', 'Informe semanal: publicaciones y vistas de la semana contra la anterior, lo que mejor anduvo y un solo link para el dirigente', async () => {
+      const m = new DatabaseSync(':memory:');
+      m.exec(`CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO projects VALUES (1, 'Lista Azul');
+        CREATE TABLE accounts (id INTEGER PRIMARY KEY, network TEXT); INSERT INTO accounts VALUES (1, 'instagram');
+        CREATE TABLE reels (id INTEGER PRIMARY KEY, title TEXT); INSERT INTO reels VALUES (1, 'La deuda'), (2, 'Cuota justa');
+        CREATE TABLE posts (id INTEGER PRIMARY KEY, project_id INTEGER, account_id INTEGER, reel_id INTEGER, status TEXT, published_at TEXT, scheduled_at TEXT);
+        CREATE TABLE post_metrics (id INTEGER PRIMARY KEY, post_id INTEGER, views INTEGER, reach INTEGER);
+        INSERT INTO posts VALUES (1, 1, 1, 1, 'publicado', '2026-11-10 18:00', '2026-11-10 18:00'), (2, 1, 1, 2, 'publicado', '2026-11-12 18:00', '2026-11-12 18:00'), (3, 1, 1, 1, 'publicado', '2026-11-03 18:00', '2026-11-03 18:00');
+        INSERT INTO post_metrics (post_id, views) VALUES (1, 1000), (2, 3000), (3, 2000);`);
+      initShare(m);
+      const l1 = ensureReportLink(m, 1), l2 = ensureReportLink(m, 1);
+      eq(l1, l2, 'el link se crea una vez');
+      const t = weeklyReport(m, 1, '2026-11-16 09:00', 'https://acm.test' + l1);
+      yes(t.includes('Publicaciones: 2 (+100 %') && t.includes('Vistas: 4.000 (+100 %') && t.includes('«Cuota justa»') && t.includes('https://acm.test/s/'), t);
     }],
     ['Circuito', 'withinWindow: la hora real también respeta 08:00-23:00', async () => {
       eq(['07:59', '08:00', '23:00', '23:01'].map(withinWindow), [false, true, true, false], 'ventana');

@@ -23,13 +23,13 @@ import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleB
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri, PUBLIC_URL } from './oauth.js';
 import { initAlerts, addAlert } from './alerts.js';
-import { flushAlerts, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR } from './notify.js';
+import { flushAlerts, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR, weeklyReport } from './notify.js';
 import { initPlanner, planProject, expiredBlocked, localExpiry, bestSlotsOf } from './planner.js';
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initMarketing, marketingCycle, projectsToCycle } from './marketing.js';
 import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars } from './memory.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS, outliers } from './knowledge.js';
-import { initShare, mountShare } from './share.js';
+import { initShare, mountShare, ensureReportLink } from './share.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA = path.resolve(process.env.ACM_DATA || './data');
@@ -1311,6 +1311,18 @@ async function resumenDelDia() {
   await avisos();
 }
 if (process.env.ACM_SCHEDULER !== 'off') { setInterval(resumenDelDia, 60e3); setTimeout(resumenDelDia, 30e3); }
+// informe semanal: los lunes desde las 09:00 (hora local), por proyecto que no es de demostración, a Gero por Telegram con el link para
+// reenviar al dirigente. Una vez por semana (si el servidor arranca más tarde el lunes, se manda al arrancar).
+async function informeSemanal() {
+  const now = localNow();
+  if (new Date(now.slice(0, 10) + 'T12:00:00Z').getUTCDay() !== 1 || now.slice(11, 16) < '09:00') return;
+  for (const p of all('SELECT id FROM projects WHERE demo = 0')) {
+    if (get("SELECT 1 FROM alerts WHERE project_id = ? AND kind = 'informe_semanal' AND substr(at, 1, 10) = ?", p.id, now.slice(0, 10))) continue;
+    try { addAlert(db, 'informe_semanal', p.id, weeklyReport(db, p.id, now, PUBLIC_URL + ensureReportLink(db, p.id)), `${now}:00`); } catch (e) { console.error('informe semanal:', e.message); }
+  }
+  await avisos();
+}
+if (process.env.ACM_SCHEDULER !== 'off') { setInterval(informeSemanal, 60e3); setTimeout(informeSemanal, 40e3); }
 
 // al arrancar completa vectores pendientes (la copia del banco lo hace enseguida para reproducir el orden de producción: primero este, después las importaciones)
 setTimeout(fillVectors, Number(process.env.ACM_FILL_MS) || 5000);

@@ -185,3 +185,14 @@ export function mountShare(app, d) {
 }
 
 function parse(s) { try { return s ? JSON.parse(s) : null; } catch { return null; } }
+
+// El link del informe semanal de un proyecto (para reenviar al dirigente): solo mirar, con calendario e informe, sin código ni
+// vencimiento. Se crea una vez y se reusa (si se desactiva desde el panel, el lunes siguiente se crea otro).
+export const WEEKLY_LABEL = 'Informe semanal (automático)';
+export function ensureReportLink(db, projectId) {
+  const ya = db.prepare("SELECT token FROM share_links WHERE project_id = ? AND label = ? AND revoked_at = '' AND report = 1 ORDER BY id DESC LIMIT 1").get(projectId, WEEKLY_LABEL);
+  if (ya) return `/s/${ya.token}`;
+  const token = crypto.randomBytes(24).toString('base64url');
+  db.prepare("INSERT INTO share_links (project_id, token, can, calendar, report, label) VALUES (?, ?, 'ver', 1, 1, ?)").run(projectId, token, WEEKLY_LABEL);
+  return `/s/${token}`;
+}
