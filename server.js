@@ -679,15 +679,16 @@ app.delete('/api/reels/:id', (req, res) => {
 // publicaciones
 // el programador compara fechas como texto en hora argentina: todas van como "AAAA-MM-DD HH:MM" (sin T ni segundos)
 // reglas duras de publicación (rules.scheduleBlocked) con lo que hay en la base; solo rigen para reels que vienen de un recorte (tienen clip_id)
-function scheduleCheck({ id, reel_id, account_id, scheduled_at }) {
+// `also`: otra publicación que no cuenta (al intercambiar dos, cada una se valida sin la otra).
+function scheduleCheck({ id, reel_id, account_id, scheduled_at }, also = null) {
   const reel = get('SELECT clip_id, review FROM reels WHERE id = ?', reel_id);
   if (!reel?.clip_id) return null;
   const network = get('SELECT network FROM accounts WHERE id = ?', account_id).network;
   const live = "p.status IN ('programado', 'publicando', 'publicado')";
   const siblings = all(`SELECT a.network, p.scheduled_at, p.account_id FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
-    WHERE r.clip_id = ? AND p.id IS NOT ? AND ${live}`, reel.clip_id, id ?? null);
-  const dayCount = get(`SELECT count(*) n FROM posts p JOIN accounts a ON a.id = p.account_id WHERE p.account_id = ? AND substr(p.scheduled_at, 1, 10) = ? AND p.id IS NOT ? AND ${live}`,
-    account_id, String(scheduled_at).slice(0, 10), id ?? null).n;
+    WHERE r.clip_id = ? AND p.id IS NOT ? AND p.id IS NOT ? AND ${live}`, reel.clip_id, id ?? null, also);
+  const dayCount = get(`SELECT count(*) n FROM posts p JOIN accounts a ON a.id = p.account_id WHERE p.account_id = ? AND substr(p.scheduled_at, 1, 10) = ? AND p.id IS NOT ? AND p.id IS NOT ? AND ${live}`,
+    account_id, String(scheduled_at).slice(0, 10), id ?? null, also).n;
   return scheduleBlocked({ reel_id, account_id, network, scheduled_at, clip_id: reel.clip_id, review: reel.review },
     { siblings, sameReelSameNetwork: false, dayCount, networkCap: NETWORK_CAPS[network], tz: TZ });
 }
@@ -700,7 +701,7 @@ app.get('/api/projects/:id/plan', (req, res) => {
     WHERE p.project_id = ? AND r.kind = 'listo' AND r.clip_id IS NOT NULL AND substr(p.scheduled_at, 1, 10) = ? ORDER BY p.scheduled_at, p.id`, req.params.id, day));
 });
 app.get('/api/projects/:id/posts', (req, res) => res.json(all(`
-  SELECT p.*, r.title AS reel_title, r.file AS reel_file, a.network, a.handle
+  SELECT p.*, r.title AS reel_title, r.file AS reel_file, r.cover AS reel_cover, a.network, a.handle, a.connected_as
   FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
   WHERE p.project_id = ? ORDER BY p.scheduled_at`, req.params.id)));
 app.post('/api/projects/:id/posts', (req, res) => {
@@ -743,6 +744,28 @@ app.put('/api/posts/:id', (req, res) => {
   }
   update('posts', p.id, d);
   res.json({ ok: true });
+});
+// Intercambiar el horario de dos publicaciones (la grilla de una cuenta: las horas quedan, cambian los reels).
+app.post('/api/posts/swap', (req, res) => {
+  const ids = [Number(req.body?.a), Number(req.body?.b)];
+  const [a, b] = ids.map((i) => get('SELECT * FROM posts WHERE id = ?', i));
+  if (!a || !b || a.id === b.id) return res.status(404).json({ error: 'No existe alguna de las publicaciones' });
+  if (a.project_id !== b.project_id) return res.status(400).json({ error: 'Las publicaciones son de proyectos distintos' });
+  const soon = (p) => new Date(p.scheduled_at.replace(' ', 'T') + ':00') - new Date(localNow().replace(' ', 'T') + ':00') < 15 * 60 * 1000;
+  for (const p of [a, b]) {
+    if (!['programado', 'fallido'].includes(p.status) || soon(p)) return res.status(409).json({ error: 'Solo se mueven las que todavía no salieron y faltan más de 15 minutos' });
+  }
+  const whyA = scheduleCheck({ id: a.id, reel_id: a.reel_id, account_id: a.account_id, scheduled_at: b.scheduled_at }, b.id);
+  if (whyA) return res.status(400).json({ error: whyA });
+  const whyB = scheduleCheck({ id: b.id, reel_id: b.reel_id, account_id: b.account_id, scheduled_at: a.scheduled_at }, a.id);
+  if (whyB) return res.status(400).json({ error: whyB });
+  db.exec('BEGIN');
+  try {
+    run('UPDATE posts SET scheduled_at = ? WHERE id = ?', b.scheduled_at, a.id);
+    run('UPDATE posts SET scheduled_at = ? WHERE id = ?', a.scheduled_at, b.id);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  res.json({ ok: true, a: { id: a.id, scheduled_at: b.scheduled_at }, b: { id: b.id, scheduled_at: a.scheduled_at } });
 });
 app.delete('/api/posts/:id', (req, res) => { run('DELETE FROM posts WHERE id = ?', req.params.id); res.json({ ok: true }); });
 
@@ -1067,12 +1090,14 @@ function reviewClip(clipId, body, { onlyProject = null, onlyPending = false, ori
   if (!['aprobar', 'rechazar'].includes(decision)) return fail(400, 'La decisión es aprobar o rechazar');
   if (decision === 'rechazar' && !note) return fail(400, 'Para rechazar contanos por qué: el comentario es obligatorio');
   const projectId = reels[0].project_id;
+  // desde un link solo se tocan las ediciones que siguen pendientes: lo ya decidido queda como está
+  const scope = onlyPending ? reels.filter((r) => r.review === 'pendiente') : reels;
   const ids = Array.isArray(body.rechazar_ids) ? body.rechazar_ids.map(Number) : [];
-  if (ids.some((i) => !reels.some((r) => r.id === i))) return fail(400, 'Alguna edición a rechazar no es de este recorte');
+  if (ids.some((i) => !scope.some((r) => r.id === i))) return fail(400, onlyPending ? 'Alguna edición a rechazar ya se decidió o no es de este recorte' : 'Alguna edición a rechazar no es de este recorte');
   // rechazar sin elegir ediciones rechaza las tres; eligiendo, las demás se aprueban
-  const rejected = decision === 'rechazar' ? new Set(ids.length ? ids : reels.map((r) => r.id)) : new Set();
+  const rejected = decision === 'rechazar' ? new Set(ids.length ? ids : scope.map((r) => r.id)) : new Set();
   const affected = [];
-  for (const r of reels) {
+  for (const r of scope) {
     if (rejected.has(r.id)) { if (r.review !== 'rechazado') { run("UPDATE reels SET review = 'rechazado' WHERE id = ?", r.id); affected.push({ r, wins: 0 }); } }
     else if (r.review === 'pendiente') { run("UPDATE reels SET review = 'aprobado' WHERE id = ?", r.id); affected.push({ r, wins: 1 }); }
   }

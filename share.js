@@ -65,11 +65,17 @@ export function mountShare(app, d) {
   });
 
   // ---- calendario para Google Calendar / Apple / Outlook (suscripción .ics) ----
+  // GET solo lee; crear o cambiar el link es POST (nunca un cambio de estado por GET).
   app.get('/api/projects/:id/ics', (req, res) => {
     const p = get('SELECT id, ics_token FROM projects WHERE id = ?', req.params.id);
     if (!p) return res.status(404).json({ error: 'No existe el proyecto' });
+    res.json({ path: p.ics_token ? `/ics/${p.ics_token}.ics` : '' });
+  });
+  app.post('/api/projects/:id/ics', (req, res) => {
+    const p = get('SELECT id, ics_token FROM projects WHERE id = ?', req.params.id);
+    if (!p) return res.status(404).json({ error: 'No existe el proyecto' });
     let t = p.ics_token;
-    if (!t || req.query.nuevo === '1') { t = crypto.randomBytes(24).toString('base64url'); run('UPDATE projects SET ics_token = ? WHERE id = ?', t, p.id); }
+    if (!t || req.body?.nuevo === true) { t = crypto.randomBytes(24).toString('base64url'); run('UPDATE projects SET ics_token = ? WHERE id = ?', t, p.id); }
     res.json({ path: `/ics/${t}.ics` });
   });
   app.delete('/api/projects/:id/ics', (req, res) => { run("UPDATE projects SET ics_token = '' WHERE id = ?", req.params.id); res.json({ ok: true }); });

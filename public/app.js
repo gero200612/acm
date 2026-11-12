@@ -114,7 +114,7 @@ async function render() {
     <header class="mobilebar"><button class="burger" data-act="menu" aria-label="Abrir menú"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>ACM</header>
     <div class="scrim" data-act="menu"></div>
     <aside class="side">${sideNav(r)}</aside>
-    <div class="main"><header class="topbar">${head}</header><main class="page">${body}</main></div>
+    <div class="main"><header class="topbar">${head}</header><main class="page ${viewKey() !== state.lastView ? 'enter' : ''}">${body}</main></div>
   </div>`;
   afterRender(r);
 }
@@ -499,7 +499,10 @@ function reelsView() {
 // Una publicación se puede mover (arrastrar a otro día) si todavía no salió y faltan más de 15 minutos.
 const LOCK_MS = 15 * 60 * 1000;
 const movable = (x) => (x.status === 'programado' || x.status === 'fallido') && pdate(x.scheduled_at) - Date.now() > LOCK_MS;
+const viewKey = () => location.hash.split('?')[0] + '|' + (state.calMode || '');
+const calModes = () => `<div class="seg" role="group" aria-label="Vista">${[['mes', 'Mes'], ['semana', 'Semana'], ['grilla', 'Grilla']].map(([k, l]) => `<button aria-pressed="${state.calMode === k}" data-act="cal-mode" data-k="${k}">${l}</button>`).join('')}</div>`;
 function calendarioView() {
+  if (state.calMode === 'grilla') return grillaView();
   const p = state.project, S = state.posts;
   const week = state.calMode === 'semana';
   const m = state.calMonth || (state.calMonth = (() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; })());
@@ -522,7 +525,7 @@ function calendarioView() {
       <h2 class="h2">${title}</h2>
       <span class="small muted">${shown.length} ${shown.length === 1 ? 'publicación' : 'publicaciones'} ${week ? 'esta semana' : 'este mes'}</span>
       <span class="spacer"></span>
-      <div class="seg" role="group" aria-label="Vista"><button aria-pressed="${!week}" data-act="cal-mode" data-k="mes">Mes</button><button aria-pressed="${week}" data-act="cal-mode" data-k="semana">Semana</button></div>
+      ${calModes()}
       <button class="btn sm" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>
       <button class="btn sm" data-act="cal-today">Hoy</button>
       <button class="icon-btn" data-act="cal-prev" aria-label="${week ? 'Semana anterior' : 'Mes anterior'}">${icon('left')}</button>
@@ -546,6 +549,77 @@ function calendarioView() {
     </div>
     <div class="cal-legend small muted"><span><i class="lgd prog"></i>Programado</span><span><i class="lgd pub"></i>Publicado</span><span><i class="lgd fail"></i>Falló</span><span><i class="lgd publ"></i>Publicándose</span>${lim ? '<span><i class="lgd veda"></i>Sin propaganda</span>' : ''}</div>
   </section>`;
+}
+
+// ---------- grilla: cómo se ve el perfil de cada cuenta ----------
+// Lo publicado y lo que viene, del más nuevo al más viejo, como en el perfil. Arrastrar un reel sobre otro de la misma cuenta los
+// intercambia: las horas quedan donde estaban y cambian los reels (el ritmo de publicación no se toca).
+function grillaView() {
+  const S = state.posts, accs = state.accounts.filter((a) => S.some((x) => x.account_id === a.id));
+  const acc = accs.find((a) => a.id === state.gridAccount) || accs.find((a) => a.network === 'instagram') || accs[0];
+  const head = `<div class="cal-head"><h2 class="h2">Grilla del perfil</h2><span class="spacer"></span>${calModes()}</div>`;
+  if (!acc) return `<section class="card cal">${head}<p class="muted" style="padding:20px">Cuando haya publicaciones programadas, acá ves cómo queda el perfil de cada cuenta.</p></section>`;
+  const L = S.filter((x) => x.account_id === acc.id && x.status !== 'bloqueado').sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
+  const name = acc.connected_as || (acc.handle ? '@' + acc.handle : NETS[acc.network].name);
+  const tile = (x) => `<button class="gr-tile s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-gdrag="1"' : ''} title="${esc(x.reel_title)}">
+      ${x.reel_cover ? `<img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false">` : `<video src="/media/${esc(x.reel_file)}#t=0.8" preload="metadata" muted playsinline></video>`}
+      <span class="gr-badge">${x.status === 'publicado' ? icon('check', 12) : x.status === 'fallido' ? '!' : `${fmtDay(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</span>
+      <span class="gr-title">${esc(x.reel_title)}</span></button>`;
+  return `<section class="card cal">${head}
+    <div class="gr-wrap">
+      <div class="gr-accs">${accs.map((a) => `<button class="gr-acc ${a.id === acc.id ? 'on' : ''}" data-act="grid-acc" data-id="${a.id}">${netBadge(a.network)}<span>${esc(a.connected_as || (a.handle ? '@' + a.handle : NETS[a.network].name))}</span><b>${S.filter((x) => x.account_id === a.id && x.status === 'programado').length}</b></button>`).join('')}
+        <p class="small muted" style="margin-top:10px">${icon('move', 14)} Arrastrá un reel programado sobre otro para intercambiarlos: las horas quedan, cambian los reels. Los publicados quedan fijos.</p></div>
+      <div class="phone"><div class="ph-top"><span class="ph-av" style="background:${esc(state.project.color)}">${esc(initials(state.project.name))}</span><div><b>${esc(name)}</b><span class="small muted">${L.filter((x) => x.status === 'publicado').length} publicados · ${L.filter((x) => x.status === 'programado').length} programados</span></div></div>
+        <div class="gr-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px">Sin publicaciones en esta cuenta.</p>'}</div></div>
+    </div></section>`;
+}
+function wireGridDrag() {
+  const grid = $('.gr-grid');
+  if (!grid) return;
+  grid.addEventListener('pointerdown', (e) => {
+    const tile = e.target.closest('[data-gdrag]');
+    if (!tile || e.button > 0) return;
+    const a = state.posts.find((x) => x.id === Number(tile.dataset.pid));
+    const sx = e.clientX, sy = e.clientY, touch = e.pointerType === 'touch';
+    let drag = null, over = null, timer = null;
+    const begin = () => {
+      const r = tile.getBoundingClientRect(), clone = tile.cloneNode(true);
+      clone.classList.add('cal-fly', 'gr-fly'); Object.assign(clone.style, { width: r.width + 'px', height: r.height + 'px', left: r.left + 'px', top: r.top + 'px' });
+      document.body.append(clone); tile.classList.add('ghost'); document.body.classList.add('cal-dragging');
+      drag = { clone, dx: sx - r.left, dy: sy - r.top };
+    };
+    const stop = () => { clearTimeout(timer); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); };
+    const move = (ev) => {
+      if (!drag) { if (touch) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 10) stop(); return; } if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return; begin(); }
+      ev.preventDefault();
+      drag.clone.style.left = ev.clientX - drag.dx + 'px'; drag.clone.style.top = ev.clientY - drag.dy + 'px';
+      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.gr-tile');
+      if (el !== over) { over?.classList.remove('drop-over', 'drop-no'); over = el && el !== tile ? el : null; over?.classList.add(over.dataset.gdrag ? 'drop-over' : 'drop-no'); }
+    };
+    const end = async (ev) => {
+      stop();
+      if (!drag) return;
+      ev.preventDefault();
+      tile.addEventListener('click', (c) => { c.stopPropagation(); c.preventDefault(); }, { capture: true, once: true });
+      over?.classList.remove('drop-over', 'drop-no');
+      const target = over?.dataset.gdrag ? over : null;
+      if (!target) return settle(drag, tile, tile, over ? 'Ese ya salió o sale en menos de 15 minutos: queda fijo.' : null);
+      const b = state.posts.find((x) => x.id === Number(target.dataset.pid));
+      const rt = target.getBoundingClientRect();
+      drag.clone.classList.add('landing'); drag.clone.style.left = rt.left + 'px'; drag.clone.style.top = rt.top + 'px';
+      await new Promise((ok) => setTimeout(ok, 220));
+      try {
+        await api('/api/posts/swap', { method: 'POST', body: { a: a.id, b: b.id } });
+        [a.scheduled_at, b.scheduled_at] = [b.scheduled_at, a.scheduled_at];
+        finish(drag, tile); render();
+        toast('Intercambiados: cada reel tomó la hora del otro', false, { label: 'Deshacer', fn: async () => {
+          try { await api('/api/posts/swap', { method: 'POST', body: { a: a.id, b: b.id } }); [a.scheduled_at, b.scheduled_at] = [b.scheduled_at, a.scheduled_at]; render(); toast('Volvieron a su lugar'); } catch (err) { fail(err); }
+        } });
+      } catch (err) { await settle(drag, tile, tile, err.message); }
+    };
+    if (touch) timer = setTimeout(begin, 320);
+    window.addEventListener('pointermove', move, { passive: false }); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
+  });
 }
 
 // ---------- arrastrar publicaciones entre días ----------
@@ -632,10 +706,10 @@ function wireCalDrag() {
 }
 const hhmm = (s) => s.slice(11, 16);
 function flyTo(clone, cell) {
-  const r = cell.getBoundingClientRect();
+  const r = cell.getBoundingClientRect(), exact = cell.classList.contains('gr-tile');
   clone.classList.add('landing');
-  clone.style.left = r.left + 6 + 'px';
-  clone.style.top = r.top + 34 + 'px';
+  clone.style.left = r.left + (exact ? 0 : 6) + 'px';
+  clone.style.top = r.top + (exact ? 0 : 34) + 'px';
   return new Promise((ok) => setTimeout(ok, 220));
 }
 async function settle(drag, card, home, why) {
@@ -1167,7 +1241,7 @@ async function shareDialog() {
 async function icsDialog(nuevo) {
   const pid = state.project.id;
   let r;
-  try { r = await api(`/api/projects/${pid}/ics${nuevo ? '?nuevo=1' : ''}`); } catch (err) { return fail(err); }
+  try { r = await api(`/api/projects/${pid}/ics`, { method: 'POST', body: { nuevo: !!nuevo } }); } catch (err) { return fail(err); }
   const url = location.origin + r.path;
   const d = openDialog('Sincronizar con tu calendario', `
     <p class="muted small">Con este link las publicaciones de «${esc(state.project.name)}» aparecen en tu calendario y se actualizan solas (Google Calendar las relee cada algunas horas). Cualquiera con el link puede verlas: no lo compartas.</p>
@@ -1446,7 +1520,10 @@ function afterRender(r) {
   }
   const ct = $('#cg-total');
   if (ct) { ct.addEventListener('change', () => { (async () => { try { state.project.pauta = await api(`/api/projects/${state.project.id}/pauta`, { method: 'PUT', body: { ...(state.project.pauta || {}), budget: Number(ct.value) || 0 } }); render(); } catch (e) { fail(e); } })(); }); }
+  state.lastView = viewKey();
+  $('main.page.enter')?.querySelectorAll(':scope > *, :scope > * > .card, :scope > * > section').forEach((el, i) => el.style.setProperty('--i', Math.min(i, 8)));
   wireCalDrag();
+  wireGridDrag();
   const drop = $('#drop');
   if (drop) {
     $('#reel-input').addEventListener('change', (e) => uploadReels(e.target.files));
@@ -1523,6 +1600,7 @@ document.addEventListener('click', async (e) => {
       case 'open-post': postDialog([Number(el.dataset.pid)]); break;
       case 'share-open': shareDialog(); break;
       case 'ics-open': icsDialog(); break;
+      case 'grid-acc': state.gridAccount = id; render(); break;
       case 'camp-new': campDialog(); break;
       case 'up-kind': state.upKind = el.dataset.k; render(); break;
       case 'reel-filter': state.reelFilter = el.dataset.k; render(); break;

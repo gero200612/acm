@@ -648,6 +648,54 @@ export function recorridoCases(sb) {
       if (inside) yes(q.status === 'bloqueado' && /venci/.test(q.note), `estado ${q.status}, nota ${q.note}`);
       else eq(q.status, 'programado', 'fuera de horario espera');
     }],
+    [G('compartir'), 'Link para aprobar sin cuenta: pide código, ve solo su proyecto, aprueba lo pendiente (opinión del dirigente) y no cambia lo ya decidido; «solo mirar» no aprueba; desactivado no abre', async () => {
+      const pub = (method, url, body, code) => als.exit(async () => { const r = await fetch(sb.box.base + url, { method, headers: { 'content-type': 'application/json', ...(code ? { 'x-share-code': code } : {}) }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, j }; });
+      const r = await api('POST', '/api/projects', form({ name: 'Compartir', kind: 'politica' }), true); c.sh = r.j.id;
+      const up = await api('POST', `/api/projects/${c.sh}/reels`, form({ files: [1, 2, 3].map((n) => [new Blob([fakeMp4(1080, 1920, 6 + n)], { type: 'video/mp4' }), `s${n}.mp4`]) }), true);
+      c.shReels = up.j.map((x) => x.id);
+      for (const [n, id] of c.shReels.entries()) await api('PUT', `/api/reels/${id}`, { clip_id: 'clip-sh', moment: { inicio_s: 1, fin_s: 20, tema: 'Cuota' }, recipe: { variables: { gancho: 'directo', subtitulos: ['karaoke', 'placa', 'minimo'][n], musica: 'sin', ritmo: 'normal', largo: 'completo' } } });
+      eq((await api('POST', `/api/projects/${c.sh}/shares`, { code: '123' })).status, 400, 'código corto');
+      const l = (await api('POST', `/api/projects/${c.sh}/shares`, { label: 'Juan', can: 'revisar', calendar: true, code: 'clave-123', days: 30 })).j;
+      const t = l.path.split('/')[2];
+      eq((await pub('GET', `/pub/share/${t}`)).status, 401, 'sin código');
+      eq((await pub('GET', `/pub/share/${t}`, null, 'mala-123')).status, 401, 'código malo');
+      const g = await pub('GET', `/pub/share/${t}`, null, 'clave-123');
+      eq([g.status, g.j.pending.length, g.j.pending[0].reels.length, g.j.can], [200, 1, 3, 'revisar'], 've el recorte pendiente');
+      eq(JSON.stringify(g.j).includes('recipe'), false, 'no muestra la receta interna');
+      const v = g.j.pending[0].reels[0].video;
+      eq((await als.exit(() => fetch(sb.box.base + v))).status, 200, 'el video de su proyecto');
+      eq((await als.exit(() => fetch(sb.box.base + `/s/${t}/media/acm.db`))).status, 404, 'un archivo que no es suyo');
+      eq((await pub('POST', `/pub/share/${t}/clips/clip-ap`, { decision: 'aprobar' }, 'clave-123')).status, 404, 'un recorte de otro proyecto');
+      const ok = await pub('POST', `/pub/share/${t}/clips/clip-sh`, { decision: 'aprobar', nombre: 'Juan' }, 'clave-123');
+      eq([ok.status, ok.j.reels.map((x) => x.review)], [200, ['aprobado', 'aprobado', 'aprobado']], 'aprobado desde el link');
+      eq(sb.box.sql("SELECT count(*) n FROM learnings WHERE project_id = ? AND origin = 'opinion_dirigente'", c.sh)[0].n > 0, true, 'opinión del dirigente');
+      eq(sb.box.sql('SELECT comentario FROM clip_reviews WHERE clip_id = ? ORDER BY id DESC LIMIT 1', 'clip-sh')[0].comentario, '(por link: Juan)', 'queda quién decidió');
+      eq((await pub('POST', `/pub/share/${t}/clips/clip-sh`, { decision: 'rechazar', comentario: 'no' }, 'clave-123')).status, 409, 'lo ya decidido no se cambia desde el link');
+      const ver = (await api('POST', `/api/projects/${c.sh}/shares`, { can: 'ver' })).j.path.split('/')[2];
+      eq((await pub('POST', `/pub/share/${ver}/clips/clip-sh`, { decision: 'aprobar' })).status, 403, 'solo mirar');
+      await api('DELETE', `/api/shares/${l.id}`);
+      eq((await pub('GET', `/pub/share/${t}`, null, 'clave-123')).status, 404, 'desactivado');
+    }],
+    [G('compartir'), 'Calendario .ics: GET no crea nada, POST crea el link; el feed trae las publicaciones y un token malo da 404', async () => {
+      eq((await api('GET', `/api/projects/${c.sh}/ics`)).j.path, '', 'GET solo lee');
+      const acc = (await api('POST', `/api/projects/${c.sh}/accounts`, { network: 'instagram' })).j.id;
+      const day = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
+      eq((await api('POST', `/api/projects/${c.sh}/posts`, [{ reel_id: c.shReels[0], account_id: acc, scheduled_at: `${day} 12:00` }, { reel_id: c.shReels[1], account_id: acc, scheduled_at: `${day} 16:00` }])).status, 200, 'dos programadas');
+      const path_ = (await api('POST', `/api/projects/${c.sh}/ics`, {})).j.path;
+      const feed = await als.exit(async () => (await fetch(sb.box.base + path_)).text());
+      eq([feed.startsWith('BEGIN:VCALENDAR'), (feed.match(/BEGIN:VEVENT/g) || []).length, feed.includes('\r\n')], [true, 2, true], 'feed con las dos');
+      eq((await als.exit(() => fetch(sb.box.base + '/ics/nada.ics'))).status, 404, 'token malo');
+    }],
+    [G('compartir'), 'Intercambiar dos publicaciones de la misma cuenta: cada una toma la hora de la otra (se validan sin contarse entre sí)', async () => {
+      const L = (await api('GET', `/api/projects/${c.sh}/posts`)).j.filter((x) => x.status === 'programado');
+      const [a, b] = L;
+      const s = await api('POST', '/api/posts/swap', { a: a.id, b: b.id });
+      eq(s.status, 200, 'intercambio');
+      const M = Object.fromEntries((await api('GET', `/api/projects/${c.sh}/posts`)).j.map((x) => [x.id, x.scheduled_at]));
+      eq([M[a.id], M[b.id]], [b.scheduled_at, a.scheduled_at], 'horas cruzadas');
+      eq((await api('POST', '/api/posts/swap', { a: a.id, b: a.id })).status, 404, 'consigo misma');
+      eq((await api('DELETE', `/api/projects/${c.sh}`)).j?.ok, true, 'se borra el proyecto de prueba (no deja publicaciones para los casos que siguen)');
+    }],
     [G('proyecto'), 'Con anuncios activos no se puede borrar el proyecto (409, pausá la pauta primero); pausados, sí', async () => {
       if (!sb.box) throw new Error(sb.error || 'no hay copia aislada');
       const id = sb.box.write("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (?, 1, 'meta', 'SET-vivo', 5, 'activa', '2026-11-21 10:00', '2026-11-21 10:00')", c.p).lastInsertRowid;
