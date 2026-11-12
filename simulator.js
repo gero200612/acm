@@ -36,6 +36,14 @@ export function startSimulator(port = 0) {
     }
     // Meta
     if (p === '/graph/PAGEBAD') return send(res, 400, { error: { message: `Malformed access token ${u.searchParams.get('access_token')}` } });
+    // cuentas vigiladas: business_discovery de una cuenta ajena (la 1.ª publicación, de ayer, rinde 6× lo normal)
+    if (p === '/graph/IG1' && /business_discovery\.username\(/.test(u.searchParams.get('fields') || '')) {
+      const user = (u.searchParams.get('fields').match(/business_discovery\.username\(([^)]+)\)/) || [])[1];
+      if (user === 'no.existe') return send(res, 400, { error: { message: 'Invalid user id', code: 110 } });
+      const day = (n) => new Date(Date.now() - n * 864e5).toISOString().replace(/\.\d+Z$/, '+0000');
+      const media = Array.from({ length: 12 }, (_, i) => ({ id: `${user}-${i}`, caption: `Publicación ${i} de ${user}`, like_count: i === 0 ? 600 : 90 + i, comments_count: 10, timestamp: day(i + 1), permalink: `https://www.instagram.com/p/${user}${i}/`, media_type: 'VIDEO', media_product_type: 'REELS' }));
+      return send(res, 200, { business_discovery: { username: user, followers_count: 20000, media: { data: media } }, id: 'IG1' });
+    }
     if (p === '/graph/PAGE1' && req.method === 'GET') return send(res, 200, { name: 'Página Mock', followers_count: 999, instagram_business_account: { id: 'IG1', username: 'mock.ig', followers_count: 1234 } });
     if (p === '/graph/IG1/media') return params.upload_type === 'resumable' && params.media_type === 'REELS' ? send(res, 200, { id: 'C1', uri: `${B}/rup/ig/C1` }) : send(res, 400, { error: { message: 'faltan params' } });
     if (p === '/rup/ig/C1') return req.headers.authorization?.startsWith('OAuth ') && Number(req.headers.file_size) === body.length ? send(res, 200, { success: true }) : send(res, 400, { error: { message: 'subida mal: ' + req.headers.file_size + ' vs ' + body.length } });

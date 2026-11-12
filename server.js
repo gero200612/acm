@@ -30,6 +30,7 @@ import { initMarketing, marketingCycle, projectsToCycle } from './marketing.js';
 import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars } from './memory.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS, outliers } from './knowledge.js';
 import { initShare, mountShare, ensureReportLink } from './share.js';
+import { initWatch, watchCycle } from './watch.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA = path.resolve(process.env.ACM_DATA || './data');
@@ -295,6 +296,7 @@ app.use('/api', requireAuth);
 
 // links para compartir sin cuenta (el dirigente aprueba desde el celular): gestión con sesión; /s y /pub, públicas con el token
 initShare(db);
+initWatch(db);
 mountShare(app, {
   get, all, run, tz: TZ, reviewClip: (...x) => reviewClip(...x),
   sendMedia: async (res, file, next) => {
@@ -744,6 +746,13 @@ app.put('/api/posts/:id', (req, res) => {
   }
   update('posts', p.id, d);
   res.json({ ok: true });
+});
+// Releer ya las cuentas vigiladas (las de la Investigación) y avisar si alguna publicó algo que explota.
+let watching = false;
+app.post('/api/watch/run', async (req, res) => {
+  if (watching) return res.status(409).json({ error: 'Ya se están releyendo las cuentas' });
+  watching = true;
+  try { res.json(await watchCycle(db, (a) => vault.open(a.creds))); } catch (e) { res.status(500).json({ error: e.message }); } finally { watching = false; }
 });
 // Buscador global (⌘K): proyectos, reels y cuentas de todos los proyectos.
 app.get('/api/search', (req, res) => {
@@ -1323,6 +1332,14 @@ async function informeSemanal() {
   await avisos();
 }
 if (process.env.ACM_SCHEDULER !== 'off') { setInterval(informeSemanal, 60e3); setTimeout(informeSemanal, 40e3); }
+// cuentas vigiladas: cada 6 horas (la primera, a los 3 minutos de arrancar)
+async function vigilar() {
+  if (watching) return;
+  watching = true;
+  try { const r = await watchCycle(db, (a) => vault.open(a.creds)); if (r.errors.length) console.error('cuentas vigiladas:', r.errors.join(' | ')); if (r.alerts) await avisos(); }
+  catch (e) { console.error('cuentas vigiladas:', mask(e.message)); } finally { watching = false; }
+}
+if (process.env.ACM_SCHEDULER !== 'off' && process.env.ACM_WATCH !== 'off') { setInterval(vigilar, 6 * 3600e3); setTimeout(vigilar, 180e3); }
 
 // al arrancar completa vectores pendientes (la copia del banco lo hace enseguida para reproducir el orden de producción: primero este, después las importaciones)
 setTimeout(fillVectors, Number(process.env.ACM_FILL_MS) || 5000);

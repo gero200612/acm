@@ -707,6 +707,20 @@ export function recorridoCases(sb) {
       eq([gr.report?.days, gs.report], [30, null], 'el informe solo en el link que lo pide');
       eq((await api('DELETE', `/api/projects/${c.sh}`)).j?.ok, true, 'se borra el proyecto de prueba (no deja publicaciones para los casos que siguen)');
     }],
+    [G('vigilar'), 'Cuentas vigiladas: relee las cuentas de la Investigación con la cuenta de Instagram del proyecto, avisa una sola vez lo que explota y una cuenta que falla no frena a las demás', async () => {
+      const p = (await api('POST', '/api/projects', form({ name: 'Vigilar', kind: 'politica' }), true)).j.id;
+      const a = (await api('POST', `/api/projects/${p}/accounts`, { network: 'instagram' })).j.id;
+      await api('PUT', `/api/accounts/${a}/connection`, { pageId: 'PAGE1', pageAccessToken: SECRETS[0] });
+      eq((await api('POST', `/api/accounts/${a}/test`, {})).j.status, 'conectada', 'Instagram conectado');
+      const post = (h, i) => ({ caption: `viejo ${i}`, like_count: 50, comments_count: 1, timestamp: '2026-01-0' + (1 + (i % 9)) + 'T12:00:00+0000', permalink: `https://www.instagram.com/p/${h}v${i}/` });
+      eq((await api('POST', `/api/projects/${p}/knowledge/import`, { instagram: [{ username: 'rival.uno', followers_count: 1, posts: [0, 1, 2].map((i) => post('rival.uno', i)) }, { username: 'no.existe', followers_count: 1, posts: [post('no.existe', 0)] }] })).status, 200, 'cuentas en la investigación');
+      const r1 = (await api('POST', '/api/watch/run', {})).j;
+      eq([r1.refreshed >= 1, r1.alerts >= 1, r1.errors.some((e) => e.startsWith('@no.existe')), JSON.stringify(r1).includes(SECRETS[0])], [true, true, true, false], 'releyó, avisó, la que falla no frena y no muestra el token');
+      eq((await api('POST', '/api/watch/run', {})).j.alerts, 0, 'la misma publicación no se avisa dos veces');
+      const al = sb.box.sql("SELECT text FROM alerts WHERE project_id = ? AND kind = 'rival_explota'", p);
+      eq([al.length, al[0].text.includes('@rival.uno') && al[0].text.includes('https://www.instagram.com/p/rival.uno0/')], [1, true], 'el aviso dice quién y el link');
+      eq((await api('DELETE', `/api/projects/${p}`)).j?.ok, true, 'borrar el proyecto de prueba');
+    }],
     [G('proyecto'), 'Con anuncios activos no se puede borrar el proyecto (409, pausá la pauta primero); pausados, sí', async () => {
       if (!sb.box) throw new Error(sb.error || 'no hay copia aislada');
       const id = sb.box.write("INSERT INTO promotions (project_id, post_id, network, ad_id, daily_usd, status, started_at, updated_at) VALUES (?, 1, 'meta', 'SET-vivo', 5, 'activa', '2026-11-21 10:00', '2026-11-21 10:00')", c.p).lastInsertRowid;

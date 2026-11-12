@@ -29,6 +29,7 @@ const ICON = {
   play: 'M7 5v14l11-7Z',
   left: 'm15 6-6 6 6 6',
   right: 'm9 6 6 6-6 6',
+  refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
   star: 'm12 3 2.7 5.6 6.2.9-4.5 4.4 1.1 6.1L12 17l-5.5 3 1.1-6.1L3.1 9.5l6.2-.9z',
   search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5',
   link: 'M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1',
@@ -1228,7 +1229,8 @@ function knDraw() {
     ${O.map((x) => `<a class="kn-o" ${/^https?:\/\//i.test(x.url || '') ? `href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"` : ''}><span class="kn-score">×${x.score.toLocaleString('es-AR', { maximumFractionDigits: 1 })}</span>
       <span><b>@${esc(x.handle)}</b> <span class="small muted">· ${esc(x.type || '')} · ${esc(x.date || '')}</span><span class="kn-ot">${esc(x.text)}</span>
       <span class="small muted">${fmt(x.eng)} interacciones · lo normal en la cuenta: ${fmt(x.median)}</span></span></a>`).join('')}</div>` : '';
-  $('#kn-side').innerHTML = outCard + `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa.</p>
+  $('#kn-side').innerHTML = outCard + `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa. Se releen solas cada 6 horas con una cuenta de Instagram conectada del proyecto, y si una publica algo que rinde 3× o más lo normal, te aviso por Telegram.</p>
+    <button class="btn sm" data-act="watch-run" style="margin:4px 0 10px">${icon('refresh', 15)} Actualizar ahora</button>
     <div class="kn-acc">${A.map((a) => `<button data-act="kn-handle" data-h="${esc(a.handle)}" class="${K.handle === a.handle ? 'sel' : ''}"><b>@${esc(a.handle)}</b><span>${fmt(a.followers)} seg. · ${fmt(a.posts)} publ.</span><span>${fmt(a.avg_eng)} interacciones prom. · ${a.followers ? fmt(a.avg_eng / a.followers * 100, 1) : 0} %</span></button>`).join('') || '<p class="small muted">Ninguna todavía.</p>'}</div></div>
     <div class="card"><h2 class="h2">Importar</h2><p class="small muted">JSON con <code>items</code> (fichas) y/o <code>instagram</code> (cuentas con sus publicaciones).</p>
     <label class="btn">${icon('up')} Elegir archivo<input type="file" id="kn-file" accept=".json,application/json" hidden></label>
@@ -1765,6 +1767,7 @@ document.addEventListener('click', async (e) => {
       case 'share-open': shareDialog(); break;
       case 'ics-open': icsDialog(); break;
       case 'grid-acc': state.gridAccount = id; render(); break;
+      case 'watch-run': { el.disabled = true; el.textContent = 'Releyendo…'; try { const r = await api('/api/watch/run', { method: 'POST' }); toast(r.refreshed ? `Releídas ${r.refreshed} cuentas${r.alerts ? ` · ${r.alerts} ${r.alerts === 1 ? 'aviso' : 'avisos'} de algo que explota` : ''}${r.errors.length ? ` · ${r.errors.length} con error` : ''}` : (r.errors[0] || 'No hay cuentas para releer: hace falta una cuenta de Instagram conectada en el proyecto'), !r.refreshed); knLoad(); } catch (err) { fail(err); } el.disabled = false; break; }
       case 'pin': { e.preventDefault(); const pid = Number(el.dataset.pin); const P = pins(); const next = P.includes(pid) ? P.filter((x) => x !== pid) : [...P, pid]; try { localStorage.setItem('acm.pins', JSON.stringify(next)); } catch {} render(); break; }
       case 'palette': paletteOpen(); break;
       case 'perf-days': state.perfDays = Number(el.dataset.k); render(); break;
