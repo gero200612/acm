@@ -1,28 +1,114 @@
-# Lo que tomamos de Sequence Social para ACM
+# Sequence Social contra ACM: todo lo que tienen y qué hicimos con cada cosa
 
-Sequence Social (sequencesocial.com) es una herramienta parecida a ACM, pensada para agencias y marcas: planifica, aprueba, publica y mide contenido en varias cuentas. Relevamos su sitio entero el 12/11/2026 (313 páginas: funciones, centro de ayuda y las 105 novedades de los últimos meses). No se copió nada literal: se tomaron las ideas que le sirven a una campaña con muchas cuentas y se armaron a nuestra manera.
+Sequence Social (sequencesocial.com) es una herramienta parecida a ACM, para agencias y marcas: planifica, aprueba, publica, responde mensajes y mide contenido en varias cuentas. El 12/11/2026 relevamos su sitio entero: 313 páginas (funciones, el centro de ayuda completo, precios, hoja de ruta y las 105 novedades de los últimos meses), y probamos su demo interactiva. No se copió nada literal: se tomaron ideas y se armaron a nuestra manera, para una campaña con muchas cuentas.
 
-## Ya está en ACM (12/11)
+Referencias: **Nuevo** = se hizo el 12/11 · **Ya estaba** = ACM ya lo tenía · **Se puede** = falta, se puede armar · **No aplica** = no sirve para ACM (y por qué).
 
-1. **Mover una publicación arrastrándola en el calendario.** Se levanta la tarjeta, se suelta en otro día y mantiene la hora. El día de destino se marca, al soltar aparece «Deshacer» y si el día no se puede (veda, ya pasó, choca con otra versión del mismo recorte) vuelve a su lugar y dice por qué. Las que ya salieron o salen en menos de 15 minutos quedan fijas. En el celular se arrastra con pulsación larga.
-2. **Vista Semana**, además de la de Mes.
-3. **Grilla del perfil**: cómo va a quedar el feed de cada cuenta (lo publicado y lo que viene, en un celular). Arrastrar un reel sobre otro los intercambia: las horas quedan, cambian los reels, así no se toca el ritmo de publicación.
-4. **Compartir para aprobar**: un link para que el dirigente vea los recortes desde el celular, sin cuenta, y los apruebe o pida cambios con un comentario. Se elige si puede aprobar o solo mirar, si ve el calendario de lo que viene, un código y un vencimiento. Desde el link nunca se publica nada, y su opinión enseña al editor igual que la nuestra.
-5. **Calendario sincronizable**: un link para ver las publicaciones de cada proyecto en Google Calendar, el iPhone u Outlook, que se actualiza solo.
-6. **Mejores horarios**: según las vistas de lo ya publicado, qué franja rinde más en cada red (por ejemplo, 17 a 20 h rinde ×2,5). Con pocas publicaciones medidas no inventa nada.
-7. **Lo que mejor les funcionó**: en Investigación, las publicaciones de las cuentas relevadas (rivales o afines) que tuvieron el doble o más de las interacciones normales de esa cuenta.
-8. **Mover un día entero**: si se suspende un acto, todas las publicaciones del día pasan a otra fecha con su misma hora (todo o nada, con Deshacer).
-9. **Deshacer al borrar** una publicación programada.
-10. **Informe para el dirigente** en el link compartido (opcional): lo publicado en los últimos 30 días, vistas, por red y lo que mejor anduvo.
-11. **Animaciones**: entrada suave al cambiar de pestaña y en la página del link, y las barras de los mejores horarios que crecen.
+## Planificar
 
-## Se puede armar después
+| Sequence | ACM |
+|---|---|
+| Calendario por mes y semana, con scroll continuo | **Nuevo**: vista Semana (Mes ya estaba) |
+| Arrastrar un post a otra fecha (con revisión antes de guardar) | **Nuevo**: arrastrar entre días, mantiene la hora, Deshacer; las reglas del servidor validan |
+| Grilla del perfil: ver el feed y reordenarlo arrastrando | **Nuevo**: Grilla por cuenta; arrastrar un reel sobre otro intercambia horas |
+| Vista Lista con filtros, orden y búsqueda | **Nuevo**: Lista con búsqueda, estado, red y orden |
+| Tablero por etapas (Board) | **Nuevo**: Tablero en el Resumen (editor → aprobar → listo → programado → publicado → problemas). En ACM las etapas las marca el sistema solo, no se arrastran |
+| Vista Galería de tarjetas | **Se puede** (es la grilla sin el celular) |
+| Mover o copiar posts a otra marca | **Se puede** (otro proyecto) |
+| Duplicar y editar en bloque, clic derecho | **Nuevo**: mover un día entero (todo o nada). **Se puede**: selección múltiple |
+| Estados propios, campos propios (fecha, persona) | **No aplica**: ACM tiene un circuito fijo y automático |
+| Documento del post (guion, lista de tomas, notas) | **Se puede**: notas del recorte para el editor |
+| Plantillas de contenido y bloques | **Se puede**: plantillas de campaña (estructura de un proyecto que funcionó) |
+| Importar desde planilla, Notion, Trello | **Ya estaba** a medias: el padrón (CSV/XLSX) y la investigación (JSON) |
+| Historial de versiones, papelera | **Nuevo**: Deshacer al borrar una publicación. **Se puede**: papelera de reels |
+| Fijar proyectos | **Nuevo**: estrella en la barra lateral |
+| Ver quién más está en el planificador | **No aplica**: ACM lo usa una sola persona |
+| Zona horaria por marca | **Ya estaba**: ACM_TZ |
+| Página de inicio personalizable | **Nuevo**: el Resumen suma rendimiento y tablero |
 
-- **Bandeja de mensajes y comentarios** de todas las cuentas en un solo lugar, con respuestas automáticas por palabra clave (por ejemplo: alguien comenta «PROPUESTAS» y le llega un mensaje con el PDF). Necesita permisos de Meta para mensajes.
-- **Informes que se mandan solos**: el informe del link, enviado cada semana por mail o WhatsApp.
-- **Programar en el mejor horario automáticamente**: que el planificador use los mejores horarios de cada red en lugar de horarios fijos.
-- **Comentarios sobre el video en un segundo exacto**, para pedir un cambio puntual («en el 0:12 tapa la cara»).
-- **Alertas de cuentas vigiladas**: aviso cuando un rival publica algo que rinde muy por encima de lo normal.
-- **Guardar referencias**: links de reels de otros (de cualquier red) en una biblioteca, para que el editor los tome de inspiración.
-- **Plantillas de campaña**: armar un proyecto nuevo con la estructura de uno que ya funcionó.
-- **Papelera completa**: recuperar también un reel borrado por error (las publicaciones ya se pueden deshacer).
+## Medios y revisión
+
+| Sequence | ACM |
+|---|---|
+| Subir videos grandes, almacenamiento para crudos | **Ya estaba**: R2, hasta 5 GB |
+| Comentar en un segundo exacto o dibujar sobre el cuadro | **Se puede** («en el 0:12 tapa la cara») |
+| Versiones del mismo video y comparar | **Ya estaba**: las 3 ediciones de cada recorte |
+| Elegir la portada | **Ya estaba**: la portada que manda el editor |
+| Notas de voz en los comentarios | **Se puede** |
+| Carruseles | **No aplica**: ACM publica reels |
+
+## Aprobaciones
+
+| Sequence | ACM |
+|---|---|
+| Aprobar o pedir cambios con comentario | **Ya estaba**: Para aprobar |
+| Link para el cliente sin cuenta (ver / revisar / editar, código, vencimiento) | **Nuevo**: Compartir para aprobar (ver o aprobar, código, vencimiento, calendario e informe opcionales) |
+| Comentarios privados y públicos | **No aplica** por ahora (un solo usuario interno) |
+| Pasos de aprobación y avisos automáticos | **Ya estaba** a su manera: revisión manual o automática y avisos por Telegram |
+
+## Publicar
+
+| Sequence | ACM |
+|---|---|
+| Instagram, Facebook, YouTube, TikTok | **Ya estaba** |
+| LinkedIn, X, Threads, Pinterest, Google Business | **No aplica** para campañas de club/política (se puede si hace falta) |
+| Programar muchos de una vez | **Ya estaba**: el reparto y el planificador |
+| Texto distinto por red | **Se puede** |
+| Etiquetar cuentas y colaboradores en Instagram | **Se puede** |
+| Música en Reels y TikTok | **Ya estaba** en el editor (música con licencia) |
+| Reintentar si falla la descarga | **Ya estaba** a medias: estado fallido y reintento manual |
+| Editar un post ya publicado | **No aplica** para reels (las redes no dejan cambiar el video) |
+| Reels de prueba de Instagram (trial reels) | **Se puede**: probar un recorte con no seguidores antes de publicarlo en serio |
+
+## Medir
+
+| Sequence | ACM |
+|---|---|
+| Métricas de cada post | **Ya estaba** |
+| Inicio con rendimiento 7/30/90 días y mejores posts | **Nuevo**: en el Resumen, contra el período anterior, con curva y lo que mejor anduvo |
+| Mejor horario para publicar | **Nuevo**: mejores franjas por red. **Se puede**: que el planificador las use solo |
+| Tableros armables, comparar redes | **Se puede** |
+| Informes para compartir (web, PDF) | **Nuevo**: informe de 30 días dentro del link compartido |
+| Informes que se mandan solos (diarios, semanales) | **Ya estaba** el resumen diario por Telegram para Gero. **Se puede**: el informe al dirigente cada semana |
+| Rendimiento de anuncios | **Ya estaba**: Campañas y pauta |
+
+## Mensajes
+
+| Sequence | ACM |
+|---|---|
+| Bandeja única de comentarios y mensajes | **Se puede** (necesita permisos de Meta para mensajes) |
+| Comentario con palabra clave → mensaje automático, quizzes, juntar mails | **Se puede** (alguien comenta «PROPUESTAS» y le llega el PDF) |
+| Bienvenida y temas sugeridos para mensajes nuevos | **Se puede** |
+
+## Inspiración
+
+| Sequence | ACM |
+|---|---|
+| Guardar posts de otros por link o extensión | **Se puede**: biblioteca de referencias para el editor |
+| Páginas por creador y cargar más posts | **Ya estaba**: cuentas relevadas en Investigación |
+| Posts que superan lo normal de un creador (outliers) | **Nuevo**: «Lo que mejor les funcionó» |
+| Alertas cuando un creador vigilado tiene un outlier | **Se puede** |
+| Analizar ganchos y estructuras | **Ya estaba** a su manera: el editor y la memoria aprenden qué funciona |
+
+## Inteligencia artificial
+
+| Sequence | ACM |
+|---|---|
+| Asistente al costado de cada página que hace cambios | **Ya estaba** a medias: «Preguntale a la investigación». **Se puede**: que también actúe |
+| Investigar en la web | **Se puede** |
+| Voz de la marca (Brand Brain) | **Ya estaba** a su manera: investigación + memoria del proyecto |
+| Textos con la voz de la marca | **Ya estaba**: el editor escribe los textos |
+
+## Integraciones y equipo
+
+| Sequence | ACM |
+|---|---|
+| Sincronizar con el calendario | **Nuevo**: link .ics para Google Calendar, iPhone y Outlook |
+| Slack, API, webhooks, MCP para asistentes | **Se puede** (Telegram ya cumple el aviso) |
+| Buscador global | **Nuevo**: ⌘K / Ctrl+K |
+| Roles y permisos, varios espacios de trabajo | **No aplica** hoy (ACM lo usa solo Gero) |
+| App para el celular | **Se puede**: ACM ya se ve bien en el celular; faltaría instalarlo como app |
+
+## Animaciones y detalles
+
+- **Nuevo**: arrastre con la tarjeta que se levanta e inclina, el día de destino marcado y la tarjeta que vuela a su lugar; entrada suave al cambiar de pestaña; números que cuentan hacia arriba; barras que crecen; la curva de vistas que se dibuja; aparición al hacer scroll en la página del link.
