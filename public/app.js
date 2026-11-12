@@ -29,6 +29,7 @@ const ICON = {
   play: 'M7 5v14l11-7Z',
   left: 'm15 6-6 6 6 6',
   right: 'm9 6 6 6-6 6',
+  move: 'M12 3v18M3 12h18M12 3l-3 3m3-3 3 3M12 21l-3-3m3 3 3-3M3 12l3-3m-3 3 3 3M21 12l-3-3m3 3-3 3',
   file: 'M7 3h7l5 5v13H7zM14 3v5h5',
   flask: 'M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9',
 };
@@ -65,14 +66,20 @@ async function api(url, opt = {}) {
   if (!r.ok) throw new Error(data.error || 'Algo falló');
   return data;
 }
-function toast(msg, err) {
+function toast(msg, err, action) {
   const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg;
-  $('#toasts').append(t); setTimeout(() => t.remove(), 3200);
+  if (action) {
+    const b = document.createElement('button'); b.className = 'toast-act'; b.textContent = action.label;
+    b.addEventListener('click', () => { t.remove(); action.fn(); }, { once: true });
+    t.append(b);
+  }
+  $('#toasts').append(t); setTimeout(() => t.remove(), action ? 6000 : 3200);
 }
 const fail = (e) => toast(e.message || 'Algo falló', true);
 
 // ---------- estado ----------
 const state = { authed: false, projects: [], project: null, accounts: [], reels: [], posts: [], uploads: [] };
+try { state.calMode = localStorage.getItem('acm.calMode') || 'mes'; } catch { state.calMode = 'mes'; }
 
 async function loadProjects() { state.projects = await api('/api/projects'); }
 async function loadProject(id) {
@@ -487,41 +494,156 @@ function reelsView() {
   return `<div class="rl">${side}<div class="rl-main">${ALL.length ? filt : ''}${grid}</div></div>`;
 }
 
+// Una publicación se puede mover (arrastrar a otro día) si todavía no salió y faltan más de 15 minutos.
+const LOCK_MS = 15 * 60 * 1000;
+const movable = (x) => (x.status === 'programado' || x.status === 'fallido') && pdate(x.scheduled_at) - Date.now() > LOCK_MS;
 function calendarioView() {
   const p = state.project, S = state.posts;
+  const week = state.calMode === 'semana';
   const m = state.calMonth || (state.calMonth = (() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; })());
-  const first = new Date(m); const start = new Date(first); start.setDate(1 - ((first.getDay() + 6) % 7)); // semana empieza el lunes
+  const wk = state.calWeek || (state.calWeek = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d; })());
+  const first = new Date(m); const start = week ? new Date(wk) : new Date(first); if (!week) start.setDate(1 - ((first.getDay() + 6) % 7)); // semana empieza el lunes
   const last = new Date(m.getFullYear(), m.getMonth() + 1, 0);
-  const cells = Math.ceil(((first.getDay() + 6) % 7 + last.getDate()) / 7) * 7;
+  const cells = week ? 7 : Math.ceil(((first.getDay() + 6) % 7 + last.getDate()) / 7) * 7;
   const elec = p.election_date ? new Date(p.election_date + 'T00:00') : null;
   const lim = p.propaganda_until ? new Date(p.propaganda_until + 'T00:00') : null;
   const todayD = new Date(); todayD.setHours(0, 0, 0, 0);
   const days = Array.from({ length: cells }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
-  const inMonth = S.filter((x) => { const d = pdate(x.scheduled_at); return d.getMonth() === m.getMonth() && d.getFullYear() === m.getFullYear(); });
-  return `<section class="card cal">
+  const shown = S.filter((x) => { const d = pdate(x.scheduled_at); return week ? d >= days[0] && d < new Date(days[6].getTime() + 86400000) : d.getMonth() === m.getMonth() && d.getFullYear() === m.getFullYear(); });
+  const cap = (s) => s[0].toUpperCase() + s.slice(1);
+  const title = week
+    ? `${days[0].getDate()} ${days[0].getMonth() !== days[6].getMonth() ? days[0].toLocaleDateString('es-AR', { month: 'short' }) + ' ' : ''}– ${days[6].getDate()} ${days[6].toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}`
+    : cap(m.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }));
+  const ev = (x) => `<button class="cal-ev s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-drag="1"' : ''} title="${esc(x.reel_title)} · ${esc(x.handle ? '@' + x.handle : NETS[x.network].name)}${movable(x) ? ' · arrastrá para cambiar el día' : ''}"><i class="nd ${x.network}"></i><span class="t">${fmtTime(x.scheduled_at)}</span><span class="r">${esc(x.reel_title)}</span></button>`;
+  return `<section class="card cal ${week ? 'week' : ''}">
     <div class="cal-head">
-      <h2 class="h2">${(() => { const t = m.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }); return t[0].toUpperCase() + t.slice(1); })()}</h2>
-      <span class="small muted">${inMonth.length} ${inMonth.length === 1 ? 'publicación' : 'publicaciones'} este mes</span>
+      <h2 class="h2">${title}</h2>
+      <span class="small muted">${shown.length} ${shown.length === 1 ? 'publicación' : 'publicaciones'} ${week ? 'esta semana' : 'este mes'}</span>
       <span class="spacer"></span>
+      <div class="seg" role="group" aria-label="Vista"><button aria-pressed="${!week}" data-act="cal-mode" data-k="mes">Mes</button><button aria-pressed="${week}" data-act="cal-mode" data-k="semana">Semana</button></div>
       <button class="btn sm" data-act="cal-today">Hoy</button>
-      <button class="icon-btn" data-act="cal-prev" aria-label="Mes anterior">${icon('left')}</button>
-      <button class="icon-btn" data-act="cal-next" aria-label="Mes siguiente">${icon('right')}</button>
+      <button class="icon-btn" data-act="cal-prev" aria-label="${week ? 'Semana anterior' : 'Mes anterior'}">${icon('left')}</button>
+      <button class="icon-btn" data-act="cal-next" aria-label="${week ? 'Semana siguiente' : 'Mes siguiente'}">${icon('right')}</button>
     </div>
+    <p class="cal-hint small muted">${icon('move', 14)} Arrastrá una publicación a otro día para moverla: mantiene la hora. Las que ya salieron o salen en menos de 15 minutos quedan fijas.</p>
     <div class="cal-grid">
-      ${['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].map((d) => `<div class="cal-wd">${d}</div>`).join('')}
+      ${days.slice(0, 7).map((d) => `<div class="cal-wd ${week && sameDay(d, todayD) ? 'today' : ''}">${d.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}${week ? ` <b>${d.getDate()}</b>` : ''}</div>`).join('')}
       ${days.map((d) => {
         const L = S.filter((x) => sameDay(pdate(x.scheduled_at), d));
-        const out = d.getMonth() !== m.getMonth();
+        const out = !week && d.getMonth() !== m.getMonth();
         const isE = elec && sameDay(d, elec), isL = lim && sameDay(d, lim), after = lim && d > lim && !(elec && d >= elec);
         const cls = [out ? 'out' : '', sameDay(d, todayD) ? 'today' : '', isE ? 'elec' : '', after ? 'veda' : '', d < todayD ? 'past' : ''].join(' ');
-        return `<div class="cal-day ${cls}">
-          <div class="cal-dn"><span>${d.getDate()}</span>${isE ? '<em class="tag e">Elección</em>' : isL ? '<em class="tag l">Fin de propaganda</em>' : ''}</div>
-          ${L.slice(0, 3).map((x) => `<button class="cal-ev s-${x.status}" data-act="open-post" data-pid="${x.id}" title="${esc(x.reel_title)} · ${esc(x.handle ? '@' + x.handle : NETS[x.network].name)}"><i class="nd ${x.network}"></i><span class="t">${fmtTime(x.scheduled_at)}</span><span class="r">${esc(x.reel_title)}</span></button>`).join('')}
-          ${L.length > 3 ? `<button class="cal-more" data-act="open-day" data-day="${ymd(d)}">+${L.length - 3} más</button>` : ''}
+        const drop = d >= todayD && !after;
+        const max = week ? 99 : 3;
+        return `<div class="cal-day ${cls}" data-day="${ymd(d)}" ${drop ? 'data-drop="1"' : ''}>
+          <div class="cal-dn">${week ? '' : `<span>${d.getDate()}</span>`}${isE ? '<em class="tag e">Elección</em>' : isL ? '<em class="tag l">Fin de propaganda</em>' : ''}</div>
+          ${L.slice(0, max).map(ev).join('')}
+          ${L.length > max ? `<button class="cal-more" data-act="open-day" data-day="${ymd(d)}">+${L.length - max} más</button>` : ''}
         </div>`; }).join('')}
     </div>
     <div class="cal-legend small muted"><span><i class="lgd prog"></i>Programado</span><span><i class="lgd pub"></i>Publicado</span><span><i class="lgd fail"></i>Falló</span><span><i class="lgd publ"></i>Publicándose</span>${lim ? '<span><i class="lgd veda"></i>Sin propaganda</span>' : ''}</div>
   </section>`;
+}
+
+// ---------- arrastrar publicaciones entre días ----------
+// Con el mouse arranca al mover 5 px; en pantallas táctiles, con una pulsación larga (así el dedo sigue pudiendo hacer scroll).
+function wireCalDrag() {
+  const grid = $('.cal-grid');
+  if (!grid) return;
+  grid.addEventListener('pointerdown', (e) => {
+    const card = e.target.closest('[data-drag]');
+    if (!card || e.button > 0) return;
+    const post = state.posts.find((x) => x.id === Number(card.dataset.pid));
+    if (!post) return;
+    const sx = e.clientX, sy = e.clientY, touch = e.pointerType === 'touch';
+    let drag = null, over = null, timer = null;
+    const begin = () => {
+      const r = card.getBoundingClientRect();
+      const clone = card.cloneNode(true);
+      clone.classList.add('cal-fly');
+      Object.assign(clone.style, { width: r.width + 'px', left: r.left + 'px', top: r.top + 'px' });
+      clone.removeAttribute('data-act');
+      const label = document.createElement('span'); label.className = 'fly-to'; clone.append(label);
+      document.body.append(clone);
+      card.classList.add('ghost');
+      document.body.classList.add('cal-dragging');
+      drag = { clone, label, dx: sx - r.left, dy: sy - r.top, from: card.closest('.cal-day') };
+      if (touch && navigator.vibrate) navigator.vibrate(12);
+    };
+    const move = (ev) => {
+      if (!drag) {
+        if (touch) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 10) cancel(); return; }
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
+        begin();
+      }
+      ev.preventDefault();
+      // cerca del borde de la ventana, la página se desplaza sola
+      const edge = 70, vh = window.innerHeight;
+      drag.scroll = ev.clientY > vh - edge ? 14 : ev.clientY < edge ? -14 : 0;
+      if (drag.scroll && !drag.raf) { const tick = () => { if (!drag || !drag.scroll) { if (drag) drag.raf = 0; return; } window.scrollBy(0, drag.scroll); drag.raf = requestAnimationFrame(tick); }; drag.raf = requestAnimationFrame(tick); }
+      drag.clone.style.left = ev.clientX - drag.dx + 'px';
+      drag.clone.style.top = ev.clientY - drag.dy + 'px';
+      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.cal-day');
+      if (el !== over) {
+        over?.classList.remove('drop-over', 'drop-no');
+        over = el;
+        if (over) over.classList.add(over.dataset.drop ? 'drop-over' : 'drop-no');
+      }
+      drag.label.textContent = over ? (over.dataset.drop ? `→ ${fmtDay(over.dataset.day + ' 12:00')} · ${hhmm(post.scheduled_at)}` : 'No se puede') : '';
+    };
+    const end = async (ev) => {
+      clearTimeout(timer);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      if (!drag) return;
+      drag.scroll = 0;
+      ev.preventDefault();
+      // el clic que sigue al soltar no abre la publicación
+      card.addEventListener('click', (c) => { c.stopPropagation(); c.preventDefault(); }, { capture: true, once: true });
+      over?.classList.remove('drop-over', 'drop-no');
+      const target = over && over.dataset.drop && over !== drag.from ? over : null;
+      if (!target) return settle(drag, card, drag.from, over && !over.dataset.drop ? 'Ese día no se puede: ya pasó o es veda de propaganda.' : null);
+      const when = `${target.dataset.day} ${hhmm(post.scheduled_at)}`;
+      if (pdate(when) - Date.now() < LOCK_MS) return settle(drag, card, drag.from, 'A esa hora ya no llega: tiene que faltar más de 15 minutos.');
+      await flyTo(drag.clone, target);
+      try {
+        await api(`/api/posts/${post.id}`, { method: 'PUT', body: { scheduled_at: when } });
+        const old = post.scheduled_at;
+        post.scheduled_at = when;
+        finish(drag, card);
+        render();
+        toast(`Movida al ${fmtDay(when)} a las ${hhmm(when)}`, false, { label: 'Deshacer', fn: async () => {
+          try { await api(`/api/posts/${post.id}`, { method: 'PUT', body: { scheduled_at: old } }); post.scheduled_at = old; render(); toast('Volvió a su día'); } catch (err) { fail(err); }
+        } });
+      } catch (err) {
+        await settle(drag, card, drag.from, err.message);
+      }
+    };
+    const cancel = () => { clearTimeout(timer); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); };
+    if (touch) timer = setTimeout(begin, 320);
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  });
+}
+const hhmm = (s) => s.slice(11, 16);
+function flyTo(clone, cell) {
+  const r = cell.getBoundingClientRect();
+  clone.classList.add('landing');
+  clone.style.left = r.left + 6 + 'px';
+  clone.style.top = r.top + 34 + 'px';
+  return new Promise((ok) => setTimeout(ok, 220));
+}
+async function settle(drag, card, home, why) {
+  await flyTo(drag.clone, home);
+  finish(drag, card);
+  if (why) toast(why, true);
+}
+function finish(drag, card) {
+  drag.clone.remove();
+  card.classList.remove('ghost');
+  document.body.classList.remove('cal-dragging');
 }
 const POST_ST = { programado: 'Programado', publicando: 'Publicando…', publicado: 'Publicado', fallido: 'Falló', bloqueado: 'Bloqueado' };
 function postDialog(ids) {
@@ -1262,6 +1384,7 @@ function afterRender(r) {
   }
   const ct = $('#cg-total');
   if (ct) { ct.addEventListener('change', () => { (async () => { try { state.project.pauta = await api(`/api/projects/${state.project.id}/pauta`, { method: 'PUT', body: { ...(state.project.pauta || {}), budget: Number(ct.value) || 0 } }); render(); } catch (e) { fail(e); } })(); }); }
+  wireCalDrag();
   const drop = $('#drop');
   if (drop) {
     $('#reel-input').addEventListener('change', (e) => uploadReels(e.target.files));
@@ -1324,9 +1447,17 @@ document.addEventListener('click', async (e) => {
       case 'new-account': addAccountDialog(); break;
       case 'add-net': { const acc = await api(`/api/projects/${state.project.id}/accounts`, { method: 'POST', body: { network: el.dataset.net } }); await render(); connectPanel(acc); break; }
       case 'cal-prev': case 'cal-next': case 'cal-today': {
-        const m = state.calMonth || new Date();
-        state.calMonth = act === 'cal-today' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : new Date(m.getFullYear(), m.getMonth() + (act === 'cal-next' ? 1 : -1), 1);
+        if (state.calMode === 'semana') {
+          const t = new Date(); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7));
+          const w = new Date(state.calWeek || t); if (act !== 'cal-today') w.setDate(w.getDate() + (act === 'cal-next' ? 7 : -7));
+          state.calWeek = act === 'cal-today' ? t : w;
+          state.calMonth = new Date(state.calWeek.getFullYear(), state.calWeek.getMonth(), 1);
+        } else {
+          const m = state.calMonth || new Date();
+          state.calMonth = act === 'cal-today' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : new Date(m.getFullYear(), m.getMonth() + (act === 'cal-next' ? 1 : -1), 1);
+        }
         render(); break; }
+      case 'cal-mode': state.calMode = el.dataset.k; try { localStorage.setItem('acm.calMode', state.calMode); } catch {} render(); break;
       case 'open-post': postDialog([Number(el.dataset.pid)]); break;
       case 'camp-new': campDialog(); break;
       case 'up-kind': state.upKind = el.dataset.k; render(); break;

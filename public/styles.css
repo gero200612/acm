@@ -824,3 +824,23 @@ dialog.wide { width: min(640px, calc(100vw - 32px)); }
 .ap .field { display: block; margin: 8px 0; }
 .ap .row { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 760px) { .ap-eds { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- calendario: arrastrar publicaciones entre días ---------- */
+.cal-hint { display: flex; align-items: center; gap: 6px; padding: 8px 20px 0; margin: 0; }
+.cal-ev.can-move { cursor: grab; touch-action: pan-y; }
+.cal-ev.ghost { opacity: .32; outline: 1.5px dashed currentColor; outline-offset: -1.5px; }
+body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-select: none; }
+.cal-fly { position: fixed; z-index: 1000; pointer-events: none; margin: 0; transform: rotate(-1.5deg) scale(1.05); box-shadow: 0 14px 34px rgba(18, 19, 22, .28); transition: transform .12s ease, box-shadow .12s ease; animation: cal-lift .14s ease; }
+.cal-fly.landing { transition: left .22s cubic-bezier(.2, .8, .2, 1), top .22s cubic-bezier(.2, .8, .2, 1), transform .22s ease, box-shadow .22s ease; transform: none; box-shadow: 0 2px 6px rgba(18, 19, 22, .12); }
+.cal-fly .fly-to { position: absolute; left: 0; top: calc(100% + 6px); white-space: nowrap; background: var(--navy, #121316); color: #fff; font-size: 11.5px; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
+.cal-fly .fly-to:empty { display: none; }
+@keyframes cal-lift { from { transform: rotate(0) scale(1); box-shadow: none; } }
+.cal-day { transition: background-color .12s ease, box-shadow .12s ease; }
+.cal-day.drop-over { background: color-mix(in srgb, var(--blue) 9%, #fff); box-shadow: inset 0 0 0 2px var(--blue); border-radius: 6px; }
+.cal-day.drop-no { box-shadow: inset 0 0 0 2px var(--red); border-radius: 6px; }
+.cal.week .cal-day { min-height: 340px; }
+.cal.week .cal-wd b { color: var(--ink); font-size: 13px; margin-left: 2px; }
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast-act { border: 0; background: transparent; color: #ffb48f; font-weight: 700; font-size: 14px; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .cal-fly, .cal-fly.landing, .cal-day { transition: none; animation: none; } }
+.cal.week .cal-wd.today b { background: var(--blue); color: #fff; border-radius: 999px; padding: 1px 7px; }
