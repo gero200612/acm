@@ -29,6 +29,7 @@ const ICON = {
   play: 'M7 5v14l11-7Z',
   left: 'm15 6-6 6 6 6',
   right: 'm9 6 6 6-6 6',
+  link: 'M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1',
   move: 'M12 3v18M3 12h18M12 3l-3 3m3-3 3 3M12 21l-3-3m3 3 3-3M3 12l3-3m-3 3 3 3M21 12l-3-3m3 3-3 3',
   file: 'M7 3h7l5 5v13H7zM14 3v5h5',
   flask: 'M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9',
@@ -305,7 +306,8 @@ function aprobarView() {
   const p = state.project, R = state.review || { clips: [], pending: 0, review_mode: p.review_mode };
   const auto = R.review_mode === 'auto';
   const head = `<div class="ap-head"><div><h2 class="h2">Para aprobar <span class="count">${R.pending}</span></h2><p class="muted small">${R.pending ? `${R.pending} ${R.pending === 1 ? 'recorte espera' : 'recortes esperan'} tu decisión. Aprobás o rechazás todas sus versiones juntas.` : 'No hay recortes esperando.'}</p></div>
-    <span class="chip ${auto ? 's-conectada' : 'nodot'}" title="${auto ? 'Lo que el analista aprueba entra solo; lo dudoso siempre espera acá. Un rechazo tuyo la vuelve a manual.' : 'Con 19 de los últimos 20 recortes aprobados pasa a automática.'}">Revisión ${auto ? 'automática' : 'manual'}</span></div>`;
+    <div class="row"><span class="chip ${auto ? 's-conectada' : 'nodot'}" title="${auto ? 'Lo que el analista aprueba entra solo; lo dudoso siempre espera acá. Un rechazo tuyo la vuelve a manual.' : 'Con 19 de los últimos 20 recortes aprobados pasa a automática.'}">Revisión ${auto ? 'automática' : 'manual'}</span>
+    <button class="btn sm" data-act="share-open">${icon('link', 15)} Compartir para aprobar</button></div></div>`;
   const rec = (R.recent || []).length ? `<h2 class="h2" style="margin-top:8px">Aprobados recientes</h2>${R.recent.map((c) => `
   <section class="card ap-clip" data-clip="${esc(c.clip_id)}">
     <div class="card-head"><h2 class="h2">${esc(c.moment?.tema || c.clip_id)}</h2><span class="small muted">${c.reels.filter((r) => r.review === 'aprobado').length} aprobadas</span></div>
@@ -1119,6 +1121,47 @@ function openDialog(title, body, foot = '') {
   d.showModal();
   return d;
 }
+// Links para que el dirigente (u otra persona) apruebe desde el celular sin entrar a ACM.
+async function shareDialog() {
+  const pid = state.project.id;
+  const list = async () => {
+    const L = await api(`/api/projects/${pid}/shares`);
+    return L.length ? L.map((l) => `<div class="sh-row" data-id="${l.id}">
+      <div><b>${esc(l.label || (l.can === 'revisar' ? 'Para aprobar' : 'Solo mirar'))}</b>
+        <span class="small muted">${l.can === 'revisar' ? 'Aprueba o pide cambios' : 'Solo mira'}${l.calendar ? ' · ve el calendario' : ''}${l.has_code ? ' · con código' : ''}${l.expires_at ? ` · vence ${fmtDay(l.expires_at)}` : ''}${l.last_seen_at ? ` · lo abrieron ${fmtDay(l.last_seen_at)}` : ' · todavía no lo abrieron'}</span></div>
+      <button class="btn sm" data-copy="${esc(location.origin + l.path)}">${icon('link', 14)} Copiar</button><button class="btn sm danger" data-revoke="${l.id}">Desactivar</button></div>`).join('') : '<p class="small muted">Todavía no hay links.</p>';
+  };
+  const d = openDialog('Compartir para aprobar', `
+    <form id="sh-form" class="sh-form">
+      <p class="small muted">La persona abre el link en el navegador, sin cuenta: ve los recortes que esperan y, si querés, lo que viene en el calendario. Desde el link nunca se publica ni se programa nada.</p>
+      <label class="field">Para quién <input class="input" name="label" maxlength="80" placeholder="Por ejemplo: Juan (candidato)"></label>
+      <div class="field">Puede <div class="seg" role="group"><button type="button" aria-pressed="true" data-can="revisar">Aprobar o pedir cambios</button><button type="button" aria-pressed="false" data-can="ver">Solo mirar</button></div></div>
+      <label class="small"><input type="checkbox" name="calendar" checked> Que vea el calendario de lo que viene</label>
+      <div class="grid2"><label class="field">Código (opcional) <input class="input" name="code" minlength="4" maxlength="40" autocomplete="off" placeholder="Sin código"></label>
+      <label class="field">Vence <select class="input" name="days"><option value="7">En 7 días</option><option value="30" selected>En 30 días</option><option value="0">Nunca</option></select></label></div>
+      <button class="btn primary">Crear link</button>
+    </form>
+    <h3 class="h2" style="margin-top:18px">Links activos</h3><div id="sh-list"><p class="small muted">Cargando…</p></div>`);
+  const refresh = async () => { d.querySelector('#sh-list').innerHTML = await list(); };
+  let can = 'revisar';
+  d.querySelectorAll('[data-can]').forEach((b) => b.addEventListener('click', () => { can = b.dataset.can; d.querySelectorAll('[data-can]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); }));
+  d.querySelector('#sh-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      const l = await api(`/api/projects/${pid}/shares`, { method: 'POST', body: { label: f.label.value.trim(), can, calendar: f.calendar.checked, code: f.code.value.trim(), days: Number(f.days.value) } });
+      const url = location.origin + l.path;
+      try { await navigator.clipboard.writeText(url); toast('Link creado y copiado'); } catch { toast('Link creado'); }
+      f.reset(); await refresh();
+    } catch (err) { fail(err); }
+  });
+  d.addEventListener('click', async (e) => {
+    const c = e.target.closest('[data-copy]'), r = e.target.closest('[data-revoke]');
+    if (c) { try { await navigator.clipboard.writeText(c.dataset.copy); toast('Link copiado'); } catch { toast(c.dataset.copy); } }
+    if (r && await confirmBox('Desactivar link', 'Quien lo tenga ya no va a poder abrirlo.', 'Desactivar')) { await api(`/api/shares/${r.dataset.revoke}`, { method: 'DELETE' }); refresh(); }
+  });
+  refresh();
+}
 function confirmBox(title, text, okLabel = 'Borrar') {
   return new Promise((res) => {
     const d = openDialog(title, `<p class="muted">${text}</p>`, `<button class="btn" data-close>Cancelar</button><button class="btn danger" data-ok>${okLabel}</button>`);
@@ -1459,6 +1502,7 @@ document.addEventListener('click', async (e) => {
         render(); break; }
       case 'cal-mode': state.calMode = el.dataset.k; try { localStorage.setItem('acm.calMode', state.calMode); } catch {} render(); break;
       case 'open-post': postDialog([Number(el.dataset.pid)]); break;
+      case 'share-open': shareDialog(); break;
       case 'camp-new': campDialog(); break;
       case 'up-kind': state.upKind = el.dataset.k; render(); break;
       case 'reel-filter': state.reelFilter = el.dataset.k; render(); break;

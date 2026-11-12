@@ -844,3 +844,10 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 .toast-act { border: 0; background: transparent; color: #ffb48f; font-weight: 700; font-size: 14px; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) { .cal-fly, .cal-fly.landing, .cal-day { transition: none; animation: none; } }
 .cal.week .cal-wd.today b { background: var(--blue); color: #fff; border-radius: 999px; padding: 1px 7px; }
+
+/* ---------- compartir para aprobar ---------- */
+.sh-form { display: grid; gap: 12px; }
+.sh-form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sh-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line-2); }
+.sh-row > div { display: grid; flex: 1; min-width: 0; }
+@media (max-width: 560px) { .sh-form .grid2 { grid-template-columns: 1fr; } .sh-row { flex-wrap: wrap; } }

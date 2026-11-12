@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Para aprobar · ACM</title>
+  <link rel="icon" href="/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    body { background: var(--bg); }
+    .sh { max-width: 980px; margin: 0 auto; padding: 24px 16px 60px; display: grid; gap: 16px; }
+    .sh-head { display: flex; align-items: center; gap: 14px; }
+    .sh-av { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 18px; overflow: hidden; flex: none; }
+    .sh-av img { width: 100%; height: 100%; object-fit: cover; }
+    .sh-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+    .sh-tabs button { border: 0; background: transparent; padding: 10px 14px; font-weight: 600; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -1px; }
+    .sh-tabs button[aria-selected='true'] { color: var(--ink); border-bottom-color: var(--blue); }
+    .clip { display: grid; gap: 14px; transition: opacity .3s ease, transform .3s ease, max-height .4s ease; }
+    .clip.done { opacity: 0; transform: translateY(-8px) scale(.98); }
+    .eds { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .ed { display: grid; gap: 6px; }
+    .ed video { width: 100%; aspect-ratio: 9 / 16; background: #111; border-radius: 10px; object-fit: cover; }
+    .ed .cap { font-size: 13px; color: var(--muted); white-space: pre-line; max-height: 7.5em; overflow: auto; }
+    textarea.input, input.input { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; background: #fff; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .day { display: grid; gap: 6px; }
+    .day h3 { font-size: 14px; font-weight: 700; }
+    .ev { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 9px; font-size: 14px; }
+    .ev > span:nth-child(2) { flex: 1 1 140px; min-width: 0; font-weight: 600; }
+    .ev > span:nth-child(3) { flex: 1 1 100%; order: 3; }
+    body { overflow-x: hidden; }
+    .ev .t { font-weight: 700; font-variant-numeric: tabular-nums; }
+    .ev .chip { margin-left: auto; }
+    .reveal { opacity: 0; transform: translateY(16px); transition: opacity .45s ease, transform .45s cubic-bezier(.2, .8, .2, 1); }
+    .reveal.in { opacity: 1; transform: none; }
+    .empty { text-align: center; padding: 40px 16px; }
+    .gate { max-width: 360px; margin: 12vh auto; display: grid; gap: 12px; }
+    #toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: grid; gap: 8px; z-index: 50; }
+    @media (prefers-reduced-motion: reduce) { .reveal, .clip { transition: none; opacity: 1; transform: none; } }
+  </style>
+</head>
+<body>
+  <main class="sh" id="app" aria-live="polite"><p class="muted">Cargando…</p></main>
+  <div id="toasts"></div>
+  <script>
+  (() => {
+    const token = location.pathname.split('/')[2] || '';
+    const $ = (s, r = document) => r.querySelector(s);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const app = $('#app');
+    let code = sessionStorage.getItem('acm.code.' + token) || '';
+    let data = null, tab = 'aprobar';
+    const NET = { instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube', tiktok: 'TikTok' };
+    const ST = { programado: 'Programado', publicado: 'Publicado', publicando: 'Publicándose' };
+    function toast(msg, err) { const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; $('#toasts').append(t); setTimeout(() => t.remove(), 3500); }
+    async function call(url, opt = {}) {
+      const r = await fetch(url, { ...opt, headers: { 'Content-Type': 'application/json', ...(code ? { 'X-Share-Code': code } : {}) } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error(j.error || 'Algo falló'); e.status = r.status; e.needsCode = j.needs_code; throw e; }
+      return j;
+    }
+    async function load() {
+      try { data = await call(`/pub/share/${encodeURIComponent(token)}`); render(); }
+      catch (e) { if (e.needsCode) return gate(code ? e.message : ''); app.innerHTML = `<section class="card empty"><h1 class="h2">${esc(e.message)}</h1></section>`; }
+    }
+    function gate(msg) {
+      app.innerHTML = `<form class="card gate" id="gate"><h1 class="h2">Este link pide un código</h1><p class="small muted">Te lo pasó quien te mandó el link.</p>
+        <input class="input" name="c" autocomplete="one-time-code" inputmode="text" required minlength="4" maxlength="40" aria-label="Código">
+        ${msg ? `<p class="small" style="color:var(--red)">${esc(msg)}</p>` : ''}<button class="btn primary">Entrar</button></form>`;
+      $('#gate').addEventListener('submit', (e) => { e.preventDefault(); code = e.target.c.value.trim(); sessionStorage.setItem('acm.code.' + token, code); load(); });
+      $('#gate input').focus();
+    }
+    const initials = (n) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+    const pdate = (s) => new Date(s.replace(' ', 'T'));
+    function render() {
+      const p = data.project, review = data.can === 'revisar';
+      const tabs = [['aprobar', `Para aprobar${data.pending.length ? ` (${data.pending.length})` : ''}`]].concat(data.calendar ? [['calendario', 'Lo que viene']] : []);
+      app.innerHTML = `
+        <header class="sh-head reveal"><span class="sh-av" style="background:${esc(p.color || '#ff5a1f')}">${p.photo ? `<img src="${esc(p.photo)}" alt="">` : esc(initials(p.name))}</span>
+          <div><h1 class="page-title">${esc(p.name)}</h1><p class="small muted">${esc([p.role, p.org].filter(Boolean).join(' · '))}${review ? ' · Podés aprobar o pedir cambios' : ' · Solo para mirar'}</p></div></header>
+        ${tabs.length > 1 ? `<nav class="sh-tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${tab === k}" data-tab="${k}">${l}</button>`).join('')}</nav>` : ''}
+        <div id="body">${tab === 'calendario' ? calendar() : pending(review)}</div>`;
+      app.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
+      app.querySelectorAll('.clip').forEach(wireClip);
+      reveal();
+    }
+    function pending(review) {
+      if (!data.pending.length) return `<section class="card empty reveal"><h2 class="h2">No hay nada esperando</h2><p class="muted small">Cuando haya recortes nuevos para revisar, aparecen acá.</p></section>`;
+      const name = localStorage.getItem('acm.nombre') || '';
+      return data.pending.map((c) => `
+        <section class="card clip reveal" data-clip="${esc(c.clip_id)}">
+          <div><h2 class="h2">${esc(c.tema || 'Recorte nuevo')}</h2><p class="small muted">${c.reels.length} ${c.reels.length === 1 ? 'versión' : 'versiones'} del mismo momento</p></div>
+          <div class="eds">${c.reels.map((r, i) => `<article class="ed"><video src="${esc(r.video)}" ${r.cover ? `poster="${esc(r.cover)}"` : ''} controls preload="metadata" playsinline></video>
+            <b>Versión ${i + 1}</b>${r.caption ? `<p class="cap">${esc(r.caption)}</p>` : ''}
+            ${review ? `<label class="small"><input type="checkbox" data-rid="${r.id}"> No me gusta esta</label>` : ''}</article>`).join('')}</div>
+          ${review ? `<label class="small">Comentario <span class="muted">(obligatorio para pedir cambios)</span><textarea class="input note" rows="2" maxlength="2000" placeholder="Por ejemplo: el subtítulo tapa la cara"></textarea></label>
+          <div class="row"><input class="input who" style="max-width:220px" maxlength="60" placeholder="Tu nombre" value="${esc(name)}" aria-label="Tu nombre">
+            <span style="flex:1"></span><button class="btn" data-act="no">Pedir cambios</button><button class="btn primary" data-act="ok">Aprobar</button></div>` : ''}
+        </section>`).join('');
+    }
+    function wireClip(el) {
+      el.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
+        const ok = b.dataset.act === 'ok';
+        const note = el.querySelector('.note').value.trim(), who = el.querySelector('.who').value.trim();
+        const ids = [...el.querySelectorAll('[data-rid]:checked')].map((x) => Number(x.dataset.rid));
+        if (!ok && !note) { toast('Contanos qué cambiar: el comentario es obligatorio', true); el.querySelector('.note').focus(); return; }
+        if (who) localStorage.setItem('acm.nombre', who);
+        b.disabled = true;
+        try {
+          await call(`/pub/share/${encodeURIComponent(token)}/clips/${encodeURIComponent(el.dataset.clip)}`, { method: 'POST', body: JSON.stringify({ decision: ok ? 'aprobar' : 'rechazar', comentario: note, rechazar_ids: ok ? [] : ids, nombre: who }) });
+          toast(ok ? '¡Aprobado! Gracias.' : 'Listo, se lo pasamos al equipo.');
+          el.style.maxHeight = el.offsetHeight + 'px'; requestAnimationFrame(() => el.classList.add('done'));
+          setTimeout(() => { data.pending = data.pending.filter((c) => c.clip_id !== el.dataset.clip); render(); }, 380);
+        } catch (e) { b.disabled = false; toast(e.message, true); }
+      }));
+    }
+    function calendar() {
+      if (!data.upcoming.length) return `<section class="card empty reveal"><h2 class="h2">No hay publicaciones programadas</h2></section>`;
+      const byDay = new Map();
+      for (const x of data.upcoming) { const k = x.scheduled_at.slice(0, 10); if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(x); }
+      return `<section class="card reveal" style="display:grid;gap:16px">${[...byDay.entries()].map(([k, L]) => `<div class="day"><h3>${esc(pdate(k + ' 12:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }))}</h3>
+        ${L.map((x) => `<div class="ev"><span class="t">${esc(x.scheduled_at.slice(11, 16))}</span><span>${esc(x.title)}</span><span class="small muted">${esc(NET[x.network] || x.network)}${x.connected_as || x.handle ? ' · ' + esc(x.connected_as || '@' + x.handle) : ''}</span><span class="chip">${esc(ST[x.status] || x.status)}</span></div>`).join('')}</div>`).join('')}</section>`;
+    }
+    function reveal() {
+      const els = app.querySelectorAll('.reveal');
+      if (!('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('in')); return; }
+      const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .08 });
+      els.forEach((e, i) => { e.style.transitionDelay = Math.min(i, 6) * 40 + 'ms'; io.observe(e); });
+    }
+    load();
+  })();
+  </script>
+</body>
+</html>

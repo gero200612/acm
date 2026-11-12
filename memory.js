@@ -29,7 +29,8 @@ export function recipeVars(recipe) {
   return out;
 }
 
-const weightOf = (origin) => (origin === 'opinion_dueno' ? OWNER_WEIGHT : 1);
+// La opinión del dueño (Gero) y la del dirigente (desde un link compartido) pesan igual: los dos deciden qué sale.
+const weightOf = (origin) => (origin === 'opinion_dueno' || origin === 'opinion_dirigente' ? OWNER_WEIGHT : 1);
 
 // Ganadora = variable (o, por red, horario) con trials >= 5 y la mayor tasa de victorias. Las opiniones del dueño pesan 3×.
 export function winningVariables(db, projectId) {

@@ -29,6 +29,7 @@ import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initMarketing, marketingCycle, projectsToCycle } from './marketing.js';
 import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars } from './memory.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS } from './knowledge.js';
+import { initShare, mountShare } from './share.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA = path.resolve(process.env.ACM_DATA || './data');
@@ -291,6 +292,19 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
 });
 
 app.use('/api', requireAuth);
+
+// links para compartir sin cuenta (el dirigente aprueba desde el celular): gestión con sesión; /s y /pub, públicas con el token
+initShare(db);
+mountShare(app, {
+  get, all, run, reviewClip: (...x) => reviewClip(...x),
+  sendMedia: async (res, file, next) => {
+    const f = path.basename(file);
+    const r = get("SELECT file FROM reels WHERE file = ? AND storage = 'r2'", f);
+    if (r) { try { return res.redirect(302, await getUrl(r.file)); } catch { return res.status(502).end(); } }
+    res.sendFile(path.join(UPLOADS, f), { maxAge: '7d' }, (err) => err && next());
+  },
+});
+app.get('/s/:token', (req, res) => res.sendFile(path.resolve('public/compartido.html')));
 
 // vuelta de la pantalla de autorizar de TikTok o Google
 app.get('/oauth/:network/callback', async (req, res) => {
@@ -1038,15 +1052,21 @@ app.get('/api/projects/:id/review', (req, res) => {
   res.json({ review_mode: p.review_mode, pending: pending.length, clips: pending, recent });
 });
 app.post('/api/clips/:clip_id/review', (req, res) => {
-  const { decision, comentario } = req.body || {}, note = String(comentario || '').trim();
-  if (note.length > 2000) return res.status(400).json({ error: 'El comentario pasa de 2000 caracteres' });
-  const reels = all("SELECT * FROM reels WHERE clip_id = ? AND kind = 'listo' ORDER BY id", req.params.clip_id);
-  if (!reels.length) return res.status(404).json({ error: 'No existe ese recorte' });
-  if (!['aprobar', 'rechazar'].includes(decision)) return res.status(400).json({ error: 'La decisión es aprobar o rechazar' });
-  if (decision === 'rechazar' && !note) return res.status(400).json({ error: 'Para rechazar contanos por qué: el comentario es obligatorio' });
+  const out = reviewClip(req.params.clip_id, req.body || {});
+  res.status(out.status).json(out.body);
+});
+// Aprobar o rechazar un recorte (todas sus ediciones). La usan el panel y el link compartido (onlyProject: el recorte tiene que ser de ese proyecto).
+function reviewClip(clipId, body, { onlyProject = null, origin = 'opinion_dueno', who = '' } = {}) {
+  const fail = (status, error) => ({ status, body: { error } });
+  const { decision, comentario } = body, note = String(comentario || '').trim();
+  if (note.length > 2000) return fail(400, 'El comentario pasa de 2000 caracteres');
+  const reels = all("SELECT * FROM reels WHERE clip_id = ? AND kind = 'listo' ORDER BY id", clipId);
+  if (!reels.length || (onlyProject != null && reels[0].project_id !== onlyProject)) return fail(404, 'No existe ese recorte');
+  if (!['aprobar', 'rechazar'].includes(decision)) return fail(400, 'La decisión es aprobar o rechazar');
+  if (decision === 'rechazar' && !note) return fail(400, 'Para rechazar contanos por qué: el comentario es obligatorio');
   const projectId = reels[0].project_id;
-  const ids = Array.isArray(req.body.rechazar_ids) ? req.body.rechazar_ids.map(Number) : [];
-  if (ids.some((i) => !reels.some((r) => r.id === i))) return res.status(400).json({ error: 'Alguna edición a rechazar no es de este recorte' });
+  const ids = Array.isArray(body.rechazar_ids) ? body.rechazar_ids.map(Number) : [];
+  if (ids.some((i) => !reels.some((r) => r.id === i))) return fail(400, 'Alguna edición a rechazar no es de este recorte');
   // rechazar sin elegir ediciones rechaza las tres; eligiendo, las demás se aprueban
   const rejected = decision === 'rechazar' ? new Set(ids.length ? ids : reels.map((r) => r.id)) : new Set();
   const affected = [];
@@ -1056,19 +1076,19 @@ app.post('/api/clips/:clip_id/review', (req, res) => {
   }
   const mode0 = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
   // repetir una decisión que no cambia nada no suma opiniones ni cuenta para el modo
-  if (!affected.length) return res.json({ ok: true, unchanged: true, review_mode: mode0, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', req.params.clip_id) });
+  if (!affected.length) return { status: 200, body: { ok: true, unchanged: true, review_mode: mode0, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', clipId) } };
   // lo ya programado de una edición rechazada no sale
   const why = 'El recorte se rechazó: ya no está aprobado.';
   for (const id of rejected) run("UPDATE posts SET status = 'bloqueado', note = ? WHERE reel_id = ? AND status = 'programado'", why, id);
-  run('INSERT INTO clip_reviews (clip_id, project_id, decision, rechazar_ids, comentario) VALUES (?, ?, ?, ?, ?)', req.params.clip_id, projectId, decision, JSON.stringify([...rejected]), note);
+  run('INSERT INTO clip_reviews (clip_id, project_id, decision, rechazar_ids, comentario) VALUES (?, ?, ?, ?, ?)', clipId, projectId, decision, JSON.stringify([...rejected]), who ? `${note}${note ? ' ' : ''}(por link: ${who})`.trim() : note);
   for (const { r, wins } of affected) for (const [variable, value] of Object.entries(recipeVars(parseJson(r.recipe))))
-    run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, NULL, ?, 1, 'opinion_dueno')", projectId, variable, value, wins);
+    run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, NULL, ?, 1, ?)", projectId, variable, value, wins, origin);
   if (affected.some((x) => x.wins)) replanificar(projectId);
   const mode = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
   const next = reviewMode(mode, all('SELECT decision FROM clip_reviews WHERE id IN (SELECT max(id) FROM clip_reviews WHERE project_id = ? GROUP BY clip_id) ORDER BY id DESC LIMIT 20', projectId).map((x) => x.decision));
   if (next !== mode) run('UPDATE projects SET review_mode = ? WHERE id = ?', next, projectId);
-  res.json({ ok: true, review_mode: next, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', req.params.clip_id) });
-});
+  return { status: 200, body: { ok: true, review_mode: next, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', clipId) } };
+}
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'No existe' }));
 app.use((err, req, res, next) => { console.error(err); res.status(err.status || 500).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'El archivo pasa de 1 GB' : 'Error del servidor' }); });
