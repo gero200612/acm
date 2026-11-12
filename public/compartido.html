@@ -70,7 +70,7 @@
     }
     function gate(msg) {
       app.innerHTML = `<form class="card gate" id="gate"><h1 class="h2">Este link pide un código</h1><p class="small muted">Te lo pasó quien te mandó el link.</p>
-        <input class="input" name="c" autocomplete="one-time-code" inputmode="text" required minlength="4" maxlength="40" aria-label="Código">
+        <input class="input" name="c" autocomplete="one-time-code" inputmode="text" required minlength="6" maxlength="40" aria-label="Código">
         ${msg ? `<p class="small" style="color:var(--red)">${esc(msg)}</p>` : ''}<button class="btn primary">Entrar</button></form>`;
       $('#gate').addEventListener('submit', (e) => { e.preventDefault(); code = e.target.c.value.trim(); sessionStorage.setItem('acm.code.' + token, code); load(); });
       $('#gate input').focus();

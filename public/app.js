@@ -523,6 +523,7 @@ function calendarioView() {
       <span class="small muted">${shown.length} ${shown.length === 1 ? 'publicación' : 'publicaciones'} ${week ? 'esta semana' : 'este mes'}</span>
       <span class="spacer"></span>
       <div class="seg" role="group" aria-label="Vista"><button aria-pressed="${!week}" data-act="cal-mode" data-k="mes">Mes</button><button aria-pressed="${week}" data-act="cal-mode" data-k="semana">Semana</button></div>
+      <button class="btn sm" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>
       <button class="btn sm" data-act="cal-today">Hoy</button>
       <button class="icon-btn" data-act="cal-prev" aria-label="${week ? 'Semana anterior' : 'Mes anterior'}">${icon('left')}</button>
       <button class="icon-btn" data-act="cal-next" aria-label="${week ? 'Semana siguiente' : 'Mes siguiente'}">${icon('right')}</button>
@@ -1137,7 +1138,7 @@ async function shareDialog() {
       <label class="field">Para quién <input class="input" name="label" maxlength="80" placeholder="Por ejemplo: Juan (candidato)"></label>
       <div class="field">Puede <div class="seg" role="group"><button type="button" aria-pressed="true" data-can="revisar">Aprobar o pedir cambios</button><button type="button" aria-pressed="false" data-can="ver">Solo mirar</button></div></div>
       <label class="small"><input type="checkbox" name="calendar" checked> Que vea el calendario de lo que viene</label>
-      <div class="grid2"><label class="field">Código (opcional) <input class="input" name="code" minlength="4" maxlength="40" autocomplete="off" placeholder="Sin código"></label>
+      <div class="grid2"><label class="field">Código (opcional) <input class="input" name="code" minlength="6" maxlength="40" autocomplete="off" placeholder="Sin código (mínimo 6)"></label>
       <label class="field">Vence <select class="input" name="days"><option value="7">En 7 días</option><option value="30" selected>En 30 días</option><option value="0">Nunca</option></select></label></div>
       <button class="btn primary">Crear link</button>
     </form>
@@ -1161,6 +1162,24 @@ async function shareDialog() {
     if (r && await confirmBox('Desactivar link', 'Quien lo tenga ya no va a poder abrirlo.', 'Desactivar')) { await api(`/api/shares/${r.dataset.revoke}`, { method: 'DELETE' }); refresh(); }
   });
   refresh();
+}
+// Suscripción .ics: el calendario del proyecto en Google Calendar, Apple o Outlook (se actualiza solo, cada hora más o menos).
+async function icsDialog(nuevo) {
+  const pid = state.project.id;
+  let r;
+  try { r = await api(`/api/projects/${pid}/ics${nuevo ? '?nuevo=1' : ''}`); } catch (err) { return fail(err); }
+  const url = location.origin + r.path;
+  const d = openDialog('Sincronizar con tu calendario', `
+    <p class="muted small">Con este link las publicaciones de «${esc(state.project.name)}» aparecen en tu calendario y se actualizan solas (Google Calendar las relee cada algunas horas). Cualquiera con el link puede verlas: no lo compartas.</p>
+    <div class="row" style="margin:12px 0"><input class="input" readonly value="${esc(url)}" style="flex:1" aria-label="Link del calendario"><button class="btn" data-copy-ics>${icon('link', 14)} Copiar</button></div>
+    <ul class="small muted" style="padding-left:18px;display:grid;gap:4px">
+      <li><b>Google Calendar</b>: Otros calendarios → + → Desde URL → pegar el link.</li>
+      <li><b>iPhone</b>: Ajustes → Calendario → Cuentas → Añadir cuenta → Otra → Añadir calendario suscrito.</li>
+      <li><b>Outlook</b>: Agregar calendario → Suscribirse desde la Web.</li>
+    </ul>`, `<button class="btn danger" data-ics-off>Desactivar link</button><button class="btn" data-ics-new>Cambiar link</button><button class="btn primary" data-close>Listo</button>`);
+  d.querySelector('[data-copy-ics]').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('Link copiado'); } catch { d.querySelector('input').select(); } };
+  d.querySelector('[data-ics-new]').onclick = async () => { if (await confirmBox('Cambiar link', 'El link anterior deja de andar: hay que volver a agregar el nuevo en el calendario.', 'Cambiar')) { d.close(); icsDialog(true); } };
+  d.querySelector('[data-ics-off]').onclick = async () => { if (await confirmBox('Desactivar link', 'El calendario deja de recibir las publicaciones.', 'Desactivar')) { await api(`/api/projects/${pid}/ics`, { method: 'DELETE' }); d.close(); toast('Link desactivado'); } };
 }
 function confirmBox(title, text, okLabel = 'Borrar') {
   return new Promise((res) => {
@@ -1503,6 +1522,7 @@ document.addEventListener('click', async (e) => {
       case 'cal-mode': state.calMode = el.dataset.k; try { localStorage.setItem('acm.calMode', state.calMode); } catch {} render(); break;
       case 'open-post': postDialog([Number(el.dataset.pid)]); break;
       case 'share-open': shareDialog(); break;
+      case 'ics-open': icsDialog(); break;
       case 'camp-new': campDialog(); break;
       case 'up-kind': state.upKind = el.dataset.k; render(); break;
       case 'reel-filter': state.reelFilter = el.dataset.k; render(); break;

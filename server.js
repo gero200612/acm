@@ -296,7 +296,7 @@ app.use('/api', requireAuth);
 // links para compartir sin cuenta (el dirigente aprueba desde el celular): gestión con sesión; /s y /pub, públicas con el token
 initShare(db);
 mountShare(app, {
-  get, all, run, reviewClip: (...x) => reviewClip(...x),
+  get, all, run, tz: TZ, reviewClip: (...x) => reviewClip(...x),
   sendMedia: async (res, file, next) => {
     const f = path.basename(file);
     const r = get("SELECT file FROM reels WHERE file = ? AND storage = 'r2'", f);
@@ -1056,12 +1056,14 @@ app.post('/api/clips/:clip_id/review', (req, res) => {
   res.status(out.status).json(out.body);
 });
 // Aprobar o rechazar un recorte (todas sus ediciones). La usan el panel y el link compartido (onlyProject: el recorte tiene que ser de ese proyecto).
-function reviewClip(clipId, body, { onlyProject = null, origin = 'opinion_dueno', who = '' } = {}) {
+function reviewClip(clipId, body, { onlyProject = null, onlyPending = false, origin = 'opinion_dueno', who = '' } = {}) {
   const fail = (status, error) => ({ status, body: { error } });
   const { decision, comentario } = body, note = String(comentario || '').trim();
   if (note.length > 2000) return fail(400, 'El comentario pasa de 2000 caracteres');
   const reels = all("SELECT * FROM reels WHERE clip_id = ? AND kind = 'listo' ORDER BY id", clipId);
   if (!reels.length || (onlyProject != null && reels[0].project_id !== onlyProject)) return fail(404, 'No existe ese recorte');
+  // desde un link solo se decide lo que todavía espera: lo que el dueño ya decidió no se puede cambiar desde afuera
+  if (onlyPending && !reels.some((r) => r.review === 'pendiente')) return fail(409, 'Este recorte ya se decidió.');
   if (!['aprobar', 'rechazar'].includes(decision)) return fail(400, 'La decisión es aprobar o rechazar');
   if (decision === 'rechazar' && !note) return fail(400, 'Para rechazar contanos por qué: el comentario es obligatorio');
   const projectId = reels[0].project_id;
