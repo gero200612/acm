@@ -31,6 +31,7 @@ import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, r
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS, outliers } from './knowledge.js';
 import { initShare, mountShare, ensureReportLink } from './share.js';
 import { initWatch, watchCycle } from './watch.js';
+import { initAutoreply, mountAutoreply, inboxCycle } from './autoreply.js';
 import { initComments, mountComments, feedbackOf, commentsOf } from './comments.js';
 import { initRefs, mountRefs, referencesOf } from './refs.js';
 
@@ -300,6 +301,7 @@ app.use('/api', requireAuth);
 // links para compartir sin cuenta (el dirigente aprueba desde el celular): gestión con sesión; /s y /pub, públicas con el token
 initShare(db);
 initWatch(db);
+initAutoreply(db);
 initComments(db);
 mountComments(app, { get, run, db });
 initRefs(db);
@@ -761,6 +763,14 @@ app.post('/api/watch/run', async (req, res) => {
   watching = true;
   try { res.json(await watchCycle(db, (a) => vault.open(a.creds))); } catch (e) { res.status(500).json({ error: e.message }); } finally { watching = false; }
 });
+// Comentarios de nuestros reels y respuestas automáticas por palabra clave.
+let inboxing = false;
+async function leerComentarios() {
+  if (inboxing) { const e = new Error('Ya se están leyendo los comentarios'); e.status = 409; throw e; }
+  inboxing = true;
+  try { return await inboxCycle(db, (a) => vault.open(a.creds)); } finally { inboxing = false; }
+}
+mountAutoreply(app, { get, all, run, cycle: leerComentarios });
 // Buscador global (⌘K): proyectos, reels y cuentas de todos los proyectos.
 app.get('/api/search', (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, 80);
@@ -1347,6 +1357,13 @@ async function vigilar() {
   try { const r = await watchCycle(db, (a) => vault.open(a.creds)); if (r.errors.length) console.error('cuentas vigiladas:', r.errors.join(' | ')); if (r.alerts) await avisos(); }
   catch (e) { console.error('cuentas vigiladas:', mask(e.message)); } finally { watching = false; }
 }
+// comentarios: cada 10 minutos, solo si algún proyecto tiene una regla activa
+async function comentarios() {
+  if (inboxing || !get('SELECT 1 FROM autoreplies WHERE active = 1 LIMIT 1')) return;
+  try { const r = await leerComentarios(); if (r.errors.length) console.error('comentarios:', r.errors.slice(0, 5).join(' | ')); }
+  catch (e) { console.error('comentarios:', mask(e.message)); }
+}
+if (process.env.ACM_SCHEDULER !== 'off' && process.env.ACM_INBOX !== 'off') setInterval(comentarios, 10 * 60e3);
 if (process.env.ACM_SCHEDULER !== 'off' && process.env.ACM_WATCH !== 'off') { setInterval(vigilar, 6 * 3600e3); setTimeout(vigilar, 180e3); }
 
 // al arrancar completa vectores pendientes (la copia del banco lo hace enseguida para reproducir el orden de producción: primero este, después las importaciones)

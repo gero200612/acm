@@ -106,7 +106,7 @@ async function render() {
   try {
     await loadProjects();
     if (state.storage == null) state.storage = await api('/api/storage').catch(() => ({ r2: false }));
-    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario') state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if ((r.tab || 'resumen') === 'resumen' && !r.sub) state.perf = await api(`/api/projects/${r.id}/performance?days=${state.perfDays || 30}`).catch(() => null); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
+    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario') state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if ((r.tab || 'resumen') === 'resumen' && !r.sub) state.perf = await api(`/api/projects/${r.id}/performance?days=${state.perfDays || 30}`).catch(() => null); if (r.tab === 'comentarios') state.inbox = await api(`/api/projects/${r.id}/inbox`); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
     else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
@@ -287,13 +287,13 @@ function projectHead(p) {
   return `<div class="who">${avatar(p, true)}<div style="min-width:0"><h1 class="page-title">${esc(p.name)}</h1><p class="lead">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Proyecto')}</p></div></div>
   <div class="row">${p.demo ? '<span class="chip s-pausada" title="No publica ni pauta nada">Demo · no publica</span>' : ''}${countdown(p)}${p.padron ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
 }
-const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['memoria', 'Memoria'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']];
+const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['memoria', 'Memoria'], ['investigacion', 'Investigación'], ['comentarios', 'Comentarios'], ['ajustes', 'Ajustes']];
 function projectView(tab) {
   const p = state.project;
   const counts = { cuentas: state.accounts.length, reels: state.reels.length, aprobar: p.review_pending, calendario: state.posts.filter((x) => x.status === 'programado').length };
   const on = tab === 'reel' ? 'reels' : tab;
   const tabs = `<nav class="tabs">${TABS.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
-  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, memoria: memoriaView, reel: reelDetailView, investigacion: investigacionView, ajustes: ajustesView };
+  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, memoria: memoriaView, reel: reelDetailView, investigacion: investigacionView, comentarios: comentariosView, ajustes: ajustesView };
   return tabs + (views[tab] || resumenView)();
 }
 
@@ -1296,6 +1296,27 @@ async function knImport(e) {
   try { const r = await api(`/api/projects/${state.project.id}/knowledge/import`, { method: 'POST', body }); toast(`Se sumaron ${r.added} fichas y ${r.posts} publicaciones`); knLoad(); } catch (err) { fail(err); }
 }
 
+// ---------- Comentarios: lo que comentan en nuestros reels y respuestas automáticas por palabra clave ----------
+function comentariosView() {
+  const I = state.inbox || { rules: [], items: [] };
+  const rules = `<section class="card"><div class="card-head"><h2 class="h2">Respuestas automáticas</h2></div>
+    <p class="small muted">Si alguien comenta la palabra en un reel de Instagram, le llega un mensaje privado (y si querés, una respuesta pública). Da igual mayúsculas o tildes. <code>{usuario}</code> pone su @. Cada regla arranca apagada: mandar mensajes necesita el permiso de mensajes de Meta.</p>
+    <form id="ar-form" class="ar-form">
+      <input class="input" name="keyword" maxlength="40" required placeholder="Palabra clave, por ejemplo PROPUESTAS" aria-label="Palabra clave">
+      <textarea class="input" name="dm" rows="3" maxlength="900" placeholder="Mensaje privado: ¡Hola {usuario}! Acá tenés las propuestas: https://…" aria-label="Mensaje privado"></textarea>
+      <input class="input" name="public_reply" maxlength="300" placeholder="Respuesta pública (opcional): Te mandamos un mensaje 📩" aria-label="Respuesta pública">
+      <button class="btn primary" type="submit">Agregar regla</button></form>
+    ${I.rules.length ? `<ul class="ar-list">${I.rules.map((r) => `<li data-arid="${r.id}">
+      <label class="switch" title="${r.active ? 'Activa' : 'Apagada'}"><input type="checkbox" data-act="ar-toggle" ${r.active ? 'checked' : ''} aria-label="Activar ${esc(r.keyword)}"><span></span></label>
+      <div class="ar-b"><b>${esc(r.keyword)}</b>${r.dm ? `<span class="small">✉ ${esc(r.dm)}</span>` : ''}${r.public_reply ? `<span class="small">💬 ${esc(r.public_reply)}</span>` : ''}<span class="small muted">${r.hits ? `${fmt(r.hits)} ${r.hits === 1 ? 'respuesta' : 'respuestas'}` : 'Todavía no respondió'}</span></div>
+      <button type="button" class="tc-x" data-act="ar-del" aria-label="Borrar regla">✕</button></li>`).join('')}</ul>` : ''}</section>`;
+  const list = `<section class="card"><div class="card-head"><h2 class="h2">Últimos comentarios</h2><button class="btn sm" data-act="inbox-run">${icon('refresh', 15)} Leer ahora</button></div>
+    <p class="small muted">De los reels publicados en Instagram en las últimas 2 semanas. Se leen solos cada 10 minutos mientras haya una regla activa.</p>
+    ${I.items.length ? `<ul class="ib-list">${I.items.map((x) => `<li><div><b>@${esc(x.username || '—')}</b> <span class="small muted">· ${esc(fmtDate(x.at))}${x.reel ? ` · ${esc(x.reel)}` : ''}</span></div><p>${esc(x.text)}</p>
+      ${x.replied ? `<span class="chip s-conectada">Respondido: ${esc(x.replied.replace('+', ' y '))}</span>` : x.error ? `<span class="chip s-error" title="${esc(x.error)}">No se pudo responder</span>` : ''}</li>`).join('')}</ul>`
+      : '<p class="muted small">Todavía no leímos comentarios.</p>'}</section>`;
+  return `<div class="grid g2" style="align-items:start">${rules}${list}</div>`;
+}
 function ajustesView() {
   const p = state.project;
   return `<div class="grid g2" style="align-items:start">
@@ -1708,6 +1729,17 @@ function uploadReels(files) {
 
 // ---------- eventos ----------
 function afterRender(r) {
+  if (r.view === 'project' && r.tab === 'comentarios') {
+    $('#ar-form').addEventListener('submit', async (e) => {
+      e.preventDefault(); const f = e.target, b = f.querySelector('button[type=submit]'); b.disabled = true;
+      try { await api(`/api/projects/${state.project.id}/autoreplies`, { method: 'POST', body: { keyword: f.keyword.value, dm: f.dm.value, public_reply: f.public_reply.value } }); toast('Regla agregada, apagada: activala cuando quieras'); render(); }
+      catch (err) { b.disabled = false; fail(err); }
+    });
+    $$('[data-act="ar-toggle"]').forEach((i) => i.addEventListener('change', async () => {
+      try { await api(`/api/autoreplies/${Number(i.closest('[data-arid]').dataset.arid)}`, { method: 'PUT', body: { active: i.checked } }); toast(i.checked ? 'Regla activa' : 'Regla apagada'); }
+      catch (err) { i.checked = !i.checked; fail(err); }
+    }));
+  }
   if (r.view === 'project' && r.tab === 'investigacion') {
     knLoad();
     if (ASK.pid !== state.project.id) Object.assign(ASK, { pid: state.project.id, turns: [] });
@@ -1870,6 +1902,11 @@ document.addEventListener('click', async (e) => {
         if (r.review_mode !== state.review?.review_mode) toast(r.review_mode === 'auto' ? 'La revisión pasó a automática: 19 de los últimos 20 aprobados' : 'La revisión volvió a manual');
         render(); break; }
       case 'tc-add': tcAdd(el.closest('.tc')); break;
+      case 'inbox-run': {
+        el.disabled = true;
+        try { const r = await api('/api/inbox/run', { method: 'POST' }); toast(`${fmt(r.read)} comentarios nuevos · ${fmt(r.replied)} respondidos${r.errors.length ? ` · ${r.errors.length} con error` : ''}`, !!r.errors.length); } catch (err) { fail(err); }
+        render(); break; }
+      case 'ar-del': if (await confirmBox('Borrar regla', 'Deja de responder a esa palabra.', 'Borrar')) { await api(`/api/autoreplies/${Number(el.closest('[data-arid]').dataset.arid)}`, { method: 'DELETE' }); render(); } break;
       case 'ref-del': await api(`/api/refs/${Number(el.dataset.rid)}`, { method: 'DELETE' }); K.refs = (K.refs || []).filter((r) => r.id !== Number(el.dataset.rid)); knDraw(); break;
       case 'tc-seek': { const v = el.closest('article')?.querySelector('video'); if (v) { v.currentTime = Number(el.dataset.at); v.play().catch(() => {}); } break; }
       case 'tc-del': {

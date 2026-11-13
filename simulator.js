@@ -49,6 +49,10 @@ export function startSimulator(port = 0) {
     if (p === '/rup/ig/C1') return req.headers.authorization?.startsWith('OAuth ') && Number(req.headers.file_size) === body.length ? send(res, 200, { success: true }) : send(res, 400, { error: { message: 'subida mal: ' + req.headers.file_size + ' vs ' + body.length } });
     if (p === '/graph/C1') return send(res, 200, { status_code: 'FINISHED' });
     if (p === '/graph/IG1/media_publish') return params.creation_id === 'C1' ? send(res, 200, { id: 'M1' }) : send(res, 400, { error: { message: 'sin creation_id' } });
+    // comentarios de un reel (M1, M7…): uno con la palabra clave, uno común y uno de la propia cuenta
+    if (/^\/graph\/M\w+\/comments$/.test(p)) { const m = p.split('/')[2]; return send(res, 200, { data: [{ id: m + '-CM1', text: 'Quiero las Propuestas!', username: 'socio.uno', timestamp: '2026-11-12T10:00:00+0000' }, { id: m + '-CM2', text: 'Vamos lista azul', username: 'socio.dos', timestamp: '2026-11-12T10:05:00+0000' }, { id: m + '-CM3', text: 'propuestas', username: 'mock.ig', timestamp: '2026-11-12T10:06:00+0000' }] }); }
+    if (p === '/graph/IG1/messages' && req.method === 'POST') { const j = JSON.parse(body.toString() || '{}'); log.push('dm ' + JSON.stringify({ to: j.recipient, text: j.message?.text })); return send(res, 200, { recipient_id: 'U1', message_id: 'MSG1' }); }
+    if (/^\/graph\/M\w+-CM\d+\/replies$/.test(p) && req.method === 'POST') { const j = JSON.parse(body.toString() || '{}'); log.push(`reply ${p.split('/')[2]} ${j.message}`); return send(res, 200, { id: 'R' + p.split('/')[2] }); }
     if (p === '/graph/M1') return send(res, 200, { permalink: 'https://www.instagram.com/reel/M1/' });
     if (p === '/graph/PAGE1/video_reels') return params.upload_phase === 'start' ? send(res, 200, { video_id: 'V1', upload_url: `${B}/rup/fb/V1` }) : params.upload_phase === 'finish' && params.video_state === 'PUBLISHED' ? send(res, 200, { success: true }) : send(res, 400, { error: { message: 'fase' } });
     if (p === '/rup/fb/V1') return Number(req.headers.file_size) === body.length ? send(res, 200, { success: true }) : send(res, 400, { error: { message: 'tamaño' } });

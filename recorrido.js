@@ -740,6 +740,35 @@ export function recorridoCases(sb) {
       eq((await pub('POST', `/pub/share/${rev}/reels/${r2}/comments`, { at_s: 1, text: 'tarde' })).status, 409, 'ya decidido no se comenta desde el link');
       for (const x of [p, q]) eq((await api('DELETE', `/api/projects/${x}`)).j?.ok, true, 'borrar el proyecto de prueba');
     }],
+    [G('comentarios'), 'Respuestas automáticas: la regla nace apagada; activa, responde por privado y en público solo al comentario con la palabra (sin importar tildes ni mayúsculas), una sola vez y nunca a la propia cuenta', async () => {
+      const p = (await api('POST', '/api/projects', form({ name: 'Responder', kind: 'politica' }), true)).j.id;
+      const a = (await api('POST', `/api/projects/${p}/accounts`, { network: 'instagram' })).j.id;
+      await api('PUT', `/api/accounts/${a}/connection`, { pageId: 'PAGE1', pageAccessToken: SECRETS[0] });
+      eq((await api('POST', `/api/accounts/${a}/test`, {})).j.status, 'conectada', 'Instagram conectado');
+      const reel = (await api('POST', `/api/projects/${p}/reels`, form({ files: [[new Blob([fakeMp4(1080, 1920, 10)], { type: 'video/mp4' }), 'ar.mp4']] }), true)).j[0].id;
+      const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      sb.box.write("INSERT INTO posts (project_id, reel_id, account_id, scheduled_at, status, external_id, published_at) VALUES (?, ?, ?, ?, 'publicado', 'M7', ?)", p, reel, a, now, now);
+      eq((await api('POST', `/api/projects/${p}/autoreplies`, { keyword: 'propuestas' })).status, 400, 'sin mensaje');
+      eq((await api('POST', `/api/projects/${p}/autoreplies`, { keyword: '  ', dm: 'x' })).status, 400, 'sin palabra');
+      eq((await api('POST', `/api/projects/${p}/autoreplies`, { keyword: 'PROPUESTAS', dm: 'Hola {usuario}, acá van: https://x.test/p.pdf', public_reply: 'Te escribimos {usuario}' })).status, 200, 'regla');
+      eq((await api('POST', `/api/projects/${p}/autoreplies`, { keyword: 'Propuestas', dm: 'y' })).status, 409, 'la misma palabra dos veces');
+      const rule = (await api('GET', `/api/projects/${p}/inbox`)).j.rules[0];
+      eq(rule.active, 0, 'nace apagada');
+      const r0 = (await api('POST', '/api/inbox/run', {})).j;
+      eq([r0.read >= 3, r0.replied], [true, 0], 'apagada lee pero no responde');
+      sb.box.write('DELETE FROM inbox WHERE project_id = ?', p);
+      await api('PUT', `/api/autoreplies/${rule.id}`, { active: true });
+      const before = (sb.simLog?.() || []).length;
+      const r1 = (await api('POST', '/api/inbox/run', {})).j;
+      const L = (sb.simLog?.() || []).slice(before);
+      eq([r1.replied, JSON.stringify(r1).includes(SECRETS[0])], [1, false], 'responde uno y no muestra el token ');
+      eq(L.filter((l) => l.startsWith('dm ')), ['dm {"to":{"comment_id":"M7-CM1"},"text":"Hola @socio.uno, acá van: https://x.test/p.pdf"}'], 'mensaje privado al comentario');
+      eq(L.filter((l) => l.startsWith('reply ')), ['reply M7-CM1 Te escribimos @socio.uno'], 'respuesta pública (y no a la propia cuenta)');
+      eq((await api('POST', '/api/inbox/run', {})).j.replied, 0, 'el mismo comentario no se responde dos veces');
+      const ib = (await api('GET', `/api/projects/${p}/inbox`)).j;
+      eq([ib.rules[0].hits, ib.items.find((x) => x.comment_id === 'M7-CM1').replied, ib.items.find((x) => x.comment_id === 'M7-CM2').replied], [1, 'mensaje+respuesta', ''], 'queda en la bandeja');
+      eq((await api('DELETE', `/api/projects/${p}`)).j?.ok, true, 'borrar el proyecto de prueba');
+    }],
     [G('vigilar'), 'Cuentas vigiladas: relee las cuentas de la Investigación con la cuenta de Instagram del proyecto, avisa una sola vez lo que explota y una cuenta que falla no frena a las demás', async () => {
       const p = (await api('POST', '/api/projects', form({ name: 'Vigilar', kind: 'politica' }), true)).j.id;
       const a = (await api('POST', `/api/projects/${p}/accounts`, { network: 'instagram' })).j.id;

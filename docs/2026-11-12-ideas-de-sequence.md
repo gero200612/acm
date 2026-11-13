@@ -31,7 +31,7 @@ Referencias: **Nuevo** = se hizo el 12/11 · **Ya estaba** = ACM ya lo tenía ·
 | Sequence | ACM |
 |---|---|
 | Subir videos grandes, almacenamiento para crudos | **Ya estaba**: R2, hasta 5 GB |
-| Comentar en un segundo exacto o dibujar sobre el cuadro | **Se puede** («en el 0:12 tapa la cara») |
+| Comentar en un segundo exacto o dibujar sobre el cuadro | **Nuevo**: comentarios en el segundo exacto (marcas en la línea de tiempo, tocar salta a ese segundo), en Para aprobar y en el link del dirigente; le llegan al editor. **Se puede**: dibujar sobre el cuadro |
 | Versiones del mismo video y comparar | **Ya estaba**: las 3 ediciones de cada recorte |
 | Elegir la portada | **Ya estaba**: la portada que manda el editor |
 | Notas de voz en los comentarios | **Se puede** |
@@ -66,28 +66,28 @@ Referencias: **Nuevo** = se hizo el 12/11 · **Ya estaba** = ACM ya lo tenía ·
 |---|---|
 | Métricas de cada post | **Ya estaba** |
 | Inicio con rendimiento 7/30/90 días y mejores posts | **Nuevo**: en el Resumen, contra el período anterior, con curva y lo que mejor anduvo |
-| Mejor horario para publicar | **Nuevo**: mejores franjas por red. **Se puede**: que el planificador las use solo |
+| Mejor horario para publicar | **Nuevo**: mejores franjas por red, y el planificador las usa solo cuando hay datos suficientes |
 | Tableros armables, comparar redes | **Se puede** |
 | Informes para compartir (web, PDF) | **Nuevo**: informe de 30 días dentro del link compartido |
-| Informes que se mandan solos (diarios, semanales) | **Ya estaba** el resumen diario por Telegram para Gero. **Se puede**: el informe al dirigente cada semana |
+| Informes que se mandan solos (diarios, semanales) | **Ya estaba** el resumen diario por Telegram. **Nuevo**: los lunes llega a Gero por Telegram el informe semanal con el link para reenviárselo al dirigente |
 | Rendimiento de anuncios | **Ya estaba**: Campañas y pauta |
 
 ## Mensajes
 
 | Sequence | ACM |
 |---|---|
-| Bandeja única de comentarios y mensajes | **Se puede** (necesita permisos de Meta para mensajes) |
-| Comentario con palabra clave → mensaje automático, quizzes, juntar mails | **Se puede** (alguien comenta «PROPUESTAS» y le llega el PDF) |
+| Bandeja única de comentarios y mensajes | **Nuevo**: pestaña Comentarios con lo que comentan en nuestros reels de Instagram (últimas 2 semanas). **Se puede**: mensajes directos (necesita permisos de Meta) |
+| Comentario con palabra clave → mensaje automático, quizzes, juntar mails | **Nuevo**: reglas por palabra (sin importar tildes ni mayúsculas) con mensaje privado y respuesta pública opcional; nacen apagadas, una sola vez por comentario, nunca a la propia cuenta. Para que salgan de verdad faltan los permisos de mensajes y comentarios de Meta. **Se puede**: quizzes, juntar mails |
 | Bienvenida y temas sugeridos para mensajes nuevos | **Se puede** |
 
 ## Inspiración
 
 | Sequence | ACM |
 |---|---|
-| Guardar posts de otros por link o extensión | **Se puede**: biblioteca de referencias para el editor |
+| Guardar posts de otros por link o extensión | **Nuevo**: referencias para el editor en Investigación (link + qué tomar); el editor las lee. **Se puede**: extensión del navegador |
 | Páginas por creador y cargar más posts | **Ya estaba**: cuentas relevadas en Investigación |
 | Posts que superan lo normal de un creador (outliers) | **Nuevo**: «Lo que mejor les funcionó» |
-| Alertas cuando un creador vigilado tiene un outlier | **Se puede** |
+| Alertas cuando un creador vigilado tiene un outlier | **Nuevo**: cada 6 horas se releen las cuentas de la Investigación y llega un aviso por Telegram si algo rinde 3× o más lo normal |
 | Analizar ganchos y estructuras | **Ya estaba** a su manera: el editor y la memoria aprenden qué funciona |
 
 ## Inteligencia artificial

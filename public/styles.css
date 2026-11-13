@@ -1000,3 +1000,18 @@ kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 
 .ref-list li { display: flex; gap: 8px; align-items: flex-start; animation: tc-pop .2s ease-out; }
 .ref-b { flex: 1; min-width: 0; display: grid; font-size: 13px; }
 .ref-b a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* comentarios y respuestas automáticas */
+.ar-form { display: grid; gap: 8px; margin: 10px 0 14px; }
+.ar-list, .ib-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.ar-list li { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.ar-b { flex: 1; min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.ib-list li { display: grid; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--line-2); }
+.ib-list li p { overflow-wrap: anywhere; }
+.ib-list .chip { justify-self: start; }
+.switch { position: relative; flex: none; width: 38px; height: 22px; margin-top: 2px; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--line); transition: background .2s; }
+.switch span::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .2s cubic-bezier(.2,.8,.2,1); }
+.switch input:checked + span { background: var(--green); }
+.switch input:checked + span::after { transform: translateX(16px); }
+.switch input:focus-visible + span { outline: 2px solid var(--green); outline-offset: 2px; }
