@@ -118,7 +118,7 @@
     function tcInner(r) {
       const C = r.comments || [], dur = Number(r.duration) || Math.max(1, ...C.map((c) => c.at_s));
       return `<div class="tc-bar" aria-hidden="true">${C.map((c) => `<i style="left:${Math.min(100, c.at_s / dur * 100).toFixed(1)}%" data-seek="${c.at_s}" title="${esc(mmss(c.at_s))} · ${esc(c.text)}"></i>`).join('')}</div>
-        ${C.length ? `<ul class="tc-list">${C.map((c) => `<li><button type="button" class="tc-t" data-seek="${c.at_s}">${mmss(c.at_s)}</button><span>${esc(c.text)}${c.author && c.author !== 'equipo' ? ` <em class="muted">— ${esc(c.author)}</em>` : ''}</span></li>`).join('')}</ul>` : ''}
+        ${C.length ? `<ul class="tc-list">${C.map((c) => `<li><span class="tc-av">${esc(String(c.author && c.author !== 'equipo' ? c.author : 'Equipo').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase())}</span><span class="tc-c"><button type="button" class="tc-t" data-seek="${c.at_s}">${mmss(c.at_s)}</button>${esc(c.text)}${c.author && c.author !== 'equipo' ? ` <em class="muted">— ${esc(c.author)}</em>` : ''}</span></li>`).join('')}</ul>` : ''}
         ${data.can === 'revisar' ? `<div class="tc-add"><input class="input tc-in" maxlength="600" placeholder="Comentar en 0:00" aria-label="Comentario en el segundo actual del video"><button type="button" class="btn sm" data-tc="add">Comentar</button></div>` : ''}`;
     }
     function findReel(rid) { for (const c of data.pending) { const r = c.reels.find((x) => x.id === rid); if (r) return r; } return null; }

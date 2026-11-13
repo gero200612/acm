@@ -39,6 +39,9 @@ const ICON = {
 };
 const icon = (k, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[k]}"/></svg>`;
 const netBadge = (n) => `<span class="net ${n}" title="${NETS[n]?.name || n}">${NETS[n]?.svg || ''}</span>`;
+// pastillas de métricas: vistas (azul), me gusta (rojo), comentarios (naranja), compartidos (verde), % (gris)
+const MP = { views: ['▶', 'Vistas'], likes: ['♥', 'Me gusta'], comments: ['💬', 'Comentarios'], shares: ['↗', 'Compartidos'], rate: ['%', 'Interacción'] };
+const mpill = (k, v, txt) => v == null || v === '' ? '' : `<span class="mp mp-${k}" title="${MP[k][1]}"><b aria-hidden="true">${MP[k][0]}</b>${txt ?? fmtK(v)}</span>`;
 const initials = (s) => String(s || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 // size: true o 'lg' = grande, 'sm' = chico (barra lateral)
 const avatar = (p, size) => { const c = `avatar${size === 'sm' ? ' sm' : size ? ' lg' : ''}`; return p.photo
@@ -311,7 +314,7 @@ const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart
 function tcInner(r) {
   const C = r.comments || [], dur = Number(r.duration) || Math.max(1, ...C.map((c) => c.at_s));
   return `<div class="tc-bar" aria-hidden="true">${C.map((c) => `<i style="left:${Math.min(100, c.at_s / dur * 100).toFixed(1)}%" data-act="tc-seek" data-at="${c.at_s}" title="${esc(mmss(c.at_s))} · ${esc(c.text)}"></i>`).join('')}</div>
-    ${C.length ? `<ul class="tc-list">${C.map((c) => `<li><button type="button" class="tc-t" data-act="tc-seek" data-at="${c.at_s}">${mmss(c.at_s)}</button><span>${esc(c.text)}${c.author && c.author !== 'equipo' ? ` <em class="muted">— ${esc(c.author)}</em>` : ''}</span><button type="button" class="tc-x" data-act="tc-del" data-cid="${c.id}" aria-label="Borrar comentario">✕</button></li>`).join('')}</ul>` : ''}
+    ${C.length ? `<ul class="tc-list">${C.map((c) => `<li><span class="tc-av" title="${esc(c.author || 'equipo')}">${esc(initials(c.author && c.author !== 'equipo' ? c.author : 'Equipo'))}</span><span class="tc-c"><button type="button" class="tc-t" data-act="tc-seek" data-at="${c.at_s}">${mmss(c.at_s)}</button>${esc(c.text)}${c.author && c.author !== 'equipo' ? ` <em class="muted">— ${esc(c.author)}</em>` : ''}</span><button type="button" class="tc-x" data-act="tc-del" data-cid="${c.id}" aria-label="Borrar comentario">✕</button></li>`).join('')}</ul>` : ''}
     <div class="tc-add"><input class="input tc-in" maxlength="600" placeholder="Comentar en 0:00" aria-label="Comentario en el segundo actual del video"><button type="button" class="btn sm" data-act="tc-add">Comentar</button></div>`;
 }
 const tcBlock = (r) => `<div class="tc" data-rid="${r.id}">${tcInner(r)}</div>`;
@@ -427,7 +430,7 @@ function perfCard(p) {
     ${P.best.length ? `<h3 class="h3 perf-h">Lo que mejor anduvo</h3><div class="perf-best">${P.best.map((x, i) => `<a class="perf-row" href="#/p/${p.id}/reel/${x.reel_id}"><span class="rk">${i + 1}</span>
       ${x.cover ? `<img src="/media/${esc(x.cover)}" alt="" loading="lazy">` : `<video src="/media/${esc(x.file)}#t=0.8" preload="metadata" muted playsinline></video>`}
       <span class="tt"><b>${esc(x.title)}</b><span class="small muted">${netBadge(x.network)} ${esc(x.who)} · ${fmtDay(x.at)}</span></span>
-      <span class="vv"><b class="num">${fmt(x.views)}</b><span class="small muted">vistas${x.eng ? ` · ${fmt(x.eng, 1)} % interacción` : ''}</span></span></a>`).join('')}</div>` : ''}
+      <span class="vv"><b class="num">${fmt(x.views)}</b><span class="mps"><span class="small muted">vistas</span>${x.eng ? mpill('rate', x.eng, fmt(x.eng, 1) + ' %') : ''}</span></span></a>`).join('')}</div>` : ''}
   </section>`;
 }
 // En qué etapa está cada reel: del crudo en el editor hasta publicado (como el tablero de Sequence, pero las etapas las marca ACM solo).
@@ -589,7 +592,7 @@ function calendarioView() {
   const title = week
     ? `${days[0].getDate()} ${days[0].getMonth() !== days[6].getMonth() ? days[0].toLocaleDateString('es-AR', { month: 'short' }) + ' ' : ''}– ${days[6].getDate()} ${days[6].toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}`
     : cap(m.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }));
-  const ev = (x) => `<button class="cal-ev s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-drag="1"' : ''} title="${esc(x.reel_title)} · ${esc(x.handle ? '@' + x.handle : NETS[x.network].name)}${movable(x) ? ' · arrastrá para cambiar el día' : ''}"><i class="nd ${x.network}"></i><span class="t">${fmtTime(x.scheduled_at)}</span><span class="r">${esc(x.reel_title)}</span></button>`;
+  const ev = (x) => `<button class="cal-ev s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-drag="1"' : ''} title="${esc(x.reel_title)} · ${esc(x.handle ? '@' + x.handle : NETS[x.network].name)}${movable(x) ? ' · arrastrá para cambiar el día' : ''}">${x.reel_cover ? `<span class="th"><img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false"><i class="nd ${x.network}"></i></span>` : `<i class="nd ${x.network}"></i>`}<span class="t">${fmtTime(x.scheduled_at)}</span><span class="r">${esc(x.reel_title)}</span></button>`;
   return `<section class="card cal ${week ? 'week' : ''}">
     <div class="cal-head">
       <h2 class="h2">${title}</h2>
@@ -597,9 +600,9 @@ function calendarioView() {
       <span class="spacer"></span>
       ${calModes()}
       <button class="btn sm" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>
-      <button class="btn sm" data-act="cal-today">Hoy</button>
+      <span class="cal-nav"><button class="btn sm" data-act="cal-today">Hoy</button>
       <button class="icon-btn" data-act="cal-prev" aria-label="${week ? 'Semana anterior' : 'Mes anterior'}">${icon('left')}</button>
-      <button class="icon-btn" data-act="cal-next" aria-label="${week ? 'Semana siguiente' : 'Mes siguiente'}">${icon('right')}</button>
+      <button class="icon-btn" data-act="cal-next" aria-label="${week ? 'Semana siguiente' : 'Mes siguiente'}">${icon('right')}</button></span>
     </div>
     <p class="cal-hint small muted">${icon('move', 14)} Arrastrá una publicación a otro día para moverla: mantiene la hora. Las que ya salieron o salen en menos de 15 minutos quedan fijas.</p>
     <div class="cal-grid">
@@ -625,13 +628,13 @@ function bestTimesCard() {
   const B = state.best;
   if (!B || !Object.keys(B).length) return '';
   const nets = Object.entries(B).sort((a, b) => b[1].measured - a[1].measured);
-  const fmtLift = (x) => '×' + x.toLocaleString('es-AR', { maximumFractionDigits: 1 });
+  const fmtLift = (x) => { const d = Math.round((x - 1) * 100); return d > 0 ? `+${d} %` : d < 0 ? `${d} %` : 'lo normal'; };
   return `<section class="card best">
     <div class="card-head"><h2 class="h2">Mejores horarios</h2><span class="small muted">Según las vistas de lo publicado. El planificador las usa en cada red donde todavía no aprendió un horario.</span></div>
-    <div class="best-grid">${nets.map(([n, x]) => `<div class="best-net">
+    <div class="best-grid">${nets.map(([n, x]) => `<div class="best-net n-${esc(n)}">
       <div class="row">${netBadge(n)}<b>${NETS[n]?.name || n}</b><span class="small muted">${x.measured} medidas</span></div>
       ${x.slots.length ? x.slots.slice(0, 5).map((sl, i) => `<div class="best-row ${i === 0 && sl.lift > 1.05 ? 'top' : ''}"><span class="t">${sl.from.slice(0, 2)}–${sl.to.slice(0, 2)} h</span>
-        <span class="bar"><i style="width:${Math.min(100, Math.round((sl.lift / Math.max(...x.slots.map((y) => y.lift))) * 100))}%"></i></span><span class="l">${fmtLift(sl.lift)}</span></div>`).join('')
+        <span class="bar"><i style="width:${Math.min(100, Math.round((sl.lift / Math.max(...x.slots.map((y) => y.lift))) * 100))}%"></i></span><span class="l ${sl.lift > 1.05 ? 'up' : sl.lift < .95 ? 'down' : ''}">${fmtLift(sl.lift)}</span></div>`).join('')
         : `<p class="small muted">${x.missing === 1 ? 'Falta 1 publicación medida' : `Faltan ${x.missing || 'más'} publicaciones medidas`} para decir algo con seguridad.</p>`}
     </div>`).join('')}</div>
   </section>`;
@@ -1253,7 +1256,7 @@ function knDraw() {
   const outCard = O.length ? `<div class="card kn-out"><h2 class="h2">Lo que mejor les funcionó</h2><p class="small muted">Publicaciones con el doble o más de las interacciones normales de su cuenta${K.handle ? ` (@${esc(K.handle)})` : ''}.</p>
     ${O.map((x) => `<a class="kn-o" ${/^https?:\/\//i.test(x.url || '') ? `href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"` : ''}><span class="kn-score">×${x.score.toLocaleString('es-AR', { maximumFractionDigits: 1 })}</span>
       <span><b>@${esc(x.handle)}</b> <span class="small muted">· ${esc(x.type || '')} · ${esc(x.date || '')}</span><span class="kn-ot">${esc(x.text)}</span>
-      <span class="small muted">${fmt(x.eng)} interacciones · lo normal en la cuenta: ${fmt(x.median)}</span></span></a>`).join('')}</div>` : '';
+      <span class="mps">${mpill('likes', x.eng, fmtK(x.eng) + ' interacciones')}<span class="small muted">lo normal: ${fmtK(x.median)}</span></span></span></a>`).join('')}</div>` : '';
   $('#kn-side').innerHTML = refsCard() + outCard + `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa. Se releen solas cada 6 horas con una cuenta de Instagram conectada del proyecto, y si una publica algo que rinde 3× o más lo normal, te aviso por Telegram.</p>
     <button class="btn sm" data-act="watch-run" style="margin:4px 0 10px">${icon('refresh', 15)} Actualizar ahora</button>
     <div class="kn-acc">${A.map((a) => `<button data-act="kn-handle" data-h="${esc(a.handle)}" class="${K.handle === a.handle ? 'sel' : ''}"><b>@${esc(a.handle)}</b><span>${fmt(a.followers)} seg. · ${fmt(a.posts)} publ.</span><span>${fmt(a.avg_eng)} interacciones prom. · ${a.followers ? fmt(a.avg_eng / a.followers * 100, 1) : 0} %</span></button>`).join('') || '<p class="small muted">Ninguna todavía.</p>'}</div></div>
@@ -1282,11 +1285,11 @@ async function refAdd(e) {
 }
 function knCard(x) {
   const d = x.data || {};
-  return `<article class="card kn-card">
+  return `<article class="card kn-card ${x.kind === 'publicacion' ? 'kn-pub' : ''}">
     <div class="kn-top"><span class="chip kn-k-${esc(x.kind)}">${esc((K.data.kindNames || {})[x.kind] || x.kind)}</span>${x.confidence ? `<span class="chip conf-${esc(x.confidence)}">${CONF[x.confidence] || esc(x.confidence)}</span>` : ''}${x.date ? `<span class="small muted">${esc(x.date)}</span>` : ''}<span class="spacer"></span>${x.score != null ? `<span class="small muted" title="Parecido con lo que buscaste">${Math.round(Math.min(1, x.score) * 100)} %</span>` : ''}<button class="icon-btn" data-act="kn-del" data-id="${x.id}" title="Borrar ficha">${icon('trash', 16)}</button></div>
     <h3>${esc(x.title)}</h3>
     <p class="kn-text">${esc(x.text)}</p>
-    ${x.kind === 'publicacion' ? `<p class="small muted">${fmt(d.likes)} me gusta · ${fmt(d.comments)} comentarios · ${fmt((d.rate || 0) * 100, 1)} % de sus seguidores</p>` : ''}
+    ${x.kind === 'publicacion' ? `<div class="mps">${mpill('likes', d.likes)}${mpill('comments', d.comments)}${mpill('rate', d.rate, fmt((d.rate || 0) * 100, 1) + ' % de sus seguidores')}</div>` : ''}
     ${x.source ? (/^https?:/.test(x.source) ? `<a class="small" href="${esc(x.source)}" target="_blank" rel="noopener noreferrer">${esc(x.source.replace(/^https?:\/\/(www\.)?/, '').slice(0, 70))} ↗</a>` : `<span class="small muted">${esc(x.source)}</span>`) : ''}
   </article>`;
 }
@@ -1482,6 +1485,18 @@ function paletteOpen() {
   box.addEventListener('click', () => setTimeout(() => d.close(), 0));
   search(); input.focus();
 }
+// pestañas: muestra la activa y marca con un degradé el lado donde quedan más
+function tabsFit() {
+  for (const n of $$('.tabs')) {
+    const a = $('a.active', n); if (a && (a.offsetLeft < n.scrollLeft || a.offsetLeft + a.offsetWidth > n.scrollLeft + n.clientWidth)) n.scrollLeft = a.offsetLeft - 24;
+    const mark = () => { n.classList.toggle('more-l', n.scrollLeft > 4); n.classList.toggle('more-r', n.scrollLeft + n.clientWidth < n.scrollWidth - 4); };
+    if (!n.dataset.fit) { n.dataset.fit = '1'; n.addEventListener('scroll', mark, { passive: true }); }
+    mark();
+  }
+}
+let tabsQ = false;
+new MutationObserver(() => { if (!tabsQ) { tabsQ = true; requestAnimationFrame(() => { tabsQ = false; tabsFit(); }); } }).observe(document.body, { childList: true, subtree: true });
+addEventListener('resize', () => tabsFit());
 document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.authed) { e.preventDefault(); paletteOpen(); } });
 function confirmBox(title, text, okLabel = 'Borrar') {
   return new Promise((res) => {
