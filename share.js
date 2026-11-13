@@ -2,6 +2,7 @@
 // aprobación y, si se eligió, el calendario de lo que viene. Con permiso «revisar» aprueba o rechaza (con comentario).
 // Nada se publica ni se programa desde un link. Cada link ve SOLO su proyecto; opcional: código y vencimiento.
 import crypto from 'node:crypto';
+import { addComment, commentsOf } from './comments.js';
 
 const CAN = ['ver', 'revisar'];
 const MAX_TRIES = 8; // intentos de código por link y por IP cada 15 minutos
@@ -30,7 +31,7 @@ const NET = { instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube', 
  * Las de gestión van bajo /api (con sesión); las públicas, bajo /s y /pub (sin sesión, con el token).
  */
 export function mountShare(app, d) {
-  const { get, all, run, reviewClip, sendMedia } = d;
+  const { get, all, run, reviewClip, sendMedia, db } = d;
   const tries = new Map(); // `${token}|${ip}` y `${token}|*` -> { n, until }
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
   // los contadores vencidos se limpian solos
@@ -137,9 +138,10 @@ export function mountShare(app, d) {
     const reels = all("SELECT id, caption, hashtags, file, cover, duration, clip_id, moment, review, created_at FROM reels WHERE project_id = ? AND kind = 'listo' AND clip_id IS NOT NULL ORDER BY id", p.id);
     const clips = new Map();
     for (const r of reels) { if (!clips.has(r.clip_id)) clips.set(r.clip_id, []); clips.get(r.clip_id).push(r); }
+    const notes = commentsOf(db, reels.map((r) => r.id));
     const pending = [...clips.entries()].filter(([, rs]) => rs.some((r) => r.review === 'pendiente')).map(([clip_id, rs]) => ({
       clip_id, tema: parse(rs[0].moment)?.tema || '',
-      reels: rs.map((r) => ({ id: r.id, caption: r.caption, hashtags: r.hashtags, duration: r.duration, review: r.review, video: `/s/${l.token}/media/${r.file}`, cover: r.cover ? `/s/${l.token}/media/${r.cover}` : '' })),
+      reels: rs.map((r) => ({ id: r.id, caption: r.caption, hashtags: r.hashtags, duration: r.duration, review: r.review, video: `/s/${l.token}/media/${r.file}`, cover: r.cover ? `/s/${l.token}/media/${r.cover}` : '', comments: (notes[r.id] || []).map((c) => ({ id: c.id, at_s: c.at_s, text: c.text, author: c.author })) })),
     }));
     const upcoming = l.calendar ? all(`SELECT p.id, p.scheduled_at, p.status, a.network, a.handle, a.connected_as, r.title
       FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id
@@ -170,6 +172,17 @@ export function mountShare(app, d) {
     if (l.can !== 'revisar') return res.status(403).json({ error: 'Este link es solo para mirar.' });
     const who = String(req.body?.nombre || '').trim().slice(0, 60);
     const out = reviewClip(String(req.params.clip_id), req.body || {}, { onlyProject: l.project_id, onlyPending: true, origin: 'opinion_dirigente', who: who || 'link compartido' });
+    res.status(out.status).json(out.body);
+  });
+
+  // Comentar un segundo de una versión desde el link: solo con permiso de revisar, en un reel de SU proyecto cuyo recorte sigue pendiente.
+  app.post('/pub/share/:token/reels/:rid/comments', async (req, res) => {
+    const l = await open(req, res); if (!l?.id) return;
+    if (l.can !== 'revisar') return res.status(403).json({ error: 'Este link es solo para mirar.' });
+    const reel = get("SELECT id, project_id, duration, clip_id, review FROM reels WHERE id = ? AND project_id = ? AND kind = 'listo'", Number(req.params.rid), l.project_id);
+    if (!reel || !reel.clip_id) return res.status(404).json({ error: 'No existe ese video' });
+    if (!get("SELECT 1 FROM reels WHERE clip_id = ? AND review = 'pendiente'", reel.clip_id)) return res.status(409).json({ error: 'Ese recorte ya se decidió.' });
+    const out = addComment(db, reel, req.body || {}, String(req.body?.nombre || '').trim().slice(0, 60) || 'link compartido');
     res.status(out.status).json(out.body);
   });
 

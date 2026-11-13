@@ -707,6 +707,39 @@ export function recorridoCases(sb) {
       eq([gr.report?.days, gs.report], [30, null], 'el informe solo en el link que lo pide');
       eq((await api('DELETE', `/api/projects/${c.sh}`)).j?.ok, true, 'se borra el proyecto de prueba (no deja publicaciones para los casos que siguen)');
     }],
+    [G('comentarios'), 'Comentarios en un segundo y referencias: el equipo y el link que revisa comentan, «solo mirar» no, otro proyecto no; le llegan al editor con las referencias', async () => {
+      const pub = (method, url, body) => als.exit(async () => { const r = await fetch(sb.box.base + url, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, j }; });
+      const p = (await api('POST', '/api/projects', form({ name: 'Comentar', kind: 'politica' }), true)).j.id;
+      const q = (await api('POST', '/api/projects', form({ name: 'Otro', kind: 'politica' }), true)).j.id;
+      const up = await api('POST', `/api/projects/${p}/reels`, form({ files: [1, 2].map((n) => [new Blob([fakeMp4(1080, 1920, 10)], { type: 'video/mp4' }), `k${n}.mp4`]) }), true);
+      const [r1, r2] = up.j.map((x) => x.id);
+      for (const id of [r1, r2]) await api('PUT', `/api/reels/${id}`, { clip_id: 'clip-tc', moment: { tema: 'Cuota' } });
+      const otro = (await api('POST', `/api/projects/${q}/reels`, form({ files: [[new Blob([fakeMp4(1080, 1920, 10)], { type: 'video/mp4' }), 'o.mp4']] }), true)).j[0].id;
+      await api('PUT', `/api/reels/${otro}`, { clip_id: 'clip-otro' });
+      const c1 = await api('POST', `/api/reels/${r1}/comments`, { at_s: 2.46, text: 'acá tapa la cara' });
+      eq([c1.status, c1.j.at_s, c1.j.author], [200, 2.5, 'equipo'], 'comenta el equipo (redondea a décimas)');
+      eq((await api('POST', `/api/reels/${r1}/comments`, { at_s: 3, text: '  ' })).status, 400, 'sin texto');
+      eq((await api('POST', `/api/reels/${r1}/comments`, { at_s: 40, text: 'x' })).status, 400, 'pasa el largo del video');
+      eq((await api('POST', `/api/reels/${r1}/comments`, { at_s: -1, text: 'x' })).status, 400, 'segundo negativo');
+      const rv = (await api('GET', `/api/projects/${p}/review`)).j;
+      eq(rv.clips[0].reels.find((r) => r.id === r1).comments.map((x) => x.text), ['acá tapa la cara'], 'Para aprobar trae los comentarios');
+      const rev = (await api('POST', `/api/projects/${p}/shares`, { can: 'revisar' })).j.path.split('/')[2];
+      const ver = (await api('POST', `/api/projects/${p}/shares`, { can: 'ver' })).j.path.split('/')[2];
+      const pc = await pub('POST', `/pub/share/${rev}/reels/${r2}/comments`, { at_s: 1, text: 'más rápido el arranque', nombre: 'Ana' });
+      eq([pc.status, pc.j.author], [200, 'Ana'], 'comenta el dirigente desde el link');
+      eq((await pub('POST', `/pub/share/${ver}/reels/${r2}/comments`, { at_s: 1, text: 'x' })).status, 403, 'solo mirar no comenta');
+      eq((await pub('POST', `/pub/share/${rev}/reels/${otro}/comments`, { at_s: 1, text: 'x' })).status, 404, 'un reel de otro proyecto');
+      const g = (await pub('GET', `/pub/share/${rev}`)).j;
+      eq(g.pending[0].reels.map((r) => r.comments.length), [1, 1], 'el link muestra los comentarios');
+      eq((await api('POST', `/api/projects/${p}/refs`, { url: 'javascript:alert(1)' })).status, 400, 'referencia que no es http');
+      eq((await api('POST', `/api/projects/${p}/refs`, { url: 'https://www.tiktok.com/@x/video/1', note: 'cómo arranca' })).status, 200, 'referencia');
+      eq((await api('POST', `/api/projects/${p}/refs`, { url: 'https://www.tiktok.com/@x/video/1' })).status, 409, 'la misma dos veces');
+      const ed = (await sb.box.editorGet(`/api/editor/aprendizajes/${p}`)).j;
+      eq([ed.pedidos.comentarios.length, ed.referencias.map((r) => [r.network, r.note])], [2, [['tiktok', 'cómo arranca']]], 'al editor le llegan comentarios y referencias');
+      await api('POST', '/api/clips/clip-tc/review', { decision: 'aprobar' });
+      eq((await pub('POST', `/pub/share/${rev}/reels/${r2}/comments`, { at_s: 1, text: 'tarde' })).status, 409, 'ya decidido no se comenta desde el link');
+      for (const x of [p, q]) eq((await api('DELETE', `/api/projects/${x}`)).j?.ok, true, 'borrar el proyecto de prueba');
+    }],
     [G('vigilar'), 'Cuentas vigiladas: relee las cuentas de la Investigación con la cuenta de Instagram del proyecto, avisa una sola vez lo que explota y una cuenta que falla no frena a las demás', async () => {
       const p = (await api('POST', '/api/projects', form({ name: 'Vigilar', kind: 'politica' }), true)).j.id;
       const a = (await api('POST', `/api/projects/${p}/accounts`, { network: 'instagram' })).j.id;

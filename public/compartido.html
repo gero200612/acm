@@ -105,6 +105,7 @@
         <section class="card clip reveal" data-clip="${esc(c.clip_id)}">
           <div><h2 class="h2">${esc(c.tema || 'Recorte nuevo')}</h2><p class="small muted">${c.reels.length} ${c.reels.length === 1 ? 'versión' : 'versiones'} del mismo momento</p></div>
           <div class="eds">${c.reels.map((r, i) => `<article class="ed"><video src="${esc(r.video)}" ${r.cover ? `poster="${esc(r.cover)}"` : ''} controls preload="metadata" playsinline></video>
+            ${review || (r.comments || []).length ? `<div class="tc" data-rid="${r.id}">${tcInner(r)}</div>` : ''}
             <b>Versión ${i + 1}</b>${r.caption ? `<p class="cap">${esc(r.caption)}</p>` : ''}
             ${review ? `<label class="small"><input type="checkbox" data-rid="${r.id}"> No me gusta esta</label>` : ''}</article>`).join('')}</div>
           ${review ? `<label class="small">Comentario <span class="muted">(obligatorio para pedir cambios)</span><textarea class="input note" rows="2" maxlength="2000" placeholder="Por ejemplo: el subtítulo tapa la cara"></textarea></label>
@@ -112,6 +113,32 @@
             <span style="flex:1"></span><button class="btn" data-act="no">Pedir cambios</button><button class="btn primary" data-act="ok">Aprobar</button></div>` : ''}
         </section>`).join('');
     }
+    // comentarios en un segundo exacto del video (solo si el link deja revisar)
+    const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    function tcInner(r) {
+      const C = r.comments || [], dur = Number(r.duration) || Math.max(1, ...C.map((c) => c.at_s));
+      return `<div class="tc-bar" aria-hidden="true">${C.map((c) => `<i style="left:${Math.min(100, c.at_s / dur * 100).toFixed(1)}%" data-seek="${c.at_s}" title="${esc(mmss(c.at_s))} · ${esc(c.text)}"></i>`).join('')}</div>
+        ${C.length ? `<ul class="tc-list">${C.map((c) => `<li><button type="button" class="tc-t" data-seek="${c.at_s}">${mmss(c.at_s)}</button><span>${esc(c.text)}${c.author && c.author !== 'equipo' ? ` <em class="muted">— ${esc(c.author)}</em>` : ''}</span></li>`).join('')}</ul>` : ''}
+        ${data.can === 'revisar' ? `<div class="tc-add"><input class="input tc-in" maxlength="600" placeholder="Comentar en 0:00" aria-label="Comentario en el segundo actual del video"><button type="button" class="btn sm" data-tc="add">Comentar</button></div>` : ''}`;
+    }
+    function findReel(rid) { for (const c of data.pending) { const r = c.reels.find((x) => x.id === rid); if (r) return r; } return null; }
+    async function tcAdd(box) {
+      const rid = Number(box.dataset.rid), input = box.querySelector('.tc-in'), text = input.value.trim(), v = box.closest('article')?.querySelector('video');
+      if (!text) { input.focus(); return; }
+      const at = Math.round((v?.currentTime || 0) * 10) / 10, who = (document.querySelector('.who')?.value || localStorage.getItem('acm.nombre') || '').trim();
+      try {
+        const c = await call(`/pub/share/${encodeURIComponent(token)}/reels/${rid}/comments`, { method: 'POST', body: JSON.stringify({ at_s: at, text, nombre: who }) });
+        const r = findReel(rid); if (r) { r.comments = [...(r.comments || []), c].sort((a, b) => a.at_s - b.at_s); box.innerHTML = tcInner(r); }
+        toast(`Comentario en el ${mmss(at)}`);
+      } catch (e) { toast(e.message, true); }
+    }
+    const tcTime = (e) => { const i = e.target.closest?.('article')?.querySelector('.tc-in'); if (i) i.placeholder = `Comentar en ${mmss(e.target.currentTime)}`; };
+    for (const ev of ['timeupdate', 'seeked']) document.addEventListener(ev, tcTime, true);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList?.contains('tc-in')) { e.preventDefault(); tcAdd(e.target.closest('.tc')); } });
+    document.addEventListener('click', (e) => {
+      const s = e.target.closest('[data-seek]'); if (s) { const v = s.closest('article')?.querySelector('video'); if (v) { v.currentTime = Number(s.dataset.seek); v.play().catch(() => {}); } return; }
+      const a = e.target.closest('[data-tc="add"]'); if (a) tcAdd(a.closest('.tc'));
+    });
     function wireClip(el) {
       el.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
         const ok = b.dataset.act === 'ok';

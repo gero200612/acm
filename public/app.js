@@ -306,6 +306,30 @@ function recetaResumen(r) {
   return [['Gancho', gancho + (r.gancho?.texto ? ` «${r.gancho.texto}»` : '')], ['Subtítulos', r.subtitulos || v.subtitulos], ['Música', musica], ['Ritmo', r.ritmo], ['Largo', r.largo_s ? `${Math.round(r.largo_s)} s` : v.largo]]
     .filter(([, x]) => x).map(([k, x]) => `<li><span>${k}</span><b>${esc(x)}</b></li>`).join('');
 }
+// Comentarios en un segundo exacto: marcas sobre la línea de tiempo, lista (tocar = ir a ese segundo) y un campo que comenta donde está el video.
+const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+function tcInner(r) {
+  const C = r.comments || [], dur = Number(r.duration) || Math.max(1, ...C.map((c) => c.at_s));
+  return `<div class="tc-bar" aria-hidden="true">${C.map((c) => `<i style="left:${Math.min(100, c.at_s / dur * 100).toFixed(1)}%" data-act="tc-seek" data-at="${c.at_s}" title="${esc(mmss(c.at_s))} · ${esc(c.text)}"></i>`).join('')}</div>
+    ${C.length ? `<ul class="tc-list">${C.map((c) => `<li><button type="button" class="tc-t" data-act="tc-seek" data-at="${c.at_s}">${mmss(c.at_s)}</button><span>${esc(c.text)}${c.author && c.author !== 'equipo' ? ` <em class="muted">— ${esc(c.author)}</em>` : ''}</span><button type="button" class="tc-x" data-act="tc-del" data-cid="${c.id}" aria-label="Borrar comentario">✕</button></li>`).join('')}</ul>` : ''}
+    <div class="tc-add"><input class="input tc-in" maxlength="600" placeholder="Comentar en 0:00" aria-label="Comentario en el segundo actual del video"><button type="button" class="btn sm" data-act="tc-add">Comentar</button></div>`;
+}
+const tcBlock = (r) => `<div class="tc" data-rid="${r.id}">${tcInner(r)}</div>`;
+function tcReel(rid) { for (const c of state.review?.clips || []) { const r = c.reels.find((x) => x.id === rid); if (r) return r; } return null; }
+async function tcAdd(box) {
+  const rid = Number(box.dataset.rid), input = $('.tc-in', box), text = input.value.trim(), v = box.closest('article')?.querySelector('video');
+  if (!text) { input.focus(); return; }
+  const at = Math.round((v?.currentTime || 0) * 10) / 10;
+  try {
+    const c = await api(`/api/reels/${rid}/comments`, { method: 'POST', body: { at_s: at, text } });
+    const r = tcReel(rid); if (r) { r.comments = [...(r.comments || []), c].sort((a, b) => a.at_s - b.at_s); box.innerHTML = tcInner(r); }
+    toast(`Comentario en el ${mmss(at)}`);
+  } catch (err) { fail(err); }
+}
+// el campo muestra el segundo en el que va a quedar el comentario
+const tcTime = (e) => { const i = e.target.closest?.('article')?.querySelector('.tc-in'); if (i) i.placeholder = `Comentar en ${mmss(e.target.currentTime)}`; };
+for (const ev of ['timeupdate', 'seeked']) document.addEventListener(ev, tcTime, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList?.contains('tc-in')) { e.preventDefault(); tcAdd(e.target.closest('.tc')); } });
 function aprobarView() {
   const p = state.project, R = state.review || { clips: [], pending: 0, review_mode: p.review_mode };
   const auto = R.review_mode === 'auto';
@@ -326,6 +350,7 @@ function aprobarView() {
     <div class="ap-eds">${c.reels.map((r, i) => `
       <article class="ap-ed ${r.review === 'rechazado' ? 'no' : ''}" data-id="${r.id}">
         <video src="/media/${esc(r.file)}" ${r.cover ? `poster="/media/${esc(r.cover)}"` : ''} controls preload="metadata" playsinline></video>
+        ${tcBlock(r)}
         <div class="ap-ed-h"><b>Versión ${i + 1}</b>${r.review === 'aprobado' ? '<span class="chip s-conectada">Aprobada</span>' : r.review === 'rechazado' ? '<span class="chip s-error">Rechazada</span>' : ''}</div>
         <ul class="ap-recipe">${recetaResumen(r.recipe)}</ul>
         <p class="ap-cap">${esc(r.caption || '')}</p>
@@ -1208,9 +1233,9 @@ async function knLoad() {
   const qs = new URLSearchParams({ q: K.q, kind: K.kind, handle: K.handle, limit: '60' });
   const seq = (K.seq = (K.seq || 0) + 1); // solo pinta la última respuesta si se cruzan dos búsquedas
   const meta = $('.kn-meta'); if (meta) meta.textContent = 'Buscando…';
-  let d, o; try { [d, o] = await Promise.all([api(`/api/projects/${pid}/knowledge?${qs}`), api(`/api/projects/${pid}/knowledge/outliers?${new URLSearchParams({ handle: K.handle, limit: '6' })}`).catch(() => [])]); } catch (e) { return fail(e); }
+  let d, o, rf; try { [d, o, rf] = await Promise.all([api(`/api/projects/${pid}/knowledge?${qs}`), api(`/api/projects/${pid}/knowledge/outliers?${new URLSearchParams({ handle: K.handle, limit: '6' })}`).catch(() => []), api(`/api/projects/${pid}/refs`).catch(() => [])]); } catch (e) { return fail(e); }
   if (seq !== K.seq) return;
-  K.data = d; K.outliers = o; knDraw();
+  K.data = d; K.outliers = o; K.refs = rf; knDraw();
 }
 function knDraw() {
   const D = K.data, list = $('#kn-list'); if (!D || !list) return;
@@ -1229,13 +1254,31 @@ function knDraw() {
     ${O.map((x) => `<a class="kn-o" ${/^https?:\/\//i.test(x.url || '') ? `href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"` : ''}><span class="kn-score">×${x.score.toLocaleString('es-AR', { maximumFractionDigits: 1 })}</span>
       <span><b>@${esc(x.handle)}</b> <span class="small muted">· ${esc(x.type || '')} · ${esc(x.date || '')}</span><span class="kn-ot">${esc(x.text)}</span>
       <span class="small muted">${fmt(x.eng)} interacciones · lo normal en la cuenta: ${fmt(x.median)}</span></span></a>`).join('')}</div>` : '';
-  $('#kn-side').innerHTML = outCard + `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa. Se releen solas cada 6 horas con una cuenta de Instagram conectada del proyecto, y si una publica algo que rinde 3× o más lo normal, te aviso por Telegram.</p>
+  $('#kn-side').innerHTML = refsCard() + outCard + `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa. Se releen solas cada 6 horas con una cuenta de Instagram conectada del proyecto, y si una publica algo que rinde 3× o más lo normal, te aviso por Telegram.</p>
     <button class="btn sm" data-act="watch-run" style="margin:4px 0 10px">${icon('refresh', 15)} Actualizar ahora</button>
     <div class="kn-acc">${A.map((a) => `<button data-act="kn-handle" data-h="${esc(a.handle)}" class="${K.handle === a.handle ? 'sel' : ''}"><b>@${esc(a.handle)}</b><span>${fmt(a.followers)} seg. · ${fmt(a.posts)} publ.</span><span>${fmt(a.avg_eng)} interacciones prom. · ${a.followers ? fmt(a.avg_eng / a.followers * 100, 1) : 0} %</span></button>`).join('') || '<p class="small muted">Ninguna todavía.</p>'}</div></div>
     <div class="card"><h2 class="h2">Importar</h2><p class="small muted">JSON con <code>items</code> (fichas) y/o <code>instagram</code> (cuentas con sus publicaciones).</p>
     <label class="btn">${icon('up')} Elegir archivo<input type="file" id="kn-file" accept=".json,application/json" hidden></label>
     <p class="small muted" style="margin-top:10px">Búsqueda: ${D.model.ready ? 'modelo listo' : D.model.present ? 'el modelo carga con la primera búsqueda' : 'sin modelo, solo por palabras'} (${esc(D.model.model)})</p></div>`;
   $('#kn-file').addEventListener('change', knImport);
+  $('#ref-form').addEventListener('submit', refAdd);
+}
+// Referencias para el editor: reels de otros que marcamos como inspiración, con qué tomar de cada uno.
+const NET_NAME = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook', x: 'X', otra: 'Link' };
+function refsCard() {
+  const R = K.refs || [];
+  return `<div class="card refs"><h2 class="h2">Referencias para el editor</h2><p class="small muted">Reels de otros que te gustan y qué tomar de cada uno. El editor los lee antes de editar.</p>
+    <form id="ref-form" class="ref-form"><input class="input" name="url" type="url" required placeholder="https://www.instagram.com/reel/…" aria-label="Link del reel">
+      <input class="input" name="note" maxlength="300" placeholder="Qué tomar: el ritmo, cómo arranca, los subtítulos…" aria-label="Qué tomar"><button class="btn sm primary" type="submit">Agregar</button></form>
+    ${R.length ? `<ul class="ref-list">${R.map((r) => `<li><span class="chip nodot">${esc(NET_NAME[r.network] || 'Link')}</span><span class="ref-b">${/^https?:\/\//i.test(r.url) ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.url.replace(/^https?:\/\/(www\.)?/i, '').slice(0, 48))}</a>` : esc(r.url)}${r.note ? `<span class="small muted">${esc(r.note)}</span>` : ''}</span><button type="button" class="tc-x" data-act="ref-del" data-rid="${r.id}" aria-label="Quitar referencia">✕</button></li>`).join('')}</ul>` : '<p class="small muted">Ninguna todavía.</p>'}</div>`;
+}
+async function refAdd(e) {
+  e.preventDefault();
+  const f = e.target, b = f.querySelector('button'); b.disabled = true;
+  try {
+    await api(`/api/projects/${state.project.id}/refs`, { method: 'POST', body: { url: f.url.value.trim(), note: f.note.value.trim() } });
+    K.refs = await api(`/api/projects/${state.project.id}/refs`); toast('Referencia agregada'); knDraw();
+  } catch (err) { b.disabled = false; fail(err); }
 }
 function knCard(x) {
   const d = x.data || {};
@@ -1826,6 +1869,14 @@ document.addEventListener('click', async (e) => {
         toast(act === 'ap-ok' ? 'Recorte aprobado' : 'Recorte rechazado');
         if (r.review_mode !== state.review?.review_mode) toast(r.review_mode === 'auto' ? 'La revisión pasó a automática: 19 de los últimos 20 aprobados' : 'La revisión volvió a manual');
         render(); break; }
+      case 'tc-add': tcAdd(el.closest('.tc')); break;
+      case 'ref-del': await api(`/api/refs/${Number(el.dataset.rid)}`, { method: 'DELETE' }); K.refs = (K.refs || []).filter((r) => r.id !== Number(el.dataset.rid)); knDraw(); break;
+      case 'tc-seek': { const v = el.closest('article')?.querySelector('video'); if (v) { v.currentTime = Number(el.dataset.at); v.play().catch(() => {}); } break; }
+      case 'tc-del': {
+        const box = el.closest('.tc'), r = tcReel(Number(box.dataset.rid)), cid = Number(el.dataset.cid);
+        await api(`/api/reel-comments/${cid}`, { method: 'DELETE' });
+        if (r) { r.comments = r.comments.filter((c) => c.id !== cid); box.innerHTML = tcInner(r); }
+        break; }
       case 'distribute': distributeDialog(state.reels.find((x) => x.id === id)); break;
       case 'del-post': {
         const old = state.posts.find((x) => x.id === id);

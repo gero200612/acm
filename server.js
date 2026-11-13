@@ -31,6 +31,8 @@ import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, r
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS, outliers } from './knowledge.js';
 import { initShare, mountShare, ensureReportLink } from './share.js';
 import { initWatch, watchCycle } from './watch.js';
+import { initComments, mountComments, feedbackOf, commentsOf } from './comments.js';
+import { initRefs, mountRefs, referencesOf } from './refs.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA = path.resolve(process.env.ACM_DATA || './data');
@@ -221,7 +223,8 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
   const pid = Number(req.params.pid);
   if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe el proyecto' });
   const w = winningVariables(db, pid);
-  res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid) });
+  // pedidos: comentarios por segundo y motivos de rechazo (para no repetir el error); referencias: reels de otros que el equipo marcó como inspiración
+  res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid) });
 });
 app.get('/api/projects/:id/memory', requireAuth, (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe el proyecto' });
@@ -297,8 +300,12 @@ app.use('/api', requireAuth);
 // links para compartir sin cuenta (el dirigente aprueba desde el celular): gestión con sesión; /s y /pub, públicas con el token
 initShare(db);
 initWatch(db);
+initComments(db);
+mountComments(app, { get, run, db });
+initRefs(db);
+mountRefs(app, { get, all, run });
 mountShare(app, {
-  get, all, run, tz: TZ, reviewClip: (...x) => reviewClip(...x),
+  get, all, run, db, tz: TZ, reviewClip: (...x) => reviewClip(...x),
   sendMedia: async (res, file, next) => {
     const f = path.basename(file);
     const r = get("SELECT file FROM reels WHERE file = ? AND storage = 'r2'", f);
@@ -1154,7 +1161,8 @@ app.get('/api/projects/:id/review', (req, res) => {
   if (!p) return res.status(404).json({ error: 'No existe el proyecto' });
   const reels = all("SELECT id, title, caption, hashtags, file, cover, duration, clip_id, moment, recipe, review, created_at FROM reels WHERE project_id = ? AND kind = 'listo' AND clip_id IS NOT NULL ORDER BY id", p.id);
   const clips = new Map();
-  for (const r of reels) { if (!clips.has(r.clip_id)) clips.set(r.clip_id, []); clips.get(r.clip_id).push({ ...r, recipe: parseJson(r.recipe), moment: parseJson(r.moment) }); }
+  const notes = commentsOf(db, reels.map((r) => r.id));
+  for (const r of reels) { if (!clips.has(r.clip_id)) clips.set(r.clip_id, []); clips.get(r.clip_id).push({ ...r, recipe: parseJson(r.recipe), moment: parseJson(r.moment), comments: notes[r.id] || [] }); }
   const pending = [...clips.entries()].filter(([, rs]) => rs.some((r) => r.review === 'pendiente'))
     .map(([clip_id, rs]) => ({ clip_id, moment: rs[0].moment, reels: rs }));
   // aprobados en los últimos 7 días (por el analista o por Gero) y sin rechazos: Gero puede rechazarlos todavía
