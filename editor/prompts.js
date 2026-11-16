@@ -9,6 +9,7 @@ Reglas duras:
 - Ordenalos por interés y poné en «interes» un número de 1 (flojo) a 10 (imperdible).
 - «tema»: en pocas palabras de qué trata. «motivo»: por qué funciona como reel.
 - «actualidad»: true solo si el momento habla de algo que vence pronto (una promo, un evento, una noticia, «este finde»); si es atemporal, false.
+- Temas partidos: si la persona arranca un tema, se va por las ramas y después vuelve al mismo tema, armá UN momento con «tramos» (2 o 3, en orden, sin pisarse), salteando el desvío. Cada tramo arranca y termina en límites de línea, como siempre; «inicio_s» es el inicio del primero y «fin_s» el fin del último. Usalo solo si pegados se entienden como una sola idea; si no, no lo uses.
 - Si el video no tiene nada que valga, devolvé la lista vacía. No inventes momentos para llenar.
 - Podés devolver hasta 25 candidatos.`;
 
@@ -26,6 +27,7 @@ export const HERRAMIENTA_MOMENTOS = {
             inicio_s: { type: 'number', description: 'Inicio de una línea de la transcripción, en segundos, tal cual' },
             fin_s: { type: 'number', description: 'Fin de una línea de la transcripción, en segundos, tal cual' },
             tema: { type: 'string' }, motivo: { type: 'string' }, actualidad: { type: 'boolean' },
+            tramos: { type: 'array', description: 'Solo si el tema está partido: 2 o 3 tramos en orden que se pegan', items: { type: 'object', properties: { inicio_s: { type: 'number' }, fin_s: { type: 'number' } }, required: ['inicio_s', 'fin_s'] } },
             interes: { type: 'number', description: '1 a 10' },
           },
           required: ['inicio_s', 'fin_s', 'tema', 'motivo', 'actualidad', 'interes'],

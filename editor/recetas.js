@@ -78,13 +78,16 @@ export function marcaParaReceta(marca = {}) {
 }
 
 export function construirReceta({ v, momento, palabras = [], textos, marca = {} }) {
+  // tema partido: el gancho «adelanto» solo puede arrancar dentro del primer tramo; lo disponible es la suma de los tramos
+  const tramos = Array.isArray(momento.datos?.tramos) && momento.datos.tramos.length > 1 ? momento.datos.tramos : null;
+  const primero = tramos ? tramos[0] : momento;
   let desde = momento.inicio_s;
   if (v.gancho === 'adelanto') {
-    const dur = momento.fin_s - momento.inicio_s;
-    const cand = iniciosDeFrase(palabras, momento).find((t) => t >= momento.inicio_s + dur * 0.2 && momento.fin_s - t >= 6);
+    const dur = primero.fin_s - primero.inicio_s;
+    const cand = iniciosDeFrase(palabras, primero).find((t) => t >= primero.inicio_s + dur * 0.2 && primero.fin_s - t >= 6);
     if (cand !== undefined) desde = cand;
   }
-  const disp = momento.fin_s - desde;
+  const disp = tramos ? tramos.reduce((a, t) => a + (t.fin_s - t.inicio_s), 0) - (desde - momento.inicio_s) : momento.fin_s - desde;
   const tope = Number(marca.largo_max_s) >= 6 ? Math.min(90, Number(marca.largo_max_s)) : 90; // el largo máximo del proyecto (ej.: 60 s)
   // nunca menos de 12 s (o el fragmento entero si es más corto): después el Estudio saca los silencios y un reel de 5 s no sirve
   const largo_s = r1(Math.min(tope, Math.max(Math.min(MIN_LARGO_S, disp), disp * FACTOR_LARGO[v.largo])));
@@ -125,7 +128,8 @@ export function crearArmarRecetas({ claude, modelo = MODELOS.textos } = {}) {
   return async ({ momento, transcripcion, palabras, aprendizajes, marca = {} } = {}) => {
     palabras = palabras || transcripcion?.palabras || [];
     const vars = elegirVariables({ semilla: momento.idx ?? momento.id ?? 0, aprendizajes, estilo: momento.datos?.publico_estilo });
-    const enMomento = palabras.filter((p) => p.fin_s > momento.inicio_s && p.inicio_s < momento.fin_s);
+    const tr = Array.isArray(momento.datos?.tramos) && momento.datos.tramos.length > 1 ? momento.datos.tramos : [momento];
+    const enMomento = palabras.filter((p) => tr.some((x) => p.fin_s > x.inicio_s && p.inicio_s < x.fin_s));
     const pedido = { modelo, system: SYSTEM_TEXTOS, herramienta: HERRAMIENTA_TEXTOS, maxTokens: 2000, usuario: usuarioTextos({ momento, texto: enMomento.map((p) => p.texto).join(' ').slice(0, 6000), versiones: vars }) };
     let textos;
     try { textos = validarTextos(await claude.estructurado(pedido)); }

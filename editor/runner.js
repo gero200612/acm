@@ -18,6 +18,8 @@ const META_RECETA = ['explora', 'caption', 'hashtags', 'variables'];
 export const paraEstudio = (receta) => Object.fromEntries(Object.entries(receta || {}).filter(([k]) => !META_RECETA.includes(k)));
 const paraAcm = (receta) => Object.fromEntries(Object.entries(receta || {}).filter(([k]) => !['caption', 'hashtags'].includes(k)));
 export const DIAS_ACTUALIDAD = 3;
+// un tema partido viaja al Estudio con sus tramos (se pegan en un solo recorte)
+const tramosDe = (m) => (Array.isArray(m.datos?.tramos) && m.datos.tramos.length > 1 ? { tramos: m.datos.tramos } : {});
 const sqliteAIso = (s) => new Date(String(s).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z'));
 
 export const rellenos = {
@@ -78,7 +80,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
       const m = ms.find((x) => x.id === e.momento_id);
       const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
       try {
-        const res = await estudio.editarRecorte({ url: t.url, palabras, inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(e.receta) });
+        const res = await estudio.editarRecorte({ url: t.url, palabras, inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(e.receta), ...tramosDe(m) });
         const base = crypto.randomUUID();
         const archivo = await estudio.descargar(res.archivo, path.join(dir, `${base}.mp4`));
         const portada = res.portada ? await estudio.descargar(res.portada, path.join(dir, `${base}.jpg`)).catch(() => '') : '';
@@ -96,13 +98,14 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
   // un intento de revisión: devuelve la revisión normalizada {review?, veredicto?, motivo?, ...}
   async function mirar(t, m, e, transcripcion) {
     const r = e.receta || {}, desde = r.gancho?.desde_s ?? m.inicio_s, hasta = Math.min(m.fin_s, desde + (r.largo_s || Infinity));
-    const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > desde && p.inicio_s < hasta);
+    // con un tema partido, el analista compara contra lo dicho en los tramos (el desvío del medio no está en la edición)
+    const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > desde && p.inicio_s < hasta && (!m.datos?.tramos || m.datos.tramos.some((x) => p.fin_s > x.inicio_s && p.inicio_s < x.fin_s)));
     return (await revisar({ trabajo: t, momento: m, edicion: e, resultado: e.resultado, tecnica: e.resultado.tecnica, cuadros: await cuadrosDe(e.resultado), palabras })) || { review: 'pendiente' };
   }
   // vuelve a editar con la receta corregida y deja la edición «editada» con el resultado nuevo
   async function rehacer(t, m, e, receta, transcripcion) {
     const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
-    const res = await estudio.editarRecorte({ url: t.url, palabras, inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(receta) });
+    const res = await estudio.editarRecorte({ url: t.url, palabras, inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(receta), ...tramosDe(m) });
     const base = crypto.randomUUID();
     const archivo = await estudio.descargar(res.archivo, path.join(dir, `${base}.mp4`));
     const portada = res.portada ? await estudio.descargar(res.portada, path.join(dir, `${base}.jpg`)).catch(() => '') : '';

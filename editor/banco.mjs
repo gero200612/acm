@@ -351,6 +351,20 @@ casos.push(
     eq(construirReceta({ v, momento: { inicio_s: 0, fin_s: 18 }, textos: t }).largo_s, 12, 'corto de 18 s: 12, no 8');
     eq(construirReceta({ v, momento: { inicio_s: 0, fin_s: 10 }, textos: t }).largo_s, 10, 'fragmento más corto: entero');
   }],
+  ['Momentos', 'Tema partido: un momento con 2 tramos se valida tramo por tramo, suma su duración, no pisa a otros y el desvío del medio queda libre', async () => {
+    const pal = Array.from({ length: 120 }, (_, i) => ({ texto: `p${i}`, inicio_s: i, fin_s: i + 0.9 }));
+    const { validos, descartados } = validarMomentos([
+      { inicio_s: 0, fin_s: 60.9, tramos: [{ inicio_s: 0, fin_s: 7.9 }, { inicio_s: 50, fin_s: 60.9 }], tema: 'el 707 (vuelve)', interes: 9 },
+      { inicio_s: 10, fin_s: 30.9, tema: 'el desvío', interes: 5 }, // cae entre los tramos: no se pisa
+      { inicio_s: 52, fin_s: 70.9, tema: 'pisa el segundo tramo', interes: 4 },
+      { inicio_s: 80, fin_s: 99.9, tramos: [{ inicio_s: 80, fin_s: 85.5 }, { inicio_s: 90, fin_s: 99.9 }], tema: 'corta palabra', interes: 3 },
+    ], pal);
+    eq(validos.map((v) => [v.tema, v.tramos?.length || 1]), [['el 707 (vuelve)', 2], ['el desvío', 1]], 'quedan el partido y el desvío');
+    eq(descartados.map((d) => d.causa).sort(), ['que cortan una palabra', 'solapados'], 'causas');
+    const v = { gancho: 'directo', subtitulos: 'grande', musica: 'sin', ritmo: 'normal', largo: 'completo', explora: false };
+    const r = construirReceta({ v, momento: { inicio_s: 0, fin_s: 60.9, datos: { tramos: validos[0].tramos } }, textos: { caption: 'c', hashtags: '#a', portada_texto: 'p' } });
+    eq(r.largo_s, 18.8, 'el largo es la suma de los tramos (7,9 + 10,9), no 60,9');
+  }],
   ['Claude', 'Pide JSON con output_config (sin forzar herramienta), limpia el esquema y con Sonnet 5.5 manda fallbacks', async () => {
     const pedidos = [];
     const respuesta = { stop_reason: 'end_turn', content: [{ type: 'text', text: '{"versiones":[]}' }] };
