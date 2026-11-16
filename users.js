@@ -11,7 +11,7 @@ export const OWNER = Object.freeze({ id: 0, email: '', name: 'Dueño', role: 'ge
 
 export function initUsers(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('general', 'admin', 'sombra')),
+    id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('general', 'admin', 'sombra')),
     project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE, pass_hash TEXT NOT NULL, ver INTEGER NOT NULL DEFAULT 1,
     created_by INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')), last_login_at TEXT DEFAULT '');`);
   // quién aprobó o rechazó cada recorte
@@ -65,7 +65,8 @@ const OWNERS = [
   [/^\/api\/posts\/(\d+)(?:\/|$)/, (db, id) => db.prepare('SELECT project_id AS p FROM posts WHERE id = ?').get(id)],
   [/^\/api\/campaigns\/(\d+)(?:\/|$)/, (db, id) => db.prepare('SELECT project_id AS p FROM campaigns WHERE id = ?').get(id)],
   [/^\/api\/knowledge\/(\d+)(?:\/|$)/, (db, id) => db.prepare('SELECT project_id AS p FROM knowledge WHERE id = ?').get(id)],
-  [/^\/api\/clips\/([^/]+)\/review$/, (db, id) => db.prepare("SELECT project_id AS p FROM reels WHERE clip_id = ? AND kind = 'listo' ORDER BY id LIMIT 1").get(decodeURIComponent(id))],
+  // un recorte es de un proyecto solo si TODAS sus ediciones son de ese proyecto
+  [/^\/api\/clips\/([^/]+)\/review$/, (db, id) => { const ps = db.prepare('SELECT DISTINCT project_id AS p FROM reels WHERE clip_id = ?').all(decodeURIComponent(id)); return ps.length === 1 ? ps[0] : null; }],
   [/^\/api\/autoreplies\/(\d+)(?:\/|$)/, (db, id) => db.prepare('SELECT project_id AS p FROM autoreplies WHERE id = ?').get(id)],
   [/^\/api\/shares\/(\d+)(?:\/|$)/, (db, id) => db.prepare('SELECT project_id AS p FROM share_links WHERE id = ?').get(id)],
   [/^\/api\/refs\/(\d+)(?:\/|$)/, (db, id) => db.prepare('SELECT project_id AS p FROM refs WHERE id = ?').get(id)],
@@ -114,9 +115,9 @@ export function permit(db, user, method, p, body) {
 export function mediaAllowed(db, user, file) {
   if (!user) return false;
   if (user.role === 'general') return true;
-  const r = db.prepare('SELECT project_id AS p, kind FROM reels WHERE file = ? OR cover = ?').get(file, file)
-    || db.prepare('SELECT id AS p FROM projects WHERE photo = ?').get(file);
-  return !!r && r.p === user.project_id;
+  // todas las filas que nombran ese archivo tienen que ser de su proyecto (una portada apuntando a un archivo ajeno no abre nada)
+  const ps = [...db.prepare('SELECT project_id AS p FROM reels WHERE file = ? OR cover = ?').all(file, file), ...db.prepare('SELECT id AS p FROM projects WHERE photo = ?').all(file)];
+  return ps.length > 0 && ps.every((r) => r.p === user.project_id);
 }
 // A qué proyectos llega (null = a todos).
 export const scopeOf = (user) => (user.role === 'general' ? null : [user.project_id]);
@@ -158,7 +159,7 @@ export function mountUsers(app, { db }) {
     const bad = check(b, me, true); if (bad) return res.status(bad.status).json({ error: bad.error });
     if (b.role === 'general' && get("SELECT count(*) n FROM users WHERE role = 'general'").n >= MAX_GENERALES) return res.status(400).json({ error: `Ya hay ${MAX_GENERALES} administradores generales además del dueño` });
     if (get('SELECT id FROM users WHERE email = ?', email)) return res.status(409).json({ error: 'Ya hay un usuario con ese mail' });
-    const r = run('INSERT INTO users (email, name, role, project_id, pass_hash, created_by) VALUES (?, ?, ?, ?, ?, ?)', email, name, b.role, b.role === 'general' ? null : Number(b.project_id), hashPassword(b.password), me.id);
+    const r = run('INSERT INTO users (email, name, role, project_id, pass_hash, created_by, ver) VALUES (?, ?, ?, ?, ?, ?, ?)', email, name, b.role, b.role === 'general' ? null : Number(b.project_id), hashPassword(b.password), me.id, crypto.randomInt(1, 2 ** 31));
     res.json(pub(get('SELECT * FROM users WHERE id = ?', r.lastInsertRowid)));
   });
   app.put('/api/users/:id', (req, res) => {

@@ -705,6 +705,8 @@ if (process.env.ACM_CLEANUP !== 'off') setInterval(() => cleanup().catch((e) => 
 app.put('/api/reels/:id', (req, res) => {
   const r = get('SELECT * FROM reels WHERE id = ?', req.params.id); if (!r) return res.status(404).json({ error: 'No existe' });
   const d = pick(req.body || {}, ['title', 'caption', 'hashtags', 'status', 'kind', 'source_id', 'clip_id', 'moment', 'recipe', 'review', 'expires_at', 'cover']);
+  // portada, recorte y crudo de origen los pone el editor: un usuario que no es general no los cambia (podrían apuntar a cosas de otro proyecto)
+  if (req.user.role !== 'general') for (const k of ['cover', 'clip_id', 'source_id']) delete d[k];
   if ('review' in d && !['pendiente', 'aprobado', 'rechazado'].includes(d.review)) return res.status(400).json({ error: 'Revisión inválida: pendiente, aprobado o rechazado' });
   if ('clip_id' in d && r.clip_id && d.clip_id !== r.clip_id) return res.status(400).json({ error: 'El recorte de este reel no se puede cambiar ni quitar.' });
   for (const k of ['moment', 'recipe']) if (k in d && d[k] !== null && typeof d[k] !== 'string') d[k] = JSON.stringify(d[k]);
