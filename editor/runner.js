@@ -48,11 +48,12 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     return tr;
   }
 
-  async function momentos(t, transcripcion, aprendizajes, investigacion = [], publicos = []) {
+  let R_pedidos = { comentarios: [], rechazos: [] }; // lo último que pidió el equipo (para el analista)
+  async function momentos(t, transcripcion, aprendizajes, investigacion = [], publicos = [], pedidos) {
     let ms = R.momentos(t.id);
     if (ms.length) return ms; // retomado: se reusan (el clip_id no cambia)
     await etapa(t, 'buscando_momentos');
-    const res = (await elegirMomentos({ trabajo: t, transcripcion, aprendizajes, investigacion, publicos })) || [];
+    const res = (await elegirMomentos({ trabajo: t, transcripcion, aprendizajes, investigacion, publicos, pedidos })) || [];
     const elegidos = Array.isArray(res) ? res : res.momentos || [];
     if (!Array.isArray(res) && !elegidos.length && res.motivo) motivoSinMomentos = res.motivo;
     elegidos.forEach((m, i) => {
@@ -65,12 +66,12 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     return ms;
   }
 
-  async function armar(t, ms, transcripcion, aprendizajes, marca = {}, porPublico = {}) {
+  async function armar(t, ms, transcripcion, aprendizajes, marca = {}, porPublico = {}, pedidos, ejemplosTextos = []) {
     // cada fragmento se arma con lo aprendido de SU público; si ese público todavía no aprendió nada, con lo del proyecto
     const delPublico = (m) => { const a = porPublico[m.datos?.publico]; return a && Object.keys(a).length ? [a] : aprendizajes; };
     if (R.ediciones(t.id).length) return;
     for (const m of ms.filter((x) => x.estado !== 'candidato')) {
-      const recetas = ((await armarRecetas({ trabajo: t, momento: m, transcripcion, aprendizajes: delPublico(m), marca })) || []).slice(0, MAX_RECETAS);
+      const recetas = ((await armarRecetas({ trabajo: t, momento: m, transcripcion, aprendizajes: delPublico(m), marca, pedidos, ejemplosTextos })) || []).slice(0, MAX_RECETAS);
       recetas.forEach((r, i) => R.guardarEdicion(t.id, m.id, i, r));
     }
   }
@@ -100,7 +101,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     const r = e.receta || {}, desde = r.gancho?.desde_s ?? m.inicio_s, hasta = Math.min(m.fin_s, desde + (r.largo_s || Infinity));
     // con un tema partido, el analista compara contra lo dicho en los tramos (el desvío del medio no está en la edición)
     const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > desde && p.inicio_s < hasta && (!m.datos?.tramos || m.datos.tramos.some((x) => p.fin_s > x.inicio_s && p.inicio_s < x.fin_s)));
-    return (await revisar({ trabajo: t, momento: m, edicion: e, resultado: e.resultado, tecnica: e.resultado.tecnica, cuadros: await cuadrosDe(e.resultado), palabras })) || { review: 'pendiente' };
+    return (await revisar({ trabajo: t, momento: m, pedidos: R_pedidos, edicion: e, resultado: e.resultado, tecnica: e.resultado.tecnica, cuadros: await cuadrosDe(e.resultado), palabras })) || { review: 'pendiente' };
   }
   // vuelve a editar con la receta corregida y deja la edición «editada» con el resultado nuevo
   async function rehacer(t, m, e, receta, transcripcion) {
@@ -159,12 +160,13 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     try {
       motivoSinMomentos = '';
       const ctx = acm.contexto ? await acm.contexto(t.project_id, t.reel_id) : { aprendizajes: (await acm.aprendizajes?.(t.project_id)) ?? [] };
-      const aprendizajes = ctx.aprendizajes ?? [], investigacion = ctx.investigacion ?? [], publicos = ctx.publicos ?? [], marca = ctx.marca ?? {}, porPublico = ctx.porPublico ?? {};
+      const aprendizajes = ctx.aprendizajes ?? [], investigacion = ctx.investigacion ?? [], publicos = ctx.publicos ?? [], marca = ctx.marca ?? {}, porPublico = ctx.porPublico ?? {}, pedidos = ctx.pedidos ?? { comentarios: [], rechazos: [] }, ejemplosTextos = ctx.ejemplosTextos ?? [];
+      R_pedidos = pedidos;
       const transcripcion = await transcribir(t);
       t = R.trabajo(id);
-      const ms = await momentos(t, transcripcion, aprendizajes, investigacion, publicos);
+      const ms = await momentos(t, transcripcion, aprendizajes, investigacion, publicos, pedidos);
       if (!ms.length) { await etapa(t, 'sin_momentos', motivoSinMomentos || 'No encontramos momentos para recortar en este video'); return R.trabajo(id); }
-      await armar(t, ms, transcripcion, aprendizajes, marca, porPublico);
+      await armar(t, ms, transcripcion, aprendizajes, marca, porPublico, pedidos, ejemplosTextos);
       if (!R.ediciones(t.id).length) { await etapa(t, 'sin_momentos', 'Hay momentos pero ninguna receta para editarlos'); return R.trabajo(id); }
       await etapa(t, 'editando', `${R.ediciones(t.id).length} ediciones`);
       await editar(t, ms, transcripcion);

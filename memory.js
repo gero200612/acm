@@ -191,6 +191,19 @@ export function memoryOf(db, projectId) {
 }
 
 // la investigación del proyecto para el editor: fichas (título + texto), con tope de cantidad y de tamaño
+// Los textos reales del dirigente: sus publicaciones de la Investigación con más me gusta, para que el editor escriba como él.
+// Su cuenta es la que se parece al nombre del proyecto (gustavo_posse ~ «Gustavo Posse»); si no hay una, nada.
+export function textosPropios(db, projectId, { max = 6 } = {}) {
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const p = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId);
+  if (!p) return [];
+  const rows = db.prepare("SELECT handle, text, data FROM knowledge WHERE project_id = ? AND kind = 'publicacion'").all(projectId);
+  const nombre = norm(p.name);
+  const propias = rows.filter((r) => { const h = norm(r.handle); return h && nombre && (h === nombre || h.includes(nombre) || nombre.includes(h)); });
+  const likes = (r) => { try { return Number(JSON.parse(r.data || '{}').likes) || 0; } catch { return 0; } };
+  return propias.filter((r) => String(r.text || '').trim().length > 40).sort((a, b) => likes(b) - likes(a)).slice(0, max).map((r) => String(r.text).replace(/\s+/g, ' ').trim().slice(0, 500));
+}
+
 export function investigationOf(db, projectId, { maxItems = 40, maxChars = 12000 } = {}) {
   const rows = db.prepare("SELECT kind, title, text FROM knowledge WHERE project_id = ? AND kind != 'publicacion' ORDER BY id DESC LIMIT ?").all(projectId, maxItems);
   const out = []; let used = 0;

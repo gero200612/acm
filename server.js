@@ -27,7 +27,7 @@ import { flushAlerts, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR, wee
 import { initPlanner, planProject, expiredBlocked, localExpiry, bestSlotsOf } from './planner.js';
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initMarketing, marketingCycle, projectsToCycle } from './marketing.js';
-import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars } from './memory.js';
+import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars, textosPropios } from './memory.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS, outliers } from './knowledge.js';
 import { initShare, mountShare, ensureReportLink } from './share.js';
 import { initWatch, watchCycle } from './watch.js';
@@ -254,6 +254,8 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
   const w = winningVariables(db, pid);
   // pedidos: comentarios por segundo y motivos de rechazo (para no repetir el error); referencias: reels de otros que el equipo marcó como inspiración
   res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid), publicos: publicosDe(pid),
+    // cómo escribe el dirigente (sus captions con más me gusta): el editor escribe los textos con esa voz
+    ejemplos_textos: textosPropios(db, pid),
     // lo aprendido de cada público por separado (sus aprobaciones y comparaciones): el editor arma las versiones de ese público con esto
     por_publico: Object.fromEntries(publicosDe(pid).map((x) => [x.clave, winningVariables(db, pid, { publico: x.clave })])),
     // la marca del proyecto y, si el editor pregunta por un crudo, su etiqueta (el barrio)

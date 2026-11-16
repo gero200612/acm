@@ -43,12 +43,12 @@ export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_
 // Devuelve { momentos: [{ inicio_s, fin_s, tema, motivo, actualidad, interes, estado: 'elegido'|'candidato' }], motivo }.
 // El corredor guarda todos; edita solo los «elegido» (hasta 15). Sin momentos válidos, `motivo` dice por qué.
 export function crearElegirMomentos({ claude, modelo = MODELOS.momentos } = {}) {
-  return async ({ palabras, transcripcion, investigacion = [], aprendizajes, publicos = [] } = {}) => {
+  return async ({ palabras, transcripcion, investigacion = [], aprendizajes, publicos = [], pedidos } = {}) => {
     palabras = palabras || transcripcion?.palabras || [];
     if (!palabras.length) return { momentos: [], motivo: 'El video no tiene habla: no hay momentos para recortar' };
     const resp = await claude.estructurado({
       modelo, system: SYSTEM_MOMENTOS, herramienta: publicos.length ? herramientaMomentos(publicos) : HERRAMIENTA_MOMENTOS,
-      usuario: usuarioMomentos({ palabras, investigacion, aprendizajes: normalizarAprendizajes(aprendizajes), publicos }),
+      usuario: usuarioMomentos({ palabras, investigacion, aprendizajes: normalizarAprendizajes(aprendizajes), publicos, pedidos }),
     });
     const propuestos = Array.isArray(resp?.momentos) ? resp.momentos : [];
     if (!propuestos.length) return { momentos: [], motivo: 'No encontramos momentos que valgan la pena como recorte en este video' };

@@ -1,3 +1,4 @@
+import { textoPedidos } from './prompts.js';
 // El analista: mira cada edición ya renderizada y dice si sale. Sin fallas técnicas, Sonnet mira entre 6 y 8 cuadros
 // y los subtítulos contra lo que se dice. Rechazo = el corredor la rehace UNA vez con la receta corregida (corregirReceta).
 //   revisar({ edicion, tecnica, cuadros: [{tipo, base64}], palabras }) → { veredicto: 'aprobado'|'rechazado'|'dudoso', motivo, correccion? }
@@ -45,7 +46,7 @@ export function resumenReceta(r = {}) {
 }
 
 export function crearAnalista({ claude, modelo = MODELOS.analista } = {}) {
-  return async function revisar({ edicion, tecnica, cuadros = [], palabras = [] } = {}) {
+  return async function revisar({ edicion, tecnica, cuadros = [], palabras = [], pedidos } = {}) {
     const fallas = tecnica?.fallas || [];
     if (fallas.length) {
       const correccion = fallas.reduce((a, f) => ({ ...a, ...(ARREGLO_POR_REGLA[f.regla] || {}) }), {});
@@ -56,7 +57,7 @@ export function crearAnalista({ claude, modelo = MODELOS.analista } = {}) {
     const texto = palabras.map((p) => p.texto).join(' ').slice(0, 4000);
     const usuario = [
       ...mira.map((c) => ({ type: 'image', source: { type: 'base64', media_type: c.tipo || 'image/jpeg', data: c.base64 } })),
-      { type: 'text', text: `${mira.length} cuadros del reel, en orden.\nReceta: ${resumenReceta(edicion?.receta)}\nSubtítulo/caption: ${edicion?.receta?.caption || ''}\nLo que se dice: «${texto || '(sin palabras)'}»` },
+      { type: 'text', text: `${mira.length} cuadros del reel, en orden.\nReceta: ${resumenReceta(edicion?.receta)}\nSubtítulo/caption: ${edicion?.receta?.caption || ''}\nLo que se dice: «${texto || '(sin palabras)'}»${textoPedidos(pedidos) ? `\nLo que el equipo ya rechazó o pidió cambiar (si esta edición repite algo de eso, rechazala y decí cuál):\n${textoPedidos(pedidos)}` : ''}` },
     ];
     try {
       const r = await claude.estructurado({ modelo, system: SYSTEM_ANALISTA, usuario, herramienta: HERRAMIENTA_ANALISTA, maxTokens: 1000 });

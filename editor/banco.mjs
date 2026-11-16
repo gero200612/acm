@@ -11,7 +11,7 @@ import { crearEditor } from './server.js';
 import { crearRunner } from './runner.js';
 import { repo } from './db.js';
 import { validarMomentos, crearElegirMomentos } from './momentos.js';
-import { herramientaMomentos, HERRAMIENTA_MOMENTOS, usuarioMomentos } from './prompts.js';
+import { herramientaMomentos, HERRAMIENTA_MOMENTOS, usuarioMomentos, usuarioTextos } from './prompts.js';
 import { crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas, construirReceta } from './recetas.js';
 import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
@@ -364,6 +364,17 @@ casos.push(
     const v = { gancho: 'directo', subtitulos: 'grande', musica: 'sin', ritmo: 'normal', largo: 'completo', explora: false };
     const r = construirReceta({ v, momento: { inicio_s: 0, fin_s: 60.9, datos: { tramos: validos[0].tramos } }, textos: { caption: 'c', hashtags: '#a', portada_texto: 'p' } });
     eq(r.largo_s, 18.8, 'el largo es la suma de los tramos (7,9 + 10,9), no 60,9');
+  }],
+  ['Pedidos', 'Los comentarios y rechazos del equipo y los textos del dirigente llegan a los momentos, a los textos y al analista', async () => {
+    const pedidos = { rechazos: [{ motivo: 'no me gusta el cartel de San Isidro' }], comentarios: [{ segundo: 0, texto: 'la letra tiene que ir tipo cartelito' }] };
+    const pal = Array.from({ length: 20 }, (_, i) => ({ texto: `p${i}`, inicio_s: i, fin_s: i + 0.9 }));
+    yes(/cartel de San Isidro/.test(usuarioMomentos({ palabras: pal, pedidos })), 'momentos');
+    const ut = usuarioTextos({ momento: { datos: { tema: 't', motivo: 'm' } }, texto: 'x', versiones: [{ gancho: 'directo', subtitulos: 'grande', ritmo: 'normal' }], pedidos, ejemplos: ['Caminar por San Isidro siempre tiene algo especial'] });
+    yes(/tipo cartelito/.test(ut) && /Caminar por San Isidro/.test(ut), 'textos: pedidos y voz del dirigente');
+    let visto = '';
+    const analista = crearAnalista({ claude: { async estructurado(p) { visto = p.usuario.at(-1).text; return { veredicto: 'aprobado', motivo: 'ok' }; } } });
+    await analista({ edicion: { receta: {} }, tecnica: { fallas: [] }, cuadros: [{ base64: 'AAAA' }], palabras: [], pedidos });
+    yes(/ya rechazó/.test(visto) && /cartel de San Isidro/.test(visto), 'analista');
   }],
   ['Claude', 'Pide JSON con output_config (sin forzar herramienta), limpia el esquema y con Sonnet 5.5 manda fallbacks', async () => {
     const pedidos = [];

@@ -60,8 +60,17 @@ export function lineasDeTranscripcion(palabras, { pausa = 0.6, maxPalabras = 14 
   return lineas;
 }
 
-export function usuarioMomentos({ palabras, investigacion = [], aprendizajes = {}, publicos = [] }) {
+// Lo que el equipo pidió (motivos de rechazo y comentarios en un segundo), en pocas líneas, de lo más nuevo a lo más viejo.
+export function textoPedidos(pedidos, { max = 12 } = {}) {
+  const r = (pedidos?.rechazos || []).map((x) => `- Rechazó un recorte: «${String(x.motivo || '').slice(0, 300)}»`);
+  const c = (pedidos?.comentarios || []).map((x) => `- Comentó (segundo ${x.segundo}): «${String(x.texto || '').slice(0, 300)}»`);
+  return [...r, ...c].slice(0, max).join('\n');
+}
+
+export function usuarioMomentos({ palabras, investigacion = [], aprendizajes = {}, publicos = [], pedidos } = {}) {
   const partes = [];
+  const ped = textoPedidos(pedidos);
+  if (ped) partes.push(`Lo que el equipo pidió o rechazó en ediciones anteriores (tenelo en cuenta al elegir; no repitas lo que no les gustó):\n${ped}`);
   if (publicos.length) partes.push(`Este proyecto publica en cuentas separadas por público. Etiquetá cada momento con el público al que mejor le sirve («publico»), y buscá fragmentos DISTINTOS para cada uno: el mismo tramo no va a dos públicos. Repartí parejo si el material da.\n${publicos.map((p) => `- ${p.clave}: ${p.nombre}. ${p.descripcion}`).join('\n')}`);
   if (investigacion.length) partes.push(`Lo que sabemos del proyecto y su público (investigación):\n${investigacion.map((i) => `- ${typeof i === 'string' ? i : JSON.stringify(i)}`).join('\n')}`);
   if (Object.keys(aprendizajes).length) partes.push(`Lo que funcionó en publicaciones anteriores de este proyecto (variables ganadoras): ${JSON.stringify(aprendizajes)}. Tenelo en cuenta al elegir.`);
@@ -96,8 +105,13 @@ export const HERRAMIENTA_TEXTOS = {
 
 const GANCHO_DESC = { directo: 'arranca directo, sin texto de gancho', pregunta: 'el gancho es una pregunta que engancha', adelanto: 'el gancho adelanta lo más fuerte del momento' };
 
-export function usuarioTextos({ momento, texto, versiones }) {
-  return `Recorte: «${momento.datos?.tema || ''}». Por qué funciona: ${momento.datos?.motivo || ''}.${momento.datos?.publico_nombre ? `\nPúblico: ${momento.datos.publico_nombre}. ${momento.datos.publico_desc || ''} Escribí los textos para ese público.` : ''}
+export function usuarioTextos({ momento, texto, versiones, pedidos, ejemplos = [] }) {
+  const ped = textoPedidos(pedidos);
+  const previo = [
+    ejemplos.length ? `Así escribe él en sus propias publicaciones (copiá su voz: primera persona, cómo arranca, cómo cierra, el largo; no copies frases):\n${ejemplos.slice(0, 6).map((e) => `- «${e}»`).join('\n')}` : '',
+    ped ? `Lo que el equipo pidió o rechazó antes (no repitas lo que no les gustó):\n${ped}` : '',
+  ].filter(Boolean).join('\n\n');
+  return `${previo ? `${previo}\n\n` : ''}Recorte: «${momento.datos?.tema || ''}». Por qué funciona: ${momento.datos?.motivo || ''}.${momento.datos?.publico_nombre ? `\nPúblico: ${momento.datos.publico_nombre}. ${momento.datos.publico_desc || ''} Escribí los textos para ese público.` : ''}
 Lo que se dice (transcripción):
 ${texto}
 

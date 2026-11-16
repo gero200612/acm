@@ -27,6 +27,7 @@ import { isPolicyReject as gPolicy } from './ads-google.js';
 import { tiktokAdapter } from './ads-tiktok.js';
 import { googleAdapter } from './ads-google.js';
 import { buildAdapters } from './ads-factory.js';
+import { textosPropios } from './memory.js';
 import { initMemory, compareSiblings, winningVariables, memoryCycle } from './memory.js';
 import { flushAlerts, alert as alert_, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR, weeklyReport } from './notify.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
@@ -193,6 +194,16 @@ function cases(video, sim) {
       eq((await memoryCycle(g.d, { now: g.now, hypothesize: hypo })).compared, 0, 'el ciclo también espera');
       const h = memFixture(); h.clip('c3', 1, 30, [1, 2, 3]); h.d.prepare('DELETE FROM posts WHERE reel_id IN (31, 32)').run();
       eq((await compareSiblings('c3', { db: h.d, now: h.now, hypothesize: hypo })).skipped, 'menos de 2 hermanas publicadas', 'con 1 no compara');
+    }],
+    ['Memoria', 'Textos propios: las publicaciones del propio dirigente (su cuenta se parece al nombre del proyecto), ordenadas por me gusta; las de otros no', async () => {
+      const d = new DatabaseSync(':memory:');
+      d.exec("CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO projects VALUES (1, 'Gustavo Posse'); CREATE TABLE knowledge (id INTEGER PRIMARY KEY, project_id INT, kind TEXT, handle TEXT, text TEXT, data TEXT)");
+      const K = (h, t, likes) => d.prepare("INSERT INTO knowledge (project_id, kind, handle, text, data) VALUES (1, 'publicacion', ?, ?, ?)").run(h, t, JSON.stringify({ likes }));
+      K('gustavo_posse', 'Caminar por San Isidro siempre tiene algo especial: cruzarme con ustedes', 1343);
+      K('gustavo_posse', 'Hace días que San Isidro quedó desconectado. No hablamos solo de colectivos', 5630);
+      K('ramonlanus', 'Seguimos trabajando por San Isidro con más obras en todos los barrios', 9000);
+      const t = textosPropios(d, 1);
+      eq([t.length, t[0].slice(0, 20)], [2, 'Hace días que San Is'], 'solo las suyas, la de más me gusta primero');
     }],
     ['Memoria', 'Cada público aprende por separado: con el público solo cuenta lo suyo; sin la columna, no hay nada por público', async () => {
       const d = new DatabaseSync(':memory:');

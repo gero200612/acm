@@ -125,12 +125,12 @@ export function validarTextos(resp) {
 }
 
 export function crearArmarRecetas({ claude, modelo = MODELOS.textos } = {}) {
-  return async ({ momento, transcripcion, palabras, aprendizajes, marca = {} } = {}) => {
+  return async ({ momento, transcripcion, palabras, aprendizajes, marca = {}, pedidos, ejemplosTextos = [] } = {}) => {
     palabras = palabras || transcripcion?.palabras || [];
     const vars = elegirVariables({ semilla: momento.idx ?? momento.id ?? 0, aprendizajes, estilo: momento.datos?.publico_estilo });
     const tr = Array.isArray(momento.datos?.tramos) && momento.datos.tramos.length > 1 ? momento.datos.tramos : [momento];
     const enMomento = palabras.filter((p) => tr.some((x) => p.fin_s > x.inicio_s && p.inicio_s < x.fin_s));
-    const pedido = { modelo, system: SYSTEM_TEXTOS, herramienta: HERRAMIENTA_TEXTOS, maxTokens: 2000, usuario: usuarioTextos({ momento, texto: enMomento.map((p) => p.texto).join(' ').slice(0, 6000), versiones: vars }) };
+    const pedido = { modelo, system: SYSTEM_TEXTOS, herramienta: HERRAMIENTA_TEXTOS, maxTokens: 2000, usuario: usuarioTextos({ momento, texto: enMomento.map((p) => p.texto).join(' ').slice(0, 6000), versiones: vars, pedidos, ejemplos: ejemplosTextos }) };
     let textos;
     try { textos = validarTextos(await claude.estructurado(pedido)); }
     catch (e) { if (/^Falta ANTHROPIC/.test(e.message)) throw e; textos = validarTextos(await claude.estructurado(pedido)); } // un reintento
