@@ -140,13 +140,17 @@ export function recorridoCases(sb) {
       eq((await mk({ email: 'som@x.com', name: 'Otra', role: 'sombra', project_id: c.p })).status, 409, 'mail repetido');
       eq((await mk({ email: 'c@x.com', name: 'C', role: 'sombra', project_id: c.p, password: 'corta' })).status, 400, 'contraseña corta');
       eq((await mk({ email: 'd@x.com', name: 'D', role: 'admin' })).status, 400, 'admin sin dirigente');
+      eq((await api('POST', '/api/login', { email: 'autocompletado@x.com', password: sb.box.password })).status, 200, 'sin generales, la maestra entra aunque haya un mail autocompletado');
       eq((await mk({ email: 'g1@x.com', name: 'G1', role: 'general' })).status, 200, 'general 1');
+      // con el primer general, la sesión del dueño se cae y la maestra deja de entrar
+      eq((await api('GET', '/api/me')).status, 401, 'la sesión del dueño ya no vale');
+      eq((await api('POST', '/api/login', { password: sb.box.password })).status, 401, 'la maestra ya no entra');
+      eq((await api('POST', '/api/login', { email: 'autocompletado@x.com', password: sb.box.password })).status, 401, 'ni con un mail autocompletado');
+      eq((await api('POST', '/api/login', { email: 'g1@x.com', password: 'clave-segura-1' })).status, 200, 'el general entra con su mail');
       eq((await mk({ email: 'g2@x.com', name: 'G2', role: 'general' })).status, 200, 'general 2');
       eq((await mk({ email: 'g3@x.com', name: 'G3', role: 'general' })).status, 400, 'tercer general (además del dueño)');
       eq((await api('POST', '/api/login', { email: 'som@x.com', password: 'mala-mala-1' })).status, 401, 'sombra con contraseña mala');
-      eq((await api('POST', '/api/login', { password: sb.box.password })).status, 200, 'el dueño sigue entrando');
-      eq((await api('POST', '/api/login', { email: 'autocompletado@x.com', password: sb.box.password })).status, 200, 'la maestra entra aunque haya un mail autocompletado');
-      eq((await api('GET', '/api/me')).j?.role, 'general', 'y entra como dueño');
+      eq((await api('GET', '/api/me')).j?.role, 'general', 'el general sigue adentro');
     }],
     [G('roles'), 'Administrador de dirigente: todo su proyecto, nada del otro, sin Laboratorio ni proyectos nuevos; solo da de alta sombras suyas', async () => {
       const u = await sb.box.client('adm@x.com', 'clave-segura-1');
@@ -791,7 +795,7 @@ export function recorridoCases(sb) {
       const otro = (await api('POST', `/api/projects/${q}/reels`, form({ files: [[new Blob([fakeMp4(1080, 1920, 10)], { type: 'video/mp4' }), 'o.mp4']] }), true)).j[0].id;
       await api('PUT', `/api/reels/${otro}`, { clip_id: 'clip-otro' });
       const c1 = await api('POST', `/api/reels/${r1}/comments`, { at_s: 2.46, text: 'acá tapa la cara' });
-      eq([c1.status, c1.j.at_s, c1.j.author], [200, 2.5, 'equipo'], 'comenta el equipo (redondea a décimas)');
+      eq([c1.status, c1.j.at_s, c1.j.author], [200, 2.5, 'G1'], 'comenta el equipo con el nombre de quien escribe (redondea a décimas)');
       eq((await api('POST', `/api/reels/${r1}/comments`, { at_s: 3, text: '  ' })).status, 400, 'sin texto');
       eq((await api('POST', `/api/reels/${r1}/comments`, { at_s: 40, text: 'x' })).status, 400, 'pasa el largo del video');
       eq((await api('POST', `/api/reels/${r1}/comments`, { at_s: -1, text: 'x' })).status, 400, 'segundo negativo');

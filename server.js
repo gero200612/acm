@@ -153,7 +153,9 @@ const run = (sql, ...p) => db.prepare(sql).run(...p);
 initUsers(db);
 const session = makeSession(SECRET);
 const cookie = (req) => Object.fromEntries((req.headers.cookie || '').split(/;\s*/).filter(Boolean).map((c) => { const i = c.indexOf('='); return [c.slice(0, i), decodeURIComponent(c.slice(i + 1))]; }));
-const userOf = (req) => userFromSession(db, session.read(cookie(req).acm));
+const hasGenerals = () => !!get("SELECT 1 FROM users WHERE role = 'general' LIMIT 1");
+// con un general dado de alta, la sesión del dueño (contraseña maestra) deja de valer
+const userOf = (req) => { const u = userFromSession(db, session.read(cookie(req).acm)); return u && u.id === 0 && hasGenerals() ? null : u; };
 const authed = (req) => !!userOf(req);
 // sesión + permiso: niega todo lo que no esté permitido para el rol (y lo de otros proyectos)
 function requireAuth(req, res, next) {
@@ -206,8 +208,9 @@ async function login(req, res) {
     const ok = checkPassword(pw, u?.pass_hash || 'scrypt$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
     if (u && ok) { user = u; run("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", u.id); }
   }
-  // la contraseña maestra entra siempre como dueño, aunque el navegador haya autocompletado un mail en el campo
-  if (!user) { const given = Buffer.from(pw), want = Buffer.from(PASSWORD); if (given.length === want.length && crypto.timingSafeEqual(given, want)) user = { id: 0, ver: 1 }; }
+  // la contraseña maestra (ACM_PASSWORD) entra como dueño SOLO mientras no haya un administrador general con usuario propio:
+  // es para arrancar; después se entra con mail y contraseña (Gero lo pidió el 16/11)
+  if (!user && !hasGenerals()) { const given = Buffer.from(pw), want = Buffer.from(PASSWORD); if (given.length === want.length && crypto.timingSafeEqual(given, want)) user = { id: 0, ver: 1 }; }
   if (!user) return res.status(401).json({ error: email ? 'Mail o contraseña incorrectos' : 'Contraseña incorrecta' });
   attempts.delete(ip); total.n = Math.max(0, total.n - 1);
   res.set('Set-Cookie', `acm=${session.token(user)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}${PROD ? '; Secure' : ''}`);

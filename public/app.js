@@ -394,9 +394,9 @@ function memoriaView() {
   const dec = (M.decisions || []).map((d) => `<tr><td class="small muted">${esc(d.at)}</td><td>${esc(MEM_KINDS[d.kind] || d.kind)}</td><td>${esc(d.target)}</td><td>${esc(d.reason)}</td></tr>`).join('');
   return `<div class="ap">
     <section class="card"><h2 class="h2">Lo que está ganando</h2>
-      ${gan ? `<ul>${gan}</ul><p class="muted small">Esto es lo que el editor usa al armar las próximas ediciones. Una variable entra con 5 intentos o más.</p>` : '<p class="muted">Todavía no hay nada ganador: una variable necesita 5 intentos. Se junta a medida que Gero aprueba o rechaza recortes y las versiones publicadas de cada uno se comparan.</p>'}
+      ${gan ? `<ul>${gan}</ul><p class="muted small">Esto es lo que el editor usa al armar las próximas ediciones. Una variable entra con 5 intentos o más.</p>` : '<p class="muted">Todavía no hay nada ganador: hace falta que se aprueben más recortes.</p>'}
     </section>
-    <section class="card"><h2 class="h2">Aprendizajes</h2>${rows ? `<table class="list"><thead><tr><th>Variable</th><th>Valor</th><th>Victorias</th><th>Tasa</th></tr></thead><tbody>${rows}</tbody></table><p class="muted small">La opinión de Gero pesa 3 veces.</p>` : '<p class="muted">Sin aprendizajes todavía.</p>'}</section>
+    <section class="card"><h2 class="h2">Aprendizajes</h2>${rows ? `<table class="list"><thead><tr><th>Variable</th><th>Valor</th><th>Victorias</th><th>Tasa</th></tr></thead><tbody>${rows}</tbody></table><p class="muted small">Una aprobación o un rechazo en Para aprobar pesa 3 veces.</p>` : '<p class="muted">Sin aprendizajes todavía.</p>'}</section>
     <section><h2 class="h2">Comparaciones de recortes</h2>${cmp || '<p class="muted">Cuando las versiones publicadas de un recorte tienen 48 horas de datos, se comparan acá.</p>'}</section>
     <section class="card"><h2 class="h2">Decisiones del agente</h2>${dec ? `<table class="list"><tbody>${dec}</tbody></table>` : '<p class="muted">El agente de marketing todavía no tomó decisiones.</p>'}</section>
   </div>`;
@@ -562,7 +562,7 @@ function usersView() {
     <td>${esc(ROLE_NAME[u.role] || u.role)}</td><td>${u.role === 'general' ? '<span class="muted">Todos</span>' : esc(pn(u.project_id))}</td>
     <td class="small muted">${u.last_login_at ? esc(u.last_login_at.slice(0, 16)) : 'Nunca entró'}</td>
     <td class="r nowrap">${u.id === state.me?.id ? '<span class="small muted">Vos</span>' : `<button class="btn sm" data-act="user-edit">Editar</button><button class="icon-btn danger" data-act="user-del" title="Borrar">${icon('trash', 16)}</button>`}</td></tr>`).join('');
-  const help = isGeneral() ? `<p class="small muted" style="margin-top:12px">El dueño entra con el mail vacío y la contraseña maestra. Además puede haber 2 administradores generales.</p>` : '';
+  const help = isGeneral() ? `<p class="small muted" style="margin-top:12px">Puede haber hasta 2 administradores generales. Mientras no haya ninguno, se entra con el mail vacío y la contraseña maestra; con el primero dado de alta, esa entrada se cierra.</p>` : '';
   return `<section class="card">${U.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Persona</th><th>Rol</th><th>Dirigente</th><th>Última entrada</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no hay usuarios.</p>'}${help}</section>`;
 }
 function userDialog(u) {
