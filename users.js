@@ -1,12 +1,12 @@
 // Usuarios y permisos. Tres roles:
-//   general → ve y maneja todo (Gero y hasta 2 más). El dueño entra con la contraseña maestra (ACM_PASSWORD) y el mail vacío.
+//   general → ve y maneja todo (hasta 3: Gero y dos más). La contraseña maestra (ACM_PASSWORD) solo entra mientras no haya ninguno.
 //   admin   → administrador de UN dirigente: todo su proyecto, nada de los otros, sin Laboratorio ni proyectos nuevos.
 //   sombra  → de UN dirigente: solo sube crudos y aprueba ediciones. No ve números.
 // El servidor niega por defecto: cada pedido tiene que caer en una regla que lo permita (no alcanza con esconder botones).
 import crypto from 'node:crypto';
 
 export const ROLES = ['general', 'admin', 'sombra'];
-export const MAX_GENERALES = 2; // además del dueño
+export const MAX_GENERALES = 3; // Gero y dos más (la contraseña maestra se cierra con el primero)
 export const OWNER = Object.freeze({ id: 0, email: '', name: 'Dueño', role: 'general', project_id: null });
 
 export function initUsers(db) {
@@ -157,7 +157,7 @@ export function mountUsers(app, { db }) {
     if (!EMAIL.test(email)) return res.status(400).json({ error: 'Poné un mail válido' });
     if (!name) return res.status(400).json({ error: 'Falta el nombre' });
     const bad = check(b, me, true); if (bad) return res.status(bad.status).json({ error: bad.error });
-    if (b.role === 'general' && get("SELECT count(*) n FROM users WHERE role = 'general'").n >= MAX_GENERALES) return res.status(400).json({ error: `Ya hay ${MAX_GENERALES} administradores generales además del dueño` });
+    if (b.role === 'general' && get("SELECT count(*) n FROM users WHERE role = 'general'").n >= MAX_GENERALES) return res.status(400).json({ error: `Ya hay ${MAX_GENERALES} administradores generales, que es el tope` });
     if (get('SELECT id FROM users WHERE email = ?', email)) return res.status(409).json({ error: 'Ya hay un usuario con ese mail' });
     const r = run('INSERT INTO users (email, name, role, project_id, pass_hash, created_by, ver) VALUES (?, ?, ?, ?, ?, ?, ?)', email, name, b.role, b.role === 'general' ? null : Number(b.project_id), hashPassword(b.password), me.id, crypto.randomInt(1, 2 ** 31));
     res.json(pub(get('SELECT * FROM users WHERE id = ?', r.lastInsertRowid)));
@@ -167,7 +167,7 @@ export function mountUsers(app, { db }) {
     if (!u || !canManage(me, u.role, u.project_id)) return res.status(404).json({ error: 'No existe' });
     const b = { role: u.role, project_id: u.project_id, ...pickDefined(req.body || {}, ['name', 'role', 'project_id', 'password']) };
     const bad = check(b, me, false); if (bad) return res.status(bad.status).json({ error: bad.error });
-    if (b.role === 'general' && u.role !== 'general' && get("SELECT count(*) n FROM users WHERE role = 'general'").n >= MAX_GENERALES) return res.status(400).json({ error: `Ya hay ${MAX_GENERALES} administradores generales además del dueño` });
+    if (b.role === 'general' && u.role !== 'general' && get("SELECT count(*) n FROM users WHERE role = 'general'").n >= MAX_GENERALES) return res.status(400).json({ error: `Ya hay ${MAX_GENERALES} administradores generales, que es el tope` });
     const name = b.name != null ? String(b.name).trim().slice(0, 80) || u.name : u.name;
     const changed = b.password || b.role !== u.role || (b.role === 'general' ? null : Number(b.project_id)) !== u.project_id;
     run('UPDATE users SET name = ?, role = ?, project_id = ?, pass_hash = ?, ver = ver + ? WHERE id = ?', name, b.role, b.role === 'general' ? null : Number(b.project_id),

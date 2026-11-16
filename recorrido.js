@@ -132,7 +132,7 @@ export function recorridoCases(sb) {
       yes(r.j?.id, 'no devolvió el proyecto'); c.p = r.j.id;
       eq((await api('POST', '/api/projects', { name: '  ' })).status, 400, 'sin nombre');
     }],
-    [G('roles'), 'Usuarios: el general da de alta admin y sombra; tope de 2 generales; mail repetido y contraseña corta rechazados', async () => {
+    [G('roles'), 'Usuarios: el general da de alta admin y sombra; tope de 3 generales; mail repetido y contraseña corta rechazados', async () => {
       c.otro = (await api('POST', '/api/projects', form({ name: 'Otro dirigente' }), true)).j.id;
       const mk = (b) => api('POST', '/api/users', { password: 'clave-segura-1', ...b });
       eq((await mk({ email: 'adm@x.com', name: 'Adm', role: 'admin', project_id: c.p })).status, 200, 'alta admin');
@@ -148,7 +148,8 @@ export function recorridoCases(sb) {
       eq((await api('POST', '/api/login', { email: 'autocompletado@x.com', password: sb.box.password })).status, 401, 'ni con un mail autocompletado');
       eq((await api('POST', '/api/login', { email: 'g1@x.com', password: 'clave-segura-1' })).status, 200, 'el general entra con su mail');
       eq((await mk({ email: 'g2@x.com', name: 'G2', role: 'general' })).status, 200, 'general 2');
-      eq((await mk({ email: 'g3@x.com', name: 'G3', role: 'general' })).status, 400, 'tercer general (además del dueño)');
+      eq((await mk({ email: 'g3@x.com', name: 'G3', role: 'general' })).status, 200, 'tercer general');
+      eq((await mk({ email: 'g4@x.com', name: 'G4', role: 'general' })).status, 400, 'cuarto general: pasa el tope de 3');
       eq((await api('POST', '/api/login', { email: 'som@x.com', password: 'mala-mala-1' })).status, 401, 'sombra con contraseña mala');
       eq((await api('GET', '/api/me')).j?.role, 'general', 'el general sigue adentro');
     }],

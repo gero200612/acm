@@ -562,7 +562,7 @@ function usersView() {
     <td>${esc(ROLE_NAME[u.role] || u.role)}</td><td>${u.role === 'general' ? '<span class="muted">Todos</span>' : esc(pn(u.project_id))}</td>
     <td class="small muted">${u.last_login_at ? esc(u.last_login_at.slice(0, 16)) : 'Nunca entró'}</td>
     <td class="r nowrap">${u.id === state.me?.id ? '<span class="small muted">Vos</span>' : `<button class="btn sm" data-act="user-edit">Editar</button><button class="icon-btn danger" data-act="user-del" title="Borrar">${icon('trash', 16)}</button>`}</td></tr>`).join('');
-  const help = isGeneral() ? `<p class="small muted" style="margin-top:12px">Puede haber hasta 2 administradores generales. Mientras no haya ninguno, se entra con el mail vacío y la contraseña maestra; con el primero dado de alta, esa entrada se cierra.</p>` : '';
+  const help = isGeneral() ? `<p class="small muted" style="margin-top:12px">Puede haber hasta 3 administradores generales.</p>` : '';
   return `<section class="card">${U.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Persona</th><th>Rol</th><th>Dirigente</th><th>Última entrada</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no hay usuarios.</p>'}${help}</section>`;
 }
 function userDialog(u) {
