@@ -550,11 +550,11 @@ function crudosView() {
   state.upKind = 'crudo';
   const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
   const list = state.reels.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Crudo</th><th>Subido</th><th>Estado</th></tr></thead><tbody>${state.reels.map((r) => `<tr>
-    <td>${esc(r.title)}</td><td class="small muted">${esc(String(r.created_at || '').slice(0, 16))}</td>
+    <td>${esc(r.title)}${r.etiqueta ? ` <span class="chip nodot">${esc(r.etiqueta)}</span>` : ''}</td><td class="small muted">${esc(String(r.created_at || '').slice(0, 16))}</td>
     <td><span class="chip ${r.status === 'error' ? 's-error' : r.status === 'listo' ? 's-conectada' : 'nodot'}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(CRUDO_ESTADO[r.status] || 'Subido')}</span></td></tr>`).join('')}</tbody></table></div>`
     : '<p class="muted" style="margin-top:12px">Todavía no subiste crudos.</p>';
   return `<section class="card"><div class="card-head"><div><h2 class="h2">Subir crudos</h2><p class="small muted">Videos sin editar. El editor saca las ediciones y aparecen en «Para aprobar».</p></div></div>
-    ${up}<label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los crudos acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
+    ${up}<label class="field up-etq">Barrio o lugar <span class="small muted">(opcional: sale arriba en todo el video, ej.: Béccar ❤️)</span><input class="input" id="up-etiqueta" maxlength="30" value="${esc(state.upEtiqueta || '')}"></label><label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los crudos acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
     ${list}</section>`;
 }
 
@@ -602,7 +602,7 @@ function reelsView() {
       <button type="button" data-act="up-kind" data-k="listo" aria-pressed="${kind === 'listo'}"><b>Listo</b><span>editado, para publicar</span></button>
       <button type="button" data-act="up-kind" data-k="crudo" aria-pressed="${kind === 'crudo'}"><b>Crudo</b><span>sin editar, para editar</span></button>
     </div>
-    <label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los ${kind === 'crudo' ? 'crudos' : 'reels listos'} acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
+    ${kind === 'crudo' ? `<label class="field up-etq">Barrio o lugar <span class="small muted">(opcional: sale arriba en todo el video, ej.: Béccar ❤️)</span><input class="input" id="up-etiqueta" maxlength="30" value="${esc(state.upEtiqueta || '')}"></label>` : ''}<label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los ${kind === 'crudo' ? 'crudos' : 'reels listos'} acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
     ${up}
     <div class="rl-stats">
       <div><b>${ALL.filter((r) => r.kind !== 'crudo').length}</b><span>listos</span></div>
@@ -1394,6 +1394,11 @@ function ajustesView() {
   <section class="card"><div class="card-head"><h2 class="h2">Datos del proyecto</h2></div>${projectForm(p)}</section>
   <div class="stack">
     ${publicosCard(p)}
+    <section class="card" id="marca-card"><div class="card-head"><div><h2 class="h2">Marca de los videos</h2><p class="small muted">El color pinta la palabra clave de los subtítulos y la línea de la etiqueta del barrio. El largo máximo corta las ediciones.</p></div></div>
+      <div class="two"><label class="field">Color de acento<span class="row"><input type="checkbox" id="marca-con" ${p.marca?.acento ? 'checked' : ''}> <input type="color" id="marca-acento" value="${esc(p.marca?.acento || '#C6E85A')}"></span></label>
+      <label class="field">Largo máximo<select class="input" id="marca-largo">${[['', 'Sin tope (90 s)'], [30, '30 s'], [45, '45 s'], [60, '60 s']].map(([v, l]) => `<option value="${v}" ${String(p.marca?.largo_max_s ?? '') === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+      <div class="row" style="margin-top:12px"><button type="button" class="btn sm primary" data-act="marca-save">Guardar marca</button></div>
+    </section>
     <section class="card"><div class="card-head"><h2 class="h2">Padrón</h2>${p.padron_file ? `<button class="btn sm danger" data-act="del-padron">Quitar</button>` : ''}</div>
       ${p.padron_file ? `<div class="pad-ok">${icon('file', 22)}<div><b>${esc(p.padron_file)}</b><span class="small muted">subido el ${fmtDate(p.padron_at)}</span></div></div>
         <div class="pad-nums"><div><b>${fmt(p.padron)}</b><span>${gente(p)}</span></div><div><b>${fmt(p.padron_phones)}</b><span>con teléfono</span></div><div><b>${fmt(p.padron_emails)}</b><span>con mail</span></div><div><b>${fmt(p.padron_contacts)}</b><span>contactables</span></div></div>` : ''}
@@ -1803,18 +1808,19 @@ async function uploadToR2(files) {
     // de a 3 a la vez: más rápido sin saturar la conexión
     const metas = await Promise.all(files.map(videoMeta));
     for (let i = 0; i < files.length; i += 3) await Promise.all(files.slice(i, i + 3).map((f, k) => putOne(f, links[i + k], i + k)));
-    await api(`/api/projects/${pid}/reels/complete`, { method: 'POST', body: { kind, items: files.map((f, i) => ({ key: links[i].key, name: f.name, ...metas[i] })) } });
+    await api(`/api/projects/${pid}/reels/complete`, { method: 'POST', body: { kind, etiqueta: kind === 'crudo' ? ($('#up-etiqueta')?.value ?? state.upEtiqueta ?? '') : '', items: files.map((f, i) => ({ key: links[i].key, name: f.name, ...metas[i] })) } });
     toast(`${files.length} ${kind === 'crudo' ? (files.length === 1 ? 'crudo subido' : 'crudos subidos') : (files.length === 1 ? 'reel listo subido' : 'reels listos subidos')}`);
   } catch (err) { fail(err); }
   state.uploads = []; render();
 }
 function uploadReels(files) {
+  state.upEtiqueta = $('#up-etiqueta')?.value || '';
   files = [...files].filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name));
   if (!files.length) return toast('Elegí archivos de video', true);
   const max = state.storage?.max || 1024 ** 3;
   const big = files.find((f) => f.size > max); if (big) return toast(`«${big.name}» pesa más de ${Math.round(max / 1024 ** 3)} GB`, true);
   if (state.storage?.r2) return uploadToR2(files);
-  const fd = new FormData(); fd.append('kind', state.upKind || 'listo'); files.forEach((f) => fd.append('files', f));
+  const fd = new FormData(); fd.append('kind', state.upKind || 'listo'); if ((state.upKind || 'listo') === 'crudo') fd.append('etiqueta', $('#up-etiqueta')?.value || ''); files.forEach((f) => fd.append('files', f));
   state.uploads = files; render();
   const x = new XMLHttpRequest();
   x.open('POST', `/api/projects/${state.project.id}/reels`);
@@ -1922,6 +1928,9 @@ document.addEventListener('click', async (e) => {
       case 'logout': await api('/api/logout', { method: 'POST' }); state.authed = false; state.me = null; location.hash = ''; render(); break;
       case 'new-project': newProjectDialog(); break;
       case 'user-new': userDialog(); break;
+      case 'marca-save': {
+        const marca = { ...($('#marca-con').checked ? { acento: $('#marca-acento').value } : {}), ...($('#marca-largo').value ? { largo_max_s: Number($('#marca-largo').value) } : {}) };
+        await api(`/api/projects/${state.project.id}`, { method: 'PUT', body: { marca } }); toast('Marca guardada'); render(); break; }
       case 'pub-add': if ($$('#pub-list .pub-row').length >= 6) { toast('Hasta 6 públicos', true); break; } $('#pub-list').insertAdjacentHTML('beforeend', pubRow()); break;
       case 'pub-del': el.closest('.pub-row').remove(); break;
       case 'pub-save': {

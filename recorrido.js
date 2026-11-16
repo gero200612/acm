@@ -639,6 +639,12 @@ export function recorridoCases(sb) {
       const r = await api('POST', `/api/projects/${c.p}/posts`, { reel_id: ej.j.id, account_id: acc.id, scheduled_at: '2026-12-20 12:00' });
       eq([r.status, /público/.test(r.j?.error || '')], [400, true], 'una de jóvenes no va a la cuenta de mayores');
       await api('DELETE', `/api/accounts/${acc.id}`);
+      // marca de los videos: color y largo en el proyecto, etiqueta en el crudo; al editor le llega todo junto
+      eq((await api('PUT', `/api/projects/${c.p}`, { marca: { acento: 'verde' } })).status, 400, 'color inválido');
+      eq((await api('PUT', `/api/projects/${c.p}`, { marca: { acento: '#c6e85a', largo_max_s: 60 } })).j?.marca, { acento: '#C6E85A', largo_max_s: 60 }, 'marca guardada');
+      eq((await api('PUT', `/api/reels/${c.crudo}`, { etiqueta: '  Béccar   ❤️ ' })).status, 200, 'etiqueta del crudo');
+      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}?crudo=${c.crudo}`)).j?.marca, { acento: '#C6E85A', largo_max_s: 60, etiqueta: 'Béccar ❤️' }, 'al editor le llega la marca con la etiqueta');
+      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.marca?.etiqueta, undefined, 'sin crudo, sin etiqueta');
     }],
     [G('editor'), 'POST /api/editor/edicion con token crea el reel listo con source_id, clip_id y review pendiente', async () => {
       const b = { crudo_id: c.crudo, clip_id: 'clip-abc', moment: { inicio_s: 1, fin_s: 9 }, recipe: { id: 'rapido' }, review: 'aprobado', edicion_id: "0a1b2c3d-0000-4000-8000-000000000501", caption: 'Un corte', hashtags: 'club, deporte', file_url: `${sb.editor.base}/video.mp4`, cover_url: `${sb.editor.base}/portada.jpg`, duration: 8, expires_at: '2026-12-01 12:00' };

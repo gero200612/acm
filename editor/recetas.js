@@ -67,7 +67,16 @@ function iniciosDeFrase(palabras, momento, pausa = 0.5) {
 }
 const r1 = (x) => Math.round(x * 10) / 10;
 
-export function construirReceta({ v, momento, palabras = [], textos }) {
+// La marca del proyecto que viaja al Estudio: color de acento (#RRGGBB) y etiqueta del crudo (el barrio, hasta 30).
+export function marcaParaReceta(marca = {}) {
+  const m = {};
+  if (/^#[0-9a-fA-F]{6}$/.test(String(marca.acento || ''))) m.acento = marca.acento;
+  const e = String(marca.etiqueta || '').trim().slice(0, 30);
+  if (e) m.etiqueta = e;
+  return m;
+}
+
+export function construirReceta({ v, momento, palabras = [], textos, marca = {} }) {
   let desde = momento.inicio_s;
   if (v.gancho === 'adelanto') {
     const dur = momento.fin_s - momento.inicio_s;
@@ -75,7 +84,9 @@ export function construirReceta({ v, momento, palabras = [], textos }) {
     if (cand !== undefined) desde = cand;
   }
   const disp = momento.fin_s - desde;
-  const largo_s = r1(Math.min(90, Math.max(Math.min(6, disp), disp * FACTOR_LARGO[v.largo])));
+  const tope = Number(marca.largo_max_s) >= 6 ? Math.min(90, Number(marca.largo_max_s)) : 90; // el largo máximo del proyecto (ej.: 60 s)
+  const largo_s = r1(Math.min(tope, Math.max(Math.min(6, disp), disp * FACTOR_LARGO[v.largo])));
+  const mr = marcaParaReceta(marca);
   const gancho = { desde_s: desde };
   const gtxt = String(textos.gancho_texto || '').trim().slice(0, 60);
   if (v.gancho !== 'directo' && gtxt) gancho.texto = gtxt;
@@ -85,6 +96,7 @@ export function construirReceta({ v, momento, palabras = [], textos }) {
     ritmo: v.ritmo, zoom: v.ritmo === 'rapido',
     largo_s, portada: { segundo_s: r1(largo_s * POS_PORTADA[v.largo]), texto: String(textos.portada_texto || '').trim().slice(0, 40) || String(momento.datos?.tema || 'Mirá esto').slice(0, 40) },
     explora: v.explora,
+    ...(Object.keys(mr).length ? { marca: mr } : {}),
     variables: { gancho: v.gancho, subtitulos: v.subtitulos, musica: v.musica, ritmo: v.ritmo, largo: v.largo },
     caption: String(textos.caption || '').trim(), hashtags: textos.hashtags,
   };
@@ -108,7 +120,7 @@ export function validarTextos(resp) {
 }
 
 export function crearArmarRecetas({ claude, modelo = MODELOS.textos } = {}) {
-  return async ({ momento, transcripcion, palabras, aprendizajes } = {}) => {
+  return async ({ momento, transcripcion, palabras, aprendizajes, marca = {} } = {}) => {
     palabras = palabras || transcripcion?.palabras || [];
     const vars = elegirVariables({ semilla: momento.idx ?? momento.id ?? 0, aprendizajes, estilo: momento.datos?.publico_estilo });
     const enMomento = palabras.filter((p) => p.fin_s > momento.inicio_s && p.inicio_s < momento.fin_s);
@@ -116,6 +128,6 @@ export function crearArmarRecetas({ claude, modelo = MODELOS.textos } = {}) {
     let textos;
     try { textos = validarTextos(await claude.estructurado(pedido)); }
     catch (e) { if (/^Falta ANTHROPIC/.test(e.message)) throw e; textos = validarTextos(await claude.estructurado(pedido)); } // un reintento
-    return vars.map((v, i) => construirReceta({ v, momento, palabras, textos: textos[i] }));
+    return vars.map((v, i) => construirReceta({ v, momento, palabras, textos: textos[i], marca }));
   };
 }

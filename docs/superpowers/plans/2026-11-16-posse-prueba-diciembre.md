@@ -52,7 +52,7 @@ Lo que sale de esto para el editor:
 - [ ] Desplegar el editor y el Estudio en el servidor nuevo (EDITOR_URL/TOKEN/PUBLIC_URL, TELEGRAM_*)
 - [ ] Cargar los 6 reels como referencias del proyecto 3, cada uno con una nota de qué tomar
 - [x] Estilo por público en el editor (ritmo, largo, subtítulos, música y arranque que usa cada público; se marca en Ajustes → Públicos) (16/11)
-- [ ] Receta de Posse: subtítulos en MAYÚSCULAS con acento verde lima, etiqueta del barrio, frase del vecino como gancho y tope de 60 s
+- [x] Receta de Posse: subtítulos en MAYÚSCULAS con acento verde lima, etiqueta del barrio, frase del vecino como gancho y tope de 60 s — hecho: Ajustes → Marca de los videos (color y largo máximo) + etiqueta del barrio al subir el crudo; el Estudio la dibuja (sincro-agents editor-acm 5ddc50b). La frase del vecino como gancho la elige el editor de momentos (16/11)
 - [ ] Música con licencia en /datos/musica (o decidir que va sin música)
 - [ ] Pedir 2 o 3 crudos reales de prueba y pasarlos por el editor de punta a punta
 - [ ] Gero revisa en «Para aprobar» y se ajusta hasta que aprueba 19 de 20

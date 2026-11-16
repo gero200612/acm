@@ -20,14 +20,14 @@ export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn 
   return {
     // lo que ACM sabe del proyecto: lo aprendido (variables ganadoras) y su investigación; si no se puede traer, el trabajo sigue sin eso.
     // El link se arma siempre con ACM_URL (nunca con uno que llegue en el trabajo): el EDITOR_TOKEN solo viaja a ACM.
-    async contexto(projectId) {
+    async contexto(projectId, crudoId) {
       const pid = Number(projectId);
       if (!base || !(pid > 0)) return { aprendizajes: [], investigacion: [] };
       try {
-        const r = await fetchFn(`${base}/api/editor/aprendizajes/${pid}`, { headers: { authorization: `Bearer ${token || ''}` }, signal: AbortSignal.timeout(20000) });
+        const r = await fetchFn(`${base}/api/editor/aprendizajes/${pid}${Number(crudoId) > 0 ? `?crudo=${Number(crudoId)}` : ''}`, { headers: { authorization: `Bearer ${token || ''}` }, signal: AbortSignal.timeout(20000) });
         if (!r.ok) return { aprendizajes: [], investigacion: [] };
         const j = await r.json();
-        return { aprendizajes: j.aprendizajes || [], investigacion: Array.isArray(j.investigacion) ? j.investigacion : [], publicos: Array.isArray(j.publicos) ? j.publicos : [] };
+        return { aprendizajes: j.aprendizajes || [], investigacion: Array.isArray(j.investigacion) ? j.investigacion : [], publicos: Array.isArray(j.publicos) ? j.publicos : [], marca: j.marca && typeof j.marca === 'object' ? j.marca : {} };
       } catch { return { aprendizajes: [], investigacion: [] }; }
     },
     async aprendizajes(projectId) { return (await this.contexto(projectId)).aprendizajes; },

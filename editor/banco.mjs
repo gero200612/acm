@@ -12,7 +12,7 @@ import { crearRunner } from './runner.js';
 import { repo } from './db.js';
 import { validarMomentos, crearElegirMomentos } from './momentos.js';
 import { herramientaMomentos, HERRAMIENTA_MOMENTOS, usuarioMomentos } from './prompts.js';
-import { crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas } from './recetas.js';
+import { crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas, construirReceta } from './recetas.js';
 import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
@@ -71,7 +71,7 @@ async function acmFalso() {
       if (o.cover_url) o.portada_bajada = (await fetch(o.cover_url)).ok;
       ediciones.push(o); return json(res, 200, { id: ediciones.length });
     }
-    if (req.method === 'GET' && req.url === '/api/editor/aprendizajes/7') return json(res, 200, { project_id: 7, aprendizajes: [{ ritmo: 'rapido', horario: { instagram: '20:00' } }], investigacion: ['Candidato X: pide más seguridad'] });
+    if (req.method === 'GET' && req.url.split('?')[0] === '/api/editor/aprendizajes/7') return json(res, 200, { project_id: 7, aprendizajes: [{ ritmo: 'rapido', horario: { instagram: '20:00' } }], investigacion: ['Candidato X: pide más seguridad'] });
     json(res, 404, {});
   });
   return { ...srv, estados, ediciones };
@@ -330,6 +330,15 @@ casos.push(
     const conAp = elegirVariables({ semilla: 3, estilo, aprendizajes: { ritmo: 'lento', subtitulos: 'grande' } });
     yes(conAp.every((v) => v.ritmo === 'rapido') && conAp[0].subtitulos === 'grande', `aprendizaje permitido sí, prohibido no: ${JSON.stringify(conAp)}`);
     eq(opcionesPermitidas({}).ritmo, ['rapido', 'normal', 'lento'], 'sin estilo, todas');
+  }],
+  ['Recetas', 'Marca del proyecto: la receta lleva acento y etiqueta válidos, respeta el largo máximo y sin marca no agrega nada', async () => {
+    const v = { gancho: 'directo', subtitulos: 'grande', musica: 'sin', ritmo: 'normal', largo: 'completo', explora: false };
+    const momento = { inicio_s: 0, fin_s: 85, datos: { tema: 'x' } };
+    const textos = { caption: 'c', hashtags: '#a', gancho_texto: '', portada_texto: 'p' };
+    const r = construirReceta({ v, momento, textos, marca: { acento: '#C6E85A', etiqueta: '  Béccar ❤️  ', largo_max_s: 60 } });
+    eq([r.marca, r.largo_s <= 60], [{ acento: '#C6E85A', etiqueta: 'Béccar ❤️' }, true], 'con marca');
+    eq(construirReceta({ v, momento, textos, marca: { acento: 'verde', etiqueta: '' } }).marca, undefined, 'marca inválida no viaja');
+    eq(construirReceta({ v, momento, textos }).largo_s, 85, 'sin tope, el largo completo');
   }],
   ['Claude', 'Pide JSON con output_config (sin forzar herramienta), limpia el esquema y con Sonnet 5.5 manda fallbacks', async () => {
     const pedidos = [];

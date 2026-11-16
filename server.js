@@ -116,6 +116,9 @@ if (!cols('reels').includes('status_at')) db.exec("ALTER TABLE reels ADD COLUMN 
 if (!cols('projects').includes('publicos')) db.exec("ALTER TABLE projects ADD COLUMN publicos TEXT DEFAULT '[]'");
 if (!cols('accounts').includes('publico')) db.exec("ALTER TABLE accounts ADD COLUMN publico TEXT DEFAULT ''");
 if (!cols('reels').includes('publico')) db.exec("ALTER TABLE reels ADD COLUMN publico TEXT DEFAULT ''");
+// marca de los videos: color de acento y largo máximo (proyecto); etiqueta (el barrio) en cada crudo
+if (!cols('projects').includes('marca')) db.exec("ALTER TABLE projects ADD COLUMN marca TEXT DEFAULT '{}'");
+if (!cols('reels').includes('etiqueta')) db.exec("ALTER TABLE reels ADD COLUMN etiqueta TEXT DEFAULT ''");
 if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD COLUMN editor_edition_id TEXT');
 db.exec('DROP INDEX IF EXISTS reels_editor_edition');
 // la clave de idempotencia es un UUID de la edición del editor, y vale dentro de su crudo
@@ -248,7 +251,9 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe el proyecto' });
   const w = winningVariables(db, pid);
   // pedidos: comentarios por segundo y motivos de rechazo (para no repetir el error); referencias: reels de otros que el equipo marcó como inspiración
-  res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid), publicos: publicosDe(pid) });
+  res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid), publicos: publicosDe(pid),
+    // la marca del proyecto y, si el editor pregunta por un crudo, su etiqueta (el barrio)
+    marca: { ...marcaDe(pid), ...(() => { const e = Number(req.query.crudo) > 0 ? get("SELECT etiqueta FROM reels WHERE id = ? AND project_id = ? AND kind = 'crudo'", Number(req.query.crudo), pid)?.etiqueta : ''; return e ? { etiqueta: e } : {}; })() } });
 });
 app.get('/api/projects/:id/memory', requireAuth, (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe el proyecto' });
@@ -389,7 +394,18 @@ function update(table, id, data) {
   if (!keys.length) return;
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
-const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode', 'score_weights', 'publicos'];
+const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode', 'score_weights', 'publicos', 'marca'];
+function limpiarMarca(v) {
+  let m = v; if (typeof m === 'string') { try { m = JSON.parse(m || '{}'); } catch { return null; } }
+  if (!m || typeof m !== 'object') return null;
+  const out = {};
+  if (m.acento) { if (!/^#[0-9a-fA-F]{6}$/.test(String(m.acento))) return null; out.acento = String(m.acento).toUpperCase(); }
+  if (m.largo_max_s !== undefined && m.largo_max_s !== '' && m.largo_max_s !== null) { const n = Math.round(Number(m.largo_max_s)); if (!(n >= 10 && n <= 90)) return null; out.largo_max_s = n; }
+  return out;
+}
+// la etiqueta de un crudo (el barrio o lugar): se ve arriba en todo el video editado
+const etiquetaDe = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+const marcaDe = (pid) => { try { return JSON.parse(get('SELECT marca FROM projects WHERE id = ?', pid)?.marca || '{}'); } catch { return {}; } };
 // opciones de edición del editor (editor/recetas.js OPCIONES): un público puede quedarse con algunas
 const OPCIONES_EDICION = { gancho: ['directo', 'pregunta', 'adelanto'], subtitulos: ['karaoke', 'placa', 'minimo', 'frase', 'grande'], musica: ['energico', 'calido', 'sin'], ritmo: ['rapido', 'normal', 'lento'], largo: ['completo', 'medio', 'corto'] };
 // públicos del proyecto: [{clave, nombre, descripcion, estilo}] (hasta 6). La clave sale del nombre.
@@ -442,6 +458,7 @@ function projectSummary(full) {
   return {
     ...p,
     publicos: (() => { try { return JSON.parse(p.publicos || '[]'); } catch { return []; } })(),
+    marca: (() => { try { return JSON.parse(p.marca || '{}'); } catch { return {}; } })(),
     score_weights: weightsOf(p.score_weights),
     ads_networks: (() => { try { return JSON.parse(p.ads_networks); } catch { return defaultAdsNetworks(p.kind); } })(),
     ads: { adAccountId: ac.adAccountId || '', token: !!ac.accessToken,
@@ -511,6 +528,7 @@ app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe' });
   const data = pick(req.body || {}, P_FIELDS);
+  if ('marca' in data) { const m = limpiarMarca(data.marca); if (!m) return res.status(400).json({ error: 'Marca inválida: el color va como #RRGGBB y el largo máximo entre 10 y 90 segundos' }); data.marca = JSON.stringify(m); }
   if ('publicos' in data) { const l = limpiarPublicos(data.publicos); if (!l) return res.status(400).json({ error: 'Los públicos son hasta 6, cada uno con nombre (sin repetir) y descripción' }); data.publicos = JSON.stringify(l); }
   if ('padron' in data) data.padron = Number(data.padron) || 0;
   if ('demo' in data) data.demo = String(data.demo) === '1' ? 1 : 0;
@@ -640,8 +658,9 @@ app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
   const out = files.map((f) => {
     const title = (req.body?.title && files.length === 1) ? req.body.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
     const m = probe(f.path) || {};
-    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, req.body?.kind === 'crudo' || req.user.role === 'sombra' ? 'crudo' : 'listo');
+    const kind = req.body?.kind === 'crudo' || req.user.role === 'sombra' ? 'crudo' : 'listo';
+    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind, etiqueta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '');
     return get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid);
   });
   res.json(out);
@@ -681,8 +700,8 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
     if (!h) return res.status(400).json({ error: `«${it.name}» no terminó de subir` });
     const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
     const title = path.parse(String(it.name || 'reel')).name.replace(/[_-]+/g, ' ');
-    const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2')",
-      pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind);
+    const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage, etiqueta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2', ?)",
+      pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '');
     if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola', status_at = datetime('now') WHERE id = ?", r.lastInsertRowid);
     out.push(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
   }
@@ -733,7 +752,8 @@ if (process.env.ACM_CLEANUP !== 'off') setInterval(() => cleanup().catch((e) => 
 
 app.put('/api/reels/:id', (req, res) => {
   const r = get('SELECT * FROM reels WHERE id = ?', req.params.id); if (!r) return res.status(404).json({ error: 'No existe' });
-  const d = pick(req.body || {}, ['title', 'caption', 'hashtags', 'status', 'kind', 'source_id', 'clip_id', 'moment', 'recipe', 'review', 'expires_at', 'cover']);
+  const d = pick(req.body || {}, ['title', 'caption', 'hashtags', 'status', 'kind', 'source_id', 'clip_id', 'moment', 'recipe', 'review', 'expires_at', 'cover', 'etiqueta']);
+  if ('etiqueta' in d) d.etiqueta = etiquetaDe(d.etiqueta);
   // portada, recorte y crudo de origen los pone el editor: un usuario que no es general no los cambia (podrían apuntar a cosas de otro proyecto)
   if (req.user.role !== 'general') for (const k of ['cover', 'clip_id', 'source_id']) delete d[k];
   if ('review' in d && !['pendiente', 'aprobado', 'rechazado'].includes(d.review)) return res.status(400).json({ error: 'Revisión inválida: pendiente, aprobado o rechazado' });
