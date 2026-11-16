@@ -145,6 +145,8 @@ export function recorridoCases(sb) {
       eq((await mk({ email: 'g3@x.com', name: 'G3', role: 'general' })).status, 400, 'tercer general (además del dueño)');
       eq((await api('POST', '/api/login', { email: 'som@x.com', password: 'mala-mala-1' })).status, 401, 'sombra con contraseña mala');
       eq((await api('POST', '/api/login', { password: sb.box.password })).status, 200, 'el dueño sigue entrando');
+      eq((await api('POST', '/api/login', { email: 'autocompletado@x.com', password: sb.box.password })).status, 200, 'la maestra entra aunque haya un mail autocompletado');
+      eq((await api('GET', '/api/me')).j?.role, 'general', 'y entra como dueño');
     }],
     [G('roles'), 'Administrador de dirigente: todo su proyecto, nada del otro, sin Laboratorio ni proyectos nuevos; solo da de alta sombras suyas', async () => {
       const u = await sb.box.client('adm@x.com', 'clave-segura-1');

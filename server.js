@@ -205,10 +205,9 @@ async function login(req, res) {
     // si el mail no existe igual se calcula un hash, así la demora no delata qué mails hay
     const ok = checkPassword(pw, u?.pass_hash || 'scrypt$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
     if (u && ok) { user = u; run("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", u.id); }
-  } else {
-    const given = Buffer.from(pw), want = Buffer.from(PASSWORD);
-    if (given.length === want.length && crypto.timingSafeEqual(given, want)) user = { id: 0, ver: 1 };
   }
+  // la contraseña maestra entra siempre como dueño, aunque el navegador haya autocompletado un mail en el campo
+  if (!user) { const given = Buffer.from(pw), want = Buffer.from(PASSWORD); if (given.length === want.length && crypto.timingSafeEqual(given, want)) user = { id: 0, ver: 1 }; }
   if (!user) return res.status(401).json({ error: email ? 'Mail o contraseña incorrectos' : 'Contraseña incorrecta' });
   attempts.delete(ip); total.n = Math.max(0, total.n - 1);
   res.set('Set-Cookie', `acm=${session.token(user)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}${PROD ? '; Secure' : ''}`);
