@@ -1903,7 +1903,7 @@ document.addEventListener('click', async (e) => {
       case 'new-project': newProjectDialog(); break;
       case 'user-new': userDialog(); break;
       case 'user-edit': userDialog(state.users.find((u) => u.id === Number(el.closest('[data-uid]').dataset.uid))); break;
-      case 'user-del': { const u = state.users.find((x) => x.id === Number(el.closest('[data-uid]').dataset.uid)); if (await confirmBox('Borrar usuario', `${u.name} ya no va a poder entrar a ACM.`)) { await api(`/api/users/${u.id}`, { method: 'DELETE' }); toast('Usuario borrado'); render(); } break; }
+      case 'user-del': { const u = state.users.find((x) => x.id === Number(el.closest('[data-uid]').dataset.uid)); if (await confirmBox('Borrar usuario', `${esc(u.name)} ya no va a poder entrar a ACM.`)) { await api(`/api/users/${u.id}`, { method: 'DELETE' }); toast('Usuario borrado'); render(); } break; }
       case 'new-account': addAccountDialog(); break;
       case 'add-net': { const acc = await api(`/api/projects/${state.project.id}/accounts`, { method: 'POST', body: { network: el.dataset.net } }); await render(); connectPanel(acc); break; }
       case 'cal-prev': case 'cal-next': case 'cal-today': {
