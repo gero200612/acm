@@ -1,6 +1,6 @@
 # Posse: prueba de diciembre
 
-Las 8 cuentas son **de periferia**: no son de Posse ni hablan como él. Son cuentas con rol propio que suben recortes de su material.
+Las 8 cuentas son **secundarias del candidato**: van a nombre de Posse o de su espacio, pero no son su cuenta principal. Cada una tiene su público (mayores o jóvenes) y sube recortes de su material. (Corregido por Gero el 16/11: no son cuentas de personas ni temáticas).
 
 Objetivo: arrancar el 1/12 con la prueba que se acordó en la reunión del 16/11. Son 8 cuentas (2 por red en IG, FB, YT y TikTok; una cuenta para mayores y otra para jóvenes) y 18 ediciones por día, de las que se suben 6, o sea 24 publicaciones diarias.
 
@@ -37,10 +37,11 @@ Lo que sale de esto para el editor:
 ### Semana 17–23/11: cerrar lo que bloquea
 - [ ] Okey del equipo de Posse (~20/11) y definir quién graba
 - [x] Cómo llegan los crudos — el equipo los sube en la pestaña Contenido de ACM como «Crudo», igual que ahora (Gero, 16/11)
-- [x] Cómo se presentan las 8 cuentas — de periferia, no de Posse (Gero, 16/11). Ojo con la política de comportamiento inauténtico de Meta (ver `estrategia-campana-2026-11-11.md`)
+- [x] Cómo se presentan las 8 cuentas — como del candidato, secundarias a la principal (Gero, 16/11; antes decía «de periferia»). Ojo con la política de comportamiento inauténtico de Meta (ver `estrategia-campana-2026-11-11.md`)
 - [x] Usuarios y roles en ACM (general, administrador de dirigente, sombra) — spec en docs/superpowers/specs/2026-11-16-roles-design.md
 - [ ] Dar de alta al equipo de Posse (administrador y sombras) cuando dé el okey
-- [ ] Generar los roles de las 8 cuentas (nombre, a quién le habla, tono, qué recorta del crudo; mayores y jóvenes sin contenido repetido) y que el editor los use. Hoy ACM no guarda un rol por cuenta
+- [x] Generar los roles de las 8 cuentas — hecho como «públicos»: el proyecto define sus públicos, cada cuenta toma uno, el editor etiqueta cada fragmento y ACM reparte solo a esas cuentas (16/11)
+- [ ] Cargar en Ajustes de Posse los públicos Mayores y Jóvenes, y asignarle uno a cada una de las 8 cuentas cuando estén conectadas
 - [ ] Conseguir o comprar las 8 cuentas y conectarlas en ACM (proyecto 3)
 - [ ] Comprar los 2 servidores en Contabo (editor y normal)
 - [x] Arreglar `editor/claude.js`: fuerza `tool_choice` con Sonnet 5.5 y la API lo rechaza (400) — ahora usa salida JSON (output_config.format); probado contra la API real el 16/11

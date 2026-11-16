@@ -11,6 +11,7 @@ import { crearEditor } from './server.js';
 import { crearRunner } from './runner.js';
 import { repo } from './db.js';
 import { validarMomentos, crearElegirMomentos } from './momentos.js';
+import { herramientaMomentos, HERRAMIENTA_MOMENTOS, usuarioMomentos } from './prompts.js';
 import { crearArmarRecetas, elegirVariables, normalizarAprendizajes } from './recetas.js';
 import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
@@ -304,6 +305,20 @@ casos.push(
     yes(/repetidos/.test(msg), `mensaje: ${msg}`);
     msg = ''; try { await crearClaude({ apiKey: '' }).estructurado({ modelo: 'x', system: '', usuario: '', herramienta: { name: 't' } }); } catch (e) { msg = e.message; }
     yes(/Falta ANTHROPIC_API_KEY/.test(msg), 'sin key: mensaje en español');
+  }],
+  ['Momentos', 'Con públicos: cada momento sale etiquetado con uno del proyecto (y su descripción); uno con público inventado se descarta; el esquema pide el público', async () => {
+    const PUB = [{ clave: 'mayores', nombre: 'Mayores', descripcion: '45 o más' }, { clave: 'jovenes', nombre: 'Jóvenes', descripcion: '18 a 35' }];
+    const pal = Array.from({ length: 40 }, (_, i) => ({ texto: `p${i}`, inicio_s: i, fin_s: i + 0.9 }));
+    const { validos, descartados } = validarMomentos([
+      { inicio_s: 0, fin_s: 10.9, tema: 'a', motivo: 'm', actualidad: false, interes: 9, publico: 'mayores' },
+      { inicio_s: 12, fin_s: 22.9, tema: 'b', motivo: 'm', actualidad: false, interes: 8, publico: 'jovenes' },
+      { inicio_s: 25, fin_s: 35.9, tema: 'c', motivo: 'm', actualidad: false, interes: 7, publico: 'chicos' },
+    ], pal, { publicos: PUB });
+    eq(validos.map((v) => [v.publico, v.publico_nombre]), [['mayores', 'Mayores'], ['jovenes', 'Jóvenes']], 'etiquetados');
+    eq(descartados.map((d) => d.causa), ['sin público'], 'el inventado se descarta');
+    const h = herramientaMomentos(PUB).input_schema.properties.momentos.items;
+    eq([h.properties.publico.enum, h.required.includes('publico'), HERRAMIENTA_MOMENTOS.input_schema.properties.momentos.items.properties.publico], [['mayores', 'jovenes'], true, undefined], 'esquema con público, sin tocar el original');
+    yes(/fragmentos DISTINTOS/.test(usuarioMomentos({ palabras: pal, publicos: PUB })), 'la consigna pide fragmentos distintos por público');
   }],
   ['Claude', 'Pide JSON con output_config (sin forzar herramienta), limpia el esquema y con Sonnet 5.5 manda fallbacks', async () => {
     const pedidos = [];

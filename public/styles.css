@@ -431,6 +431,10 @@ dialog.wide { width: min(640px, calc(100vw - 32px)); }
 /* padrón en ajustes */
 .pad-ok { display: flex; gap: 12px; align-items: center; background: var(--bg); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
 .pad-ok div { display: flex; flex-direction: column; }
+.pub-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; padding-bottom: 10px; border-bottom: 1px solid var(--line, #e6e3dc); }
+.pub-row textarea { grid-column: 1; }
+.pub-row .icon-btn { grid-column: 2; grid-row: 1; }
+.input.sm { padding: 6px 8px; font-size: 13px; min-height: 0; }
 .pad-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
 .pad-nums div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .pad-nums b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }

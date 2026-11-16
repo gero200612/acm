@@ -27,7 +27,7 @@ export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn 
         const r = await fetchFn(`${base}/api/editor/aprendizajes/${pid}`, { headers: { authorization: `Bearer ${token || ''}` }, signal: AbortSignal.timeout(20000) });
         if (!r.ok) return { aprendizajes: [], investigacion: [] };
         const j = await r.json();
-        return { aprendizajes: j.aprendizajes || [], investigacion: Array.isArray(j.investigacion) ? j.investigacion : [] };
+        return { aprendizajes: j.aprendizajes || [], investigacion: Array.isArray(j.investigacion) ? j.investigacion : [], publicos: Array.isArray(j.publicos) ? j.publicos : [] };
       } catch { return { aprendizajes: [], investigacion: [] }; }
     },
     async aprendizajes(projectId) { return (await this.contexto(projectId)).aprendizajes; },

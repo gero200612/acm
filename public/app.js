@@ -366,7 +366,7 @@ function aprobarView() {
   if (!R.clips.length) return `<div class="ap"><section class="card">${head}<p class="muted" style="margin-top:12px">Cuando el editor entregue recortes nuevos, aparecen acá.</p></section>${rec}</div>`;
   return `<div class="ap">${head}${R.clips.map((c) => `
   <section class="card ap-clip" data-clip="${esc(c.clip_id)}">
-    <div class="card-head"><h2 class="h2">${esc(c.moment?.tema || c.clip_id)}</h2><span class="small muted">${c.moment?.motivo ? esc(c.moment.motivo) : ''}</span></div>
+    <div class="card-head"><h2 class="h2">${esc(c.moment?.tema || c.clip_id)}${c.moment?.publico ? ` <span class="chip nodot">Para ${esc(pubName(c.moment.publico))}</span>` : ''}</h2><span class="small muted">${c.moment?.motivo ? esc(c.moment.motivo) : ''}</span></div>
     <div class="ap-eds">${c.reels.map((r, i) => `
       <article class="ap-ed ${r.review === 'rechazado' ? 'no' : ''}" data-id="${r.id}">
         <video src="/media/${esc(r.file)}" ${r.cover ? `poster="/media/${esc(r.cover)}"` : ''} controls preload="metadata" playsinline></video>
@@ -530,9 +530,10 @@ function cuentasView() {
       <div class="ac-tot"><div><b>${live}</b><span>conectadas</span></div><div><b>${A.filter((a) => a.status === 'error').length}</b><span>con error</span></div><div><b>${fmtK(A.reduce((x, a) => x + (a.connected_as ? a.followers : 0), 0))}</b><span>seguidores</span></div></div></section>
     <p class="note"><b>Cómo se conecta:</b> cada cuenta entra por la vía oficial de su red, con el permiso de su dueño; ACM nunca guarda contraseñas. Los tokens quedan cifrados en el servidor y no se vuelven a mostrar.</p>
   </aside>`;
-  const table = A.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Cuenta</th><th class="r">Seguidores</th><th>Conexión</th><th>Última prueba</th><th></th></tr></thead><tbody>
+  const table = A.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Cuenta</th>${state.project.publicos?.length ? '<th>Público</th>' : ''}<th class="r">Seguidores</th><th>Conexión</th><th>Última prueba</th><th></th></tr></thead><tbody>
   ${A.map((a) => `<tr data-id="${a.id}">
     <td><div class="handle">${netBadge(a.network)}<div class="${a.connected_as ? '' : 'muted'}">${esc(accName(a))}<small>${NETS[a.network].name}</small></div></div></td>
+    ${state.project.publicos?.length ? `<td><select class="input sm" data-act="acc-pub" aria-label="Público de la cuenta"><option value="">Cualquiera</option>${state.project.publicos.map((x) => `<option value="${esc(x.clave)}" ${a.publico === x.clave ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></td>` : ''}
     <td class="r num">${a.connected_as ? fmt(a.followers) : '—'}</td>
     <td><span class="chip s-${a.status}" ${a.status === 'error' ? `title="${esc(a.last_error)}"` : ''}>${ACC_STATUS[a.status] || esc(a.status)}</span></td>
     <td class="small muted">${a.last_checked_at ? new Date(a.last_checked_at).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
@@ -1392,6 +1393,7 @@ function ajustesView() {
   return `<div class="grid g2" style="align-items:start">
   <section class="card"><div class="card-head"><h2 class="h2">Datos del proyecto</h2></div>${projectForm(p)}</section>
   <div class="stack">
+    ${publicosCard(p)}
     <section class="card"><div class="card-head"><h2 class="h2">Padrón</h2>${p.padron_file ? `<button class="btn sm danger" data-act="del-padron">Quitar</button>` : ''}</div>
       ${p.padron_file ? `<div class="pad-ok">${icon('file', 22)}<div><b>${esc(p.padron_file)}</b><span class="small muted">subido el ${fmtDate(p.padron_at)}</span></div></div>
         <div class="pad-nums"><div><b>${fmt(p.padron)}</b><span>${gente(p)}</span></div><div><b>${fmt(p.padron_phones)}</b><span>con teléfono</span></div><div><b>${fmt(p.padron_emails)}</b><span>con mail</span></div><div><b>${fmt(p.padron_contacts)}</b><span>contactables</span></div></div>` : ''}
@@ -1403,6 +1405,16 @@ function ajustesView() {
     ${isGeneral() ? `<section class="card"><div class="card-head"><h2 class="h2">Borrar proyecto</h2></div><p class="muted small">Se borran sus cuentas, reels, publicaciones y el padrón. No se puede deshacer.</p><button class="btn danger" style="margin-top:14px" data-act="del-project">${icon('trash')} Borrar ${esc(p.name)}</button></section>` : ''}
   </div></div>`;
 }
+// Públicos objetivo: cada cuenta le habla a uno y el editor etiqueta cada fragmento del crudo con el suyo.
+function publicosCard(p) {
+  const L = p.publicos?.length ? p.publicos : [{ nombre: '', descripcion: '' }];
+  return `<section class="card" id="pub-card"><div class="card-head"><div><h2 class="h2">Públicos</h2><p class="small muted">Cada cuenta le habla a uno. El editor etiqueta cada fragmento del crudo con su público y ACM lo reparte solo a esas cuentas.</p></div></div>
+    <div class="form" id="pub-list">${L.map((x) => pubRow(x)).join('')}</div>
+    <div class="row" style="margin-top:12px"><button type="button" class="btn sm" data-act="pub-add">${icon('plus', 15)} Agregar público</button><button type="button" class="btn sm primary" data-act="pub-save">Guardar públicos</button></div>
+  </section>`;
+}
+const pubRow = (x = {}) => `<div class="pub-row"><input class="input" data-pub="nombre" maxlength="40" placeholder="Nombre (ej.: Mayores)" value="${esc(x.nombre || '')}"><textarea class="input" data-pub="descripcion" rows="2" maxlength="400" placeholder="A quién le habla, tono y qué fragmentos le sirven">${esc(x.descripcion || '')}</textarea><button type="button" class="icon-btn danger" data-act="pub-del" title="Quitar">${icon('trash', 15)}</button></div>`;
+const pubName = (k) => state.project?.publicos?.find((x) => x.clave === k)?.nombre || k;
 function projectForm(p = {}) {
   return `<form class="form" id="project-form">
     <label class="field">Nombre del dirigente o candidato<input class="input" name="name" required value="${esc(p.name)}" placeholder="Nombre y apellido"></label>
@@ -1907,6 +1919,11 @@ document.addEventListener('click', async (e) => {
       case 'logout': await api('/api/logout', { method: 'POST' }); state.authed = false; state.me = null; location.hash = ''; render(); break;
       case 'new-project': newProjectDialog(); break;
       case 'user-new': userDialog(); break;
+      case 'pub-add': if ($$('#pub-list .pub-row').length >= 6) { toast('Hasta 6 públicos', true); break; } $('#pub-list').insertAdjacentHTML('beforeend', pubRow()); break;
+      case 'pub-del': el.closest('.pub-row').remove(); break;
+      case 'pub-save': {
+        const publicos = $$('#pub-list .pub-row').map((r) => ({ nombre: $('[data-pub=nombre]', r).value.trim(), descripcion: $('[data-pub=descripcion]', r).value.trim() })).filter((x) => x.nombre);
+        await api(`/api/projects/${state.project.id}`, { method: 'PUT', body: { publicos } }); toast('Públicos guardados'); render(); break; }
       case 'user-edit': userDialog(state.users.find((u) => u.id === Number(el.closest('[data-uid]').dataset.uid))); break;
       case 'user-del': { const u = state.users.find((x) => x.id === Number(el.closest('[data-uid]').dataset.uid)); if (await confirmBox('Borrar usuario', `${esc(u.name)} ya no va a poder entrar a ACM.`)) { await api(`/api/users/${u.id}`, { method: 'DELETE' }); toast('Usuario borrado'); render(); } break; }
       case 'new-account': addAccountDialog(); break;
@@ -2023,6 +2040,7 @@ document.addEventListener('change', async (e) => {
   const id = Number(el.closest('[data-id]')?.dataset.id);
   try {
     if (el.dataset.act === 'post-status') { await api(`/api/posts/${id}`, { method: 'PUT', body: { status: el.value } }); const x = state.posts.find((y) => y.id === id); if (x) x.status = el.value; toast('Publicación actualizada'); if (!el.closest('dialog')) render(); }
+    if (el.dataset.act === 'acc-pub') { await api(`/api/accounts/${id}`, { method: 'PUT', body: { publico: el.value } }); const x = state.accounts.find((y) => y.id === id); if (x) x.publico = el.value; toast(el.value ? `Ahora le habla a ${pubName(el.value)}` : 'Recibe de cualquier público'); }
     if (el.dataset.act === 'reel-title' && el.value.trim()) { await api(`/api/reels/${id}`, { method: 'PUT', body: { title: el.value.trim() } }); toast('Título guardado'); }
   } catch (err) { fail(err); }
 });

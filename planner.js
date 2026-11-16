@@ -116,16 +116,18 @@ export function planDay({ project, accounts = [], bank = [], existingPosts = [],
     }
     return false;
   };
+  // cada cuenta recibe solo lo de su público (una cuenta o una edición sin público van con cualquiera)
+  const fits = (a, ed) => !a.publico || !ed.publico || a.publico === ed.publico;
   const hasRoom = (a) => (dayCount.get(a.id) || 0) < (a.posts_per_day || 3) && !(a.network === 'youtube' && ytDay >= ytCap);
   const maxPpd = Math.max(0, ...accs.map((a) => a.posts_per_day || 3));
   for (let j = 0; j < maxPpd; j++) { // vuelta a vuelta entre cuentas: nadie se queda sin nada si el banco es corto
     for (const a of accs) {
       if (!hasRoom(a)) continue;
-      for (const ed of cand) if (!usedNet.has(`${ed.id}|${a.network}`) && place(a, ed)) break;
+      for (const ed of cand) if (fits(a, ed) && !usedNet.has(`${ed.id}|${a.network}`) && place(a, ed)) break;
     }
   }
   // segunda pasada: lo que quedó afuera por las separaciones busca cualquier cuenta con lugar
-  for (const ed of cand) for (const a of accs) if (hasRoom(a) && !usedNet.has(`${ed.id}|${a.network}`) && place(a, ed)) break;
+  for (const ed of cand) for (const a of accs) if (hasRoom(a) && fits(a, ed) && !usedNet.has(`${ed.id}|${a.network}`) && place(a, ed)) break;
   return out;
 }
 
@@ -172,8 +174,8 @@ export function planProject(db, projectId, { now, date, tz, youtubeQuota = Numbe
   const pr = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
   if (!pr || pr.demo) return [];
   const day = date || (now.slice(11, 16) > '22:30' ? new Date(absMin(now) * 6e4 + 864e5).toISOString().slice(0, 10) : now.slice(0, 10));
-  const accounts = db.prepare('SELECT id, network, status, posts_per_day FROM accounts WHERE project_id = ?').all(projectId);
-  const bank = db.prepare("SELECT id, clip_id, review, expires_at, recipe FROM reels WHERE project_id = ? AND kind = 'listo' AND review = 'aprobado' AND archived_at = ''").all(projectId);
+  const accounts = db.prepare('SELECT * FROM accounts WHERE project_id = ?').all(projectId);
+  const bank = db.prepare("SELECT * FROM reels WHERE project_id = ? AND kind = 'listo' AND review = 'aprobado' AND archived_at = ''").all(projectId);
   const existing = db.prepare('SELECT reel_id, account_id, scheduled_at, status FROM posts WHERE project_id = ?').all(projectId);
   const activeProjects = db.prepare("SELECT count(*) n FROM projects p WHERE p.demo = 0 AND EXISTS (SELECT 1 FROM accounts a WHERE a.project_id = p.id AND a.status = 'conectada')").get().n;
   const plan = planDay({ project: pr, accounts, bank, existingPosts: existing, learnings: learningsOf(db, projectId), date: day, now, youtubeQuota, activeProjects, tz });

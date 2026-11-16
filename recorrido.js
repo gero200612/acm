@@ -623,6 +623,21 @@ export function recorridoCases(sb) {
       eq((await post({ reel_id: 999999, estado: 'listo' })).status, 404, 'crudo inexistente');
       eq((await post({ reel_id: c.crudo, estado: 'listo' })).status, 200, 'listo');
     }],
+    [G('editor'), 'Públicos: se cargan en el proyecto, le llegan al editor, la edición guarda el de su fragmento, la cuenta toma uno y no se programa en otra de otro público', async () => {
+      eq((await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'Mayores', descripcion: '45+' }, { nombre: 'Jóvenes', descripcion: '18 a 35' }] })).j?.publicos?.map((x) => x.clave), ['mayores', 'jovenes'], 'públicos guardados');
+      eq((await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'A' }, { nombre: 'a' }] })).status, 400, 'nombres repetidos');
+      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.publicos?.length, 2, 'le llegan al editor');
+      const base = { crudo_id: c.crudo, review: 'pendiente', file_url: `${sb.editor.base}/video.mp4` };
+      const ej = await sb.box.editorApi('/api/editor/edicion', { ...base, clip_id: 'clip-pub-j', edicion_id: '0a1b2c3d-0000-4000-8000-000000000901', moment: { inicio_s: 1, fin_s: 9, publico: 'jovenes' } });
+      const ex = await sb.box.editorApi('/api/editor/edicion', { ...base, clip_id: 'clip-pub-x', edicion_id: '0a1b2c3d-0000-4000-8000-000000000902', moment: { inicio_s: 1, fin_s: 9, publico: 'chicos' } });
+      eq([ej.j?.publico, ex.j?.publico], ['jovenes', ''], 'la edición guarda el público válido');
+      const acc = (await api('POST', `/api/projects/${c.p}/accounts`, { network: 'youtube' })).j;
+      eq((await api('PUT', `/api/accounts/${acc.id}`, { publico: 'chicos' })).status, 400, 'público que no existe');
+      eq((await api('PUT', `/api/accounts/${acc.id}`, { publico: 'mayores' })).j?.publico, 'mayores', 'la cuenta le habla a mayores');
+      const r = await api('POST', `/api/projects/${c.p}/posts`, { reel_id: ej.j.id, account_id: acc.id, scheduled_at: '2026-12-20 12:00' });
+      eq([r.status, /público/.test(r.j?.error || '')], [400, true], 'una de jóvenes no va a la cuenta de mayores');
+      await api('DELETE', `/api/accounts/${acc.id}`);
+    }],
     [G('editor'), 'POST /api/editor/edicion con token crea el reel listo con source_id, clip_id y review pendiente', async () => {
       const b = { crudo_id: c.crudo, clip_id: 'clip-abc', moment: { inicio_s: 1, fin_s: 9 }, recipe: { id: 'rapido' }, review: 'aprobado', edicion_id: "0a1b2c3d-0000-4000-8000-000000000501", caption: 'Un corte', hashtags: 'club, deporte', file_url: `${sb.editor.base}/video.mp4`, cover_url: `${sb.editor.base}/portada.jpg`, duration: 8, expires_at: '2026-12-01 12:00' };
       const r = await sb.box.editorApi('/api/editor/edicion', b);

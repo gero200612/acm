@@ -444,6 +444,17 @@ function cases(video, sim) {
       eq(NETWORK_CAPS, { instagram: 100, facebook: 30, tiktok: 15, youtube: null }, 'topes');
       eq(youtubeShare(100, 8), 12, 'cuota de YouTube');
     }],
+    ['Circuito', 'Planificador con públicos: cada cuenta recibe solo ediciones de su público; una sin público va a cualquiera', async () => {
+      const { accounts, bank } = planFixture(2, 4);
+      accounts[0].publico = 'mayores'; accounts[1].publico = 'jovenes';
+      bank.forEach((e, i) => { e.publico = i < 6 ? 'mayores' : i < 9 ? 'jovenes' : ''; });
+      const plan = planDay({ accounts, bank, existingPosts: [], date: '2026-12-01', now: '2026-12-01 07:30' });
+      const pub = new Map(bank.map((e) => [e.id, e.publico]));
+      const acc = new Map(accounts.map((a) => [a.id, a.publico]));
+      yes(plan.length > 0, 'planificó algo');
+      yes(plan.every((p) => !pub.get(p.reel_id) || pub.get(p.reel_id) === acc.get(p.account_id)), 'ninguna edición fue a una cuenta de otro público');
+      yes(plan.some((p) => p.account_id === 2 && pub.get(p.reel_id) === 'jovenes'), 'la cuenta de jóvenes recibió de jóvenes');
+    }],
     ['Circuito', 'Planificador: 7 cuentas de IG y 21 ediciones, 3 por cuenta, en horario, sin repetir edición y con las hermanas a 3 h', async () => {
       const { accounts, bank } = planFixture(7, 7);
       const plan = planDay({ accounts, bank, existingPosts: [], date: '2026-12-01', now: '2026-12-01 07:30' });

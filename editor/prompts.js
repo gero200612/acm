@@ -36,6 +36,14 @@ export const HERRAMIENTA_MOMENTOS = {
   },
 };
 
+// con públicos: cada momento lleva el público al que le sirve (uno de los del proyecto)
+export function herramientaMomentos(publicos) {
+  const h = structuredClone(HERRAMIENTA_MOMENTOS), it = h.input_schema.properties.momentos.items;
+  it.properties.publico = { type: 'string', enum: publicos.map((p) => p.clave), description: 'A qué público le sirve este fragmento' };
+  it.required = [...it.required, 'publico'];
+  return h;
+}
+
 const t = (s) => (Math.round(s * 100) / 100).toString();
 
 // Agrupa las palabras en líneas (se corta en pausas largas o a las 14 palabras): el modelo elige límites de línea, que son límites de palabra.
@@ -50,8 +58,9 @@ export function lineasDeTranscripcion(palabras, { pausa = 0.6, maxPalabras = 14 
   return lineas;
 }
 
-export function usuarioMomentos({ palabras, investigacion = [], aprendizajes = {} }) {
+export function usuarioMomentos({ palabras, investigacion = [], aprendizajes = {}, publicos = [] }) {
   const partes = [];
+  if (publicos.length) partes.push(`Este proyecto publica en cuentas separadas por público. Etiquetá cada momento con el público al que mejor le sirve («publico»), y buscá fragmentos DISTINTOS para cada uno: el mismo tramo no va a dos públicos. Repartí parejo si el material da.\n${publicos.map((p) => `- ${p.clave}: ${p.nombre}. ${p.descripcion}`).join('\n')}`);
   if (investigacion.length) partes.push(`Lo que sabemos del proyecto y su público (investigación):\n${investigacion.map((i) => `- ${typeof i === 'string' ? i : JSON.stringify(i)}`).join('\n')}`);
   if (Object.keys(aprendizajes).length) partes.push(`Lo que funcionó en publicaciones anteriores de este proyecto (variables ganadoras): ${JSON.stringify(aprendizajes)}. Tenelo en cuenta al elegir.`);
   partes.push(`Transcripción (duración ${t(palabras.at(-1)?.fin_s ?? 0)} s):\n${lineasDeTranscripcion(palabras).join('\n')}`);
@@ -86,7 +95,7 @@ export const HERRAMIENTA_TEXTOS = {
 const GANCHO_DESC = { directo: 'arranca directo, sin texto de gancho', pregunta: 'el gancho es una pregunta que engancha', adelanto: 'el gancho adelanta lo más fuerte del momento' };
 
 export function usuarioTextos({ momento, texto, versiones }) {
-  return `Recorte: «${momento.datos?.tema || ''}». Por qué funciona: ${momento.datos?.motivo || ''}.
+  return `Recorte: «${momento.datos?.tema || ''}». Por qué funciona: ${momento.datos?.motivo || ''}.${momento.datos?.publico_nombre ? `\nPúblico: ${momento.datos.publico_nombre}. ${momento.datos.publico_desc || ''} Escribí los textos para ese público.` : ''}
 Lo que se dice (transcripción):
 ${texto}
 

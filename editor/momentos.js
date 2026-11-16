@@ -1,12 +1,12 @@
 // Elegir los momentos de un crudo. Claude propone; el código manda: límites de palabra, 6–90 s, sin solapes, máximo 15 editados.
 import { MODELOS } from './claude.js';
-import { SYSTEM_MOMENTOS, HERRAMIENTA_MOMENTOS, usuarioMomentos } from './prompts.js';
+import { SYSTEM_MOMENTOS, HERRAMIENTA_MOMENTOS, herramientaMomentos, usuarioMomentos } from './prompts.js';
 import { normalizarAprendizajes } from './recetas.js';
 
 export const MIN_S = 6, MAX_S = 90, MAX_EDITADOS = 15, TOLERANCIA_S = 0.05;
 
 // → { validos (ordenados por interés, con los tiempos clavados a la palabra), descartados: [{ momento, motivo }] }
-export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_S } = {}) {
+export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_S, publicos = [] } = {}) {
   const validos = [], descartados = [];
   const cerca = (a, b) => Math.abs(a - b) <= tolerancia;
   const ordenados = (Array.isArray(propuestos) ? propuestos : []).map((m, i) => ({ m, i }))
@@ -22,7 +22,11 @@ export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_
     if (dur < MIN_S) { descartar(`dura ${Math.round(dur * 10) / 10} s, menos de ${MIN_S}`, 'muy cortos'); continue; }
     if (dur > MAX_S) { descartar(`dura ${Math.round(dur)} s, más de ${MAX_S}`, 'muy largos'); continue; }
     if (validos.some((v) => inicio_s < v.fin_s && v.inicio_s < fin_s)) { descartar('se solapa con otro momento de más interés', 'solapados'); continue; }
-    validos.push({ inicio_s, fin_s, tema: String(m.tema || '').trim(), motivo: String(m.motivo || '').trim(), actualidad: m.actualidad === true, interes: Number(m.interes) || 0 });
+    // el público del fragmento: tiene que ser uno del proyecto; viaja con el momento hasta ACM, que lo reparte a las cuentas de ese público
+    const pub = publicos.find((x) => x.clave === m.publico);
+    if (publicos.length && !pub) { descartar(`sin un público válido («${m.publico ?? ''}»)`, 'sin público'); continue; }
+    validos.push({ inicio_s, fin_s, tema: String(m.tema || '').trim(), motivo: String(m.motivo || '').trim(), actualidad: m.actualidad === true, interes: Number(m.interes) || 0,
+      ...(pub ? { publico: pub.clave, publico_nombre: pub.nombre, publico_desc: pub.descripcion } : {}) });
   }
   return { validos, descartados };
 }
@@ -30,16 +34,16 @@ export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_
 // Devuelve { momentos: [{ inicio_s, fin_s, tema, motivo, actualidad, interes, estado: 'elegido'|'candidato' }], motivo }.
 // El corredor guarda todos; edita solo los «elegido» (hasta 15). Sin momentos válidos, `motivo` dice por qué.
 export function crearElegirMomentos({ claude, modelo = MODELOS.momentos } = {}) {
-  return async ({ palabras, transcripcion, investigacion = [], aprendizajes } = {}) => {
+  return async ({ palabras, transcripcion, investigacion = [], aprendizajes, publicos = [] } = {}) => {
     palabras = palabras || transcripcion?.palabras || [];
     if (!palabras.length) return { momentos: [], motivo: 'El video no tiene habla: no hay momentos para recortar' };
     const resp = await claude.estructurado({
-      modelo, system: SYSTEM_MOMENTOS, herramienta: HERRAMIENTA_MOMENTOS,
-      usuario: usuarioMomentos({ palabras, investigacion, aprendizajes: normalizarAprendizajes(aprendizajes) }),
+      modelo, system: SYSTEM_MOMENTOS, herramienta: publicos.length ? herramientaMomentos(publicos) : HERRAMIENTA_MOMENTOS,
+      usuario: usuarioMomentos({ palabras, investigacion, aprendizajes: normalizarAprendizajes(aprendizajes), publicos }),
     });
     const propuestos = Array.isArray(resp?.momentos) ? resp.momentos : [];
     if (!propuestos.length) return { momentos: [], motivo: 'No encontramos momentos que valgan la pena como recorte en este video' };
-    const { validos, descartados } = validarMomentos(propuestos, palabras);
+    const { validos, descartados } = validarMomentos(propuestos, palabras, { publicos });
     if (!validos.length) {
       const razones = [...new Set(descartados.map((d) => d.causa))].join(', ');
       return { momentos: [], motivo: `Se propusieron ${propuestos.length} momentos pero ninguno sirve (${razones})`, descartados };

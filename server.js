@@ -112,6 +112,10 @@ for (const [c, def] of [['clip_id', 'TEXT'], ['moment', 'TEXT'], ['recipe', 'TEX
 if (!cols('reels').includes('status_detail')) db.exec("ALTER TABLE reels ADD COLUMN status_detail TEXT DEFAULT ''");
 // cuándo cambió por última vez el estado del crudo en el editor (UTC); sirve para avisar si una etapa lleva más de 24 h
 if (!cols('reels').includes('status_at')) db.exec("ALTER TABLE reels ADD COLUMN status_at TEXT DEFAULT ''");
+// públicos objetivo: el proyecto define cuáles hay; cada cuenta le habla a uno; el editor etiqueta cada fragmento con el suyo
+if (!cols('projects').includes('publicos')) db.exec("ALTER TABLE projects ADD COLUMN publicos TEXT DEFAULT '[]'");
+if (!cols('accounts').includes('publico')) db.exec("ALTER TABLE accounts ADD COLUMN publico TEXT DEFAULT ''");
+if (!cols('reels').includes('publico')) db.exec("ALTER TABLE reels ADD COLUMN publico TEXT DEFAULT ''");
 if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD COLUMN editor_edition_id TEXT');
 db.exec('DROP INDEX IF EXISTS reels_editor_edition');
 // la clave de idempotencia es un UUID de la edición del editor, y vale dentro de su crudo
@@ -244,7 +248,7 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe el proyecto' });
   const w = winningVariables(db, pid);
   // pedidos: comentarios por segundo y motivos de rechazo (para no repetir el error); referencias: reels de otros que el equipo marcó como inspiración
-  res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid) });
+  res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid), publicos: publicosDe(pid) });
 });
 app.get('/api/projects/:id/memory', requireAuth, (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe el proyecto' });
@@ -298,11 +302,14 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
   const size = storage === 'local' ? fs.statSync(path.join(UPLOADS, file)).size : 0;
   const dur = Number(b.duration) > 0 ? Number(b.duration) : (m.duration ?? null);
   const title = String(b.title || '').trim() || `${crudo.title} · ${String(b.clip_id).slice(0, 12)}`;
+  // el público que el editor le puso al fragmento (si no es uno del proyecto, queda sin público y va a cualquier cuenta)
+  const pk = String(b.publico || (typeof b.moment === 'object' && b.moment?.publico) || '');
+  const publico = publicosDe(crudo.project_id).some((x) => x.clave === pk) ? pk : '';
   let r;
   try {
-  r = run("INSERT INTO reels (project_id, title, caption, hashtags, file, original_name, size, duration, width, height, kind, source_id, storage, clip_id, moment, recipe, review, expires_at, cover, editor_edition_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'borrador')",
+  r = run("INSERT INTO reels (project_id, title, caption, hashtags, file, original_name, size, duration, width, height, kind, source_id, storage, clip_id, moment, recipe, review, expires_at, cover, editor_edition_id, status, publico) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'borrador', ?)",
     crudo.project_id, title, String(b.caption || ''), tags(b.hashtags), file, `${title}.mp4`, size, dur, m.width ?? null, m.height ?? null, crudo.id, storage,
-    String(b.clip_id), json(b.moment), json(b.recipe), review, localExpiry(b.expires_at || '', TZ), cover, eid);
+    String(b.clip_id), json(b.moment), json(b.recipe), review, localExpiry(b.expires_at || '', TZ), cover, eid, publico);
   } catch (e) {
     // dos reintentos a la vez: el segundo pierde contra el índice único, borra lo que subió y devuelve el reel del primero
     const ya = eid && get('SELECT *, 0 AS posts FROM reels WHERE editor_edition_id = ? AND source_id = ?', eid, crudo.id);
@@ -382,7 +389,16 @@ function update(table, id, data) {
   if (!keys.length) return;
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
-const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode', 'score_weights'];
+const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode', 'score_weights', 'publicos'];
+// públicos del proyecto: [{clave, nombre, descripcion}] (hasta 6). La clave sale del nombre.
+const claveDe = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
+function limpiarPublicos(v) {
+  let l = v; if (typeof l === 'string') { try { l = JSON.parse(l); } catch { return null; } }
+  if (!Array.isArray(l) || l.length > 6) return null;
+  const out = l.map((x) => ({ nombre: String(x?.nombre || '').trim().slice(0, 40), descripcion: String(x?.descripcion || '').trim().slice(0, 400) })).filter((x) => x.nombre).map((x) => ({ clave: claveDe(x.nombre), ...x }));
+  return new Set(out.map((x) => x.clave)).size === out.length && out.every((x) => x.clave) ? out : null;
+}
+const publicosDe = (pid) => { try { return JSON.parse(get('SELECT publicos FROM projects WHERE id = ?', pid)?.publicos || '[]'); } catch { return []; } };
 // valida tipo, redes con pauta y modo de revisión; devuelve el motivo del error o '' (y normaliza ads_networks a JSON)
 function circuitFields(d, kindBefore) {
   if ('kind' in d && !PROJECT_KINDS.includes(d.kind)) return 'Tipo de proyecto inválido: club, politica o comercial';
@@ -421,6 +437,7 @@ function projectSummary(full) {
   const c = (sql) => get(sql, p.id).n;
   return {
     ...p,
+    publicos: (() => { try { return JSON.parse(p.publicos || '[]'); } catch { return []; } })(),
     score_weights: weightsOf(p.score_weights),
     ads_networks: (() => { try { return JSON.parse(p.ads_networks); } catch { return defaultAdsNetworks(p.kind); } })(),
     ads: { adAccountId: ac.adAccountId || '', token: !!ac.accessToken,
@@ -490,6 +507,7 @@ app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe' });
   const data = pick(req.body || {}, P_FIELDS);
+  if ('publicos' in data) { const l = limpiarPublicos(data.publicos); if (!l) return res.status(400).json({ error: 'Los públicos son hasta 6, cada uno con nombre (sin repetir) y descripción' }); data.publicos = JSON.stringify(l); }
   if ('padron' in data) data.padron = Number(data.padron) || 0;
   if ('demo' in data) data.demo = String(data.demo) === '1' ? 1 : 0;
   const bad = circuitFields(data, p.kind); if (bad) return res.status(400).json({ error: bad });
@@ -550,6 +568,11 @@ app.put('/api/accounts/:id', (req, res) => {
   // pausar y reanudar es lo único del estado que se toca a mano; "conectada" sale de probar la conexión
   const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
   if (!a) return res.status(404).json({ error: 'No existe' });
+  if (req.body?.publico !== undefined) {
+    const k = String(req.body.publico || '');
+    if (k && !publicosDe(a.project_id).some((x) => x.clave === k)) return res.status(400).json({ error: 'Ese público no está en el proyecto: cargalo en Ajustes' });
+    data.publico = k;
+  }
   if (req.body?.status === 'pausada') data.status = 'pausada';
   if (req.body?.status === 'activa' && a.status === 'pausada') data.status = a.connected_as ? 'conectada' : 'pendiente';
   update('accounts', a.id, data);
@@ -779,6 +802,8 @@ app.post('/api/projects/:id/posts', (req, res) => {
       const net = get('SELECT network FROM accounts WHERE id = ?', it.account_id).network;
       const ya = get('SELECT a.handle, a.connected_as FROM posts p JOIN accounts a ON a.id = p.account_id WHERE p.reel_id = ? AND a.network = ?', it.reel_id, net);
       if (ya) throw new Error(`«${reel.title}» ya está en ${ya.connected_as || '@' + ya.handle} de ${NET_NAME[net]}. El mismo reel en dos cuentas de la misma red hace que la red las bloquee: subí otra edición del crudo.`);
+      const pub = get('SELECT r.publico AS rp, a.publico AS ap, a.handle, a.connected_as FROM reels r, accounts a WHERE r.id = ? AND a.id = ?', it.reel_id, it.account_id);
+      if (pub.rp && pub.ap && pub.rp !== pub.ap) throw new Error(`«${reel.title}» es para el público «${pub.rp}» y ${pub.connected_as || '@' + pub.handle} le habla a «${pub.ap}».`);
       const why = scheduleCheck({ reel_id: it.reel_id, account_id: it.account_id, scheduled_at: at }); if (why) throw new Error(`«${reel.title}»: ${why}`);
       ins.run(req.params.id, it.reel_id, it.account_id, at, it.options ? JSON.stringify(tiktokOptions(it.options)) : '');
     }
