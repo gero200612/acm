@@ -68,12 +68,10 @@ function iniciosDeFrase(palabras, momento, pausa = 0.5) {
 }
 const r1 = (x) => Math.round(x * 10) / 10;
 
-// La marca del proyecto que viaja al Estudio: color de acento (#RRGGBB) y etiqueta del crudo (el barrio, hasta 30).
+// La marca del proyecto que viaja al Estudio: color de acento (#RRGGBB). Sin cartel de barrio (Gero, 16/11: «el barrio no tiene que tener un cartel»).
 export function marcaParaReceta(marca = {}) {
   const m = {};
   if (/^#[0-9a-fA-F]{6}$/.test(String(marca.acento || ''))) m.acento = marca.acento;
-  const e = String(marca.etiqueta || '').trim().slice(0, 30);
-  if (e) m.etiqueta = e;
   return m;
 }
 

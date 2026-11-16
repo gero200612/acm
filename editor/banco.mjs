@@ -336,7 +336,7 @@ casos.push(
     const momento = { inicio_s: 0, fin_s: 85, datos: { tema: 'x' } };
     const textos = { caption: 'c', hashtags: '#a', gancho_texto: '', portada_texto: 'p' };
     const r = construirReceta({ v, momento, textos, marca: { acento: '#C6E85A', etiqueta: '  Béccar ❤️  ', largo_max_s: 60 } });
-    eq([r.marca, r.largo_s <= 60], [{ acento: '#C6E85A', etiqueta: 'Béccar ❤️' }, true], 'con marca');
+    eq([r.marca, r.largo_s <= 60], [{ acento: '#C6E85A' }, true], 'con marca: solo el color (el barrio no lleva cartel)');
     eq(construirReceta({ v, momento, textos, marca: { acento: 'verde', etiqueta: '' } }).marca, undefined, 'marca inválida no viaja');
     eq(construirReceta({ v, momento, textos }).largo_s, 85, 'sin tope, el largo completo');
   }],
