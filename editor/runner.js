@@ -123,7 +123,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
           const previos = e.revision?.rechazos || [];
           R.edicion(e.id, { revision: { rechazos: [...previos, rev.motivo || ''] } });
           if (!previos.length) {
-            e = await rehacer(t, m, e, corregirReceta(e.receta, rev), transcripcion);
+            e = await rehacer(t, m, e, corregirReceta(e.receta, rev, m.datos?.publico_estilo), transcripcion);
             rev = await mirar(t, m, e, transcripcion);
           }
           if (rev.veredicto === 'rechazado') {

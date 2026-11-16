@@ -1,9 +1,9 @@
-// Elegir los momentos de un crudo. Claude propone; el código manda: límites de palabra, 6–90 s, sin solapes, máximo 15 editados.
+// Elegir los momentos de un crudo. Claude propone; el código manda: límites de palabra, 12–90 s, sin solapes, máximo 15 editados.
 import { MODELOS } from './claude.js';
 import { SYSTEM_MOMENTOS, HERRAMIENTA_MOMENTOS, herramientaMomentos, usuarioMomentos } from './prompts.js';
 import { normalizarAprendizajes } from './recetas.js';
 
-export const MIN_S = 6, MAX_S = 90, MAX_EDITADOS = 15, TOLERANCIA_S = 0.05;
+export const MIN_S = 12, MAX_S = 90, MAX_EDITADOS = 15, TOLERANCIA_S = 0.05;
 
 // → { validos (ordenados por interés, con los tiempos clavados a la palabra), descartados: [{ momento, motivo }] }
 export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_S, publicos = [] } = {}) {

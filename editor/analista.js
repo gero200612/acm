@@ -67,12 +67,20 @@ export function crearAnalista({ claude, modelo = MODELOS.analista } = {}) {
 }
 
 // La receta corregida para el segundo intento. Siempre cambia algo: si la corrección no cambia nada, rota los subtítulos.
-export function corregirReceta(receta, rev = {}) {
+// `estilo`: el del público del fragmento. La corrección no se sale de él: si el analista pide unos subtítulos que ese público no usa,
+// se toma el otro permitido (los permitidos de alto contraste primero).
+const ALTO_CONTRASTE = ['grande', 'placa', 'frase', 'karaoke', 'minimo'];
+export function corregirReceta(receta, rev = {}, estilo) {
   const c = rev.correccion || {}, n = { ...receta };
-  if (c.subtitulos && OPCIONES.subtitulos.includes(c.subtitulos)) n.subtitulos = c.subtitulos;
+  const permitidos = Array.isArray(estilo?.subtitulos) && estilo.subtitulos.some((x) => OPCIONES.subtitulos.includes(x)) ? estilo.subtitulos.filter((x) => OPCIONES.subtitulos.includes(x)) : OPCIONES.subtitulos;
+  const otroPermitido = (actual) => ALTO_CONTRASTE.find((x) => permitidos.includes(x) && x !== actual) || actual;
+  if (c.subtitulos && OPCIONES.subtitulos.includes(c.subtitulos)) n.subtitulos = permitidos.includes(c.subtitulos) ? c.subtitulos : otroPermitido(receta.subtitulos);
   if (c.quitar_musica) n.musica = null;
   if (c.quitar_zoom) n.zoom = false;
-  if (JSON.stringify(n) === JSON.stringify(receta)) { const o = OPCIONES.subtitulos; n.subtitulos = o[(o.indexOf(receta.subtitulos) + 1) % o.length]; }
+  if (JSON.stringify(n) === JSON.stringify(receta)) {
+    if (permitidos !== OPCIONES.subtitulos) n.subtitulos = otroPermitido(receta.subtitulos);
+    if (JSON.stringify(n) === JSON.stringify(receta)) { const o = permitidos.length > 1 ? permitidos : OPCIONES.subtitulos; n.subtitulos = o[(o.indexOf(receta.subtitulos) + 1) % o.length]; }
+  }
   if (n.variables) n.variables = { ...n.variables, subtitulos: n.subtitulos, musica: n.musica ? n.variables.musica : 'sin' };
   return n;
 }

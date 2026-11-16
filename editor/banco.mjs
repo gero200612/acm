@@ -199,8 +199,8 @@ casos.push(['Cola', 'Primero los cortos (sin duración al final); el que espera 
 
 // ---- Tarea 6: momentos y recetas con Claude (respuestas fakes, cero red) ----
 // 220 palabras de 0,9 s, una por segundo: la palabra i va de i a i+0,9
-const PALABRAS = Array.from({ length: 220 }, (_, i) => ({ inicio_s: i, fin_s: i + 0.9, texto: `p${i}` }));
-const mom = (k, extra = {}) => ({ inicio_s: k * 10, fin_s: k * 10 + 9.9, tema: `tema ${k}`, motivo: `motivo ${k}`, actualidad: false, interes: 100 - k, ...extra });
+const PALABRAS = Array.from({ length: 320 }, (_, i) => ({ inicio_s: i, fin_s: i + 0.9, texto: `p${i}` }));
+const mom = (k, extra = {}) => ({ inicio_s: k * 14, fin_s: k * 14 + 12.9, tema: `tema ${k}`, motivo: `motivo ${k}`, actualidad: false, interes: 100 - k, ...extra });
 // Claude falso: responde según la herramienta pedida y guarda los pedidos
 function claudeFalso({ momentos = [], textos } = {}) {
   const pedidos = [];
@@ -222,10 +222,10 @@ casos.push(
     const { validos, descartados } = validarMomentos([
       mom(0), { inicio_s: 100.5, fin_s: 110.9, tema: 'a', interes: 9 }, // empieza a mitad de la palabra 100
       { inicio_s: 30, fin_s: 33.9, tema: 'b', interes: 8 }, // 4 s
-      { inicio_s: 5, fin_s: 14.9, tema: 'c', interes: 1 }, // pisa al de 0 a 9,9 (más interesante)
+      { inicio_s: 5, fin_s: 17.9, tema: 'c', interes: 1 }, // pisa al de 0 a 12,9 (más interesante)
       mom(5),
     ], PALABRAS);
-    eq(validos.map((m) => [m.inicio_s, m.fin_s]), [[0, 9.9], [50, 59.9]], 'quedan');
+    eq(validos.map((m) => [m.inicio_s, m.fin_s]), [[0, 12.9], [70, 82.9]], 'quedan');
     eq(descartados.map((d) => d.causa).sort(), ['muy cortos', 'que cortan una palabra', 'solapados'], 'causas');
     eq(validarMomentos([{ inicio_s: 0, fin_s: 94.9, interes: 5 }], PALABRAS).descartados[0].causa, 'muy largos', 'más de 90 s');
     eq(validarMomentos([mom(1, { fin_s: 19.5 })], PALABRAS).descartados[0].causa, 'que cortan una palabra', 'termina a mitad de palabra');
@@ -308,11 +308,11 @@ casos.push(
   }],
   ['Momentos', 'Con públicos: cada momento sale etiquetado con uno del proyecto (y su descripción); uno con público inventado se descarta; el esquema pide el público', async () => {
     const PUB = [{ clave: 'mayores', nombre: 'Mayores', descripcion: '45 o más' }, { clave: 'jovenes', nombre: 'Jóvenes', descripcion: '18 a 35' }];
-    const pal = Array.from({ length: 40 }, (_, i) => ({ texto: `p${i}`, inicio_s: i, fin_s: i + 0.9 }));
+    const pal = Array.from({ length: 50 }, (_, i) => ({ texto: `p${i}`, inicio_s: i, fin_s: i + 0.9 }));
     const { validos, descartados } = validarMomentos([
-      { inicio_s: 0, fin_s: 10.9, tema: 'a', motivo: 'm', actualidad: false, interes: 9, publico: 'mayores' },
-      { inicio_s: 12, fin_s: 22.9, tema: 'b', motivo: 'm', actualidad: false, interes: 8, publico: 'jovenes' },
-      { inicio_s: 25, fin_s: 35.9, tema: 'c', motivo: 'm', actualidad: false, interes: 7, publico: 'chicos' },
+      { inicio_s: 0, fin_s: 12.9, tema: 'a', motivo: 'm', actualidad: false, interes: 9, publico: 'mayores' },
+      { inicio_s: 14, fin_s: 26.9, tema: 'b', motivo: 'm', actualidad: false, interes: 8, publico: 'jovenes' },
+      { inicio_s: 28, fin_s: 40.9, tema: 'c', motivo: 'm', actualidad: false, interes: 7, publico: 'chicos' },
     ], pal, { publicos: PUB });
     eq(validos.map((v) => [v.publico, v.publico_nombre]), [['mayores', 'Mayores'], ['jovenes', 'Jóvenes']], 'etiquetados');
     eq(descartados.map((d) => d.causa), ['sin público'], 'el inventado se descarta');
@@ -339,6 +339,17 @@ casos.push(
     eq([r.marca, r.largo_s <= 60], [{ acento: '#C6E85A', etiqueta: 'Béccar ❤️' }, true], 'con marca');
     eq(construirReceta({ v, momento, textos, marca: { acento: 'verde', etiqueta: '' } }).marca, undefined, 'marca inválida no viaja');
     eq(construirReceta({ v, momento, textos }).largo_s, 85, 'sin tope, el largo completo');
+  }],
+  ['Recetas', 'Ensayo 16/11: la corrección del analista no se sale del estilo del público y ningún recorte queda por debajo de 12 s', async () => {
+    const base = { subtitulos: 'karaoke', musica: { clima: 'energico', volumen: 0.25 }, zoom: true, variables: { subtitulos: 'karaoke', musica: 'energico' } };
+    const est = { subtitulos: ['karaoke', 'grande'] };
+    eq(corregirReceta(base, { correccion: { subtitulos: 'placa' } }, est).subtitulos, 'grande', 'pide placa: toma el otro permitido');
+    eq(corregirReceta(base, {}, est).subtitulos, 'grande', 'sin pedido: cambia dentro del estilo');
+    eq(corregirReceta(base, { correccion: { subtitulos: 'placa' } }).subtitulos, 'placa', 'sin estilo: lo que pide');
+    const v = { gancho: 'directo', subtitulos: 'grande', musica: 'sin', ritmo: 'rapido', largo: 'corto', explora: false };
+    const t = { caption: 'c', hashtags: '#a', gancho_texto: '', portada_texto: 'p' };
+    eq(construirReceta({ v, momento: { inicio_s: 0, fin_s: 18 }, textos: t }).largo_s, 12, 'corto de 18 s: 12, no 8');
+    eq(construirReceta({ v, momento: { inicio_s: 0, fin_s: 10 }, textos: t }).largo_s, 10, 'fragmento más corto: entero');
   }],
   ['Claude', 'Pide JSON con output_config (sin forzar herramienta), limpia el esquema y con Sonnet 5.5 manda fallbacks', async () => {
     const pedidos = [];

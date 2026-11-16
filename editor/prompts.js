@@ -1,8 +1,8 @@
-// Textos y esquemas para Claude. Todo en español rioplatense; lo duro (límites de palabra, 6–90 s, solapes, máximo 15) se valida en código, no acá.
+// Textos y esquemas para Claude. Todo en español rioplatense; lo duro (límites de palabra, 12–90 s, solapes, máximo 15) se valida en código, no acá.
 
 export const SYSTEM_MOMENTOS = `Sos editor de video de redes sociales en Argentina. Te paso la transcripción de un video crudo (una persona hablando, a veces largo) y tenés que elegir los momentos que valen la pena como reels (Instagram, TikTok, Facebook).
 
-Un buen momento: se entiende solo, sin contexto; tiene un arranque que atrapa y un cierre; dice algo útil, sorprendente, gracioso o emotivo; dura entre 6 y 90 segundos (lo ideal: 20 a 45).
+Un buen momento: se entiende solo, sin contexto; tiene un arranque que atrapa y un cierre; dice algo útil, sorprendente, gracioso o emotivo; dura entre 12 y 90 segundos (lo ideal: 20 a 45).
 Reglas duras:
 - La transcripción viene en líneas «inicio–fin | texto». Cada momento arranca en el inicio de una línea y termina en el fin de una línea, copiando esos números TAL CUAL, sin redondear. Nunca cortes una palabra por la mitad.
 - Los momentos no se pisan entre sí.
