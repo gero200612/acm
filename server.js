@@ -34,6 +34,7 @@ import { initWatch, watchCycle } from './watch.js';
 import { initAutoreply, mountAutoreply, inboxCycle } from './autoreply.js';
 import { initComments, mountComments, feedbackOf, commentsOf } from './comments.js';
 import { initRefs, mountRefs, referencesOf } from './refs.js';
+import { initUsers, mountUsers, makeSession, userFromSession, permit, mediaAllowed, scopeOf, sombraProject, sombraReel, checkPassword } from './users.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA = path.resolve(process.env.ACM_DATA || './data');
@@ -148,19 +149,25 @@ const all = (sql, ...p) => db.prepare(sql).all(...p);
 const get = (sql, ...p) => db.prepare(sql).get(...p);
 const run = (sql, ...p) => db.prepare(sql).run(...p);
 
-// ---------- sesión (cookie firmada) ----------
-const sign = (v) => crypto.createHmac('sha256', SECRET).update(v).digest('base64url');
-function makeToken() { const exp = String(Date.now() + 30 * 864e5); return `${exp}.${sign(exp)}`; }
-function validToken(t) {
-  if (!t) return false;
-  const [exp, sig] = t.split('.');
-  if (!exp || !sig || Number(exp) < Date.now()) return false;
-  const a = Buffer.from(sig), b = Buffer.from(sign(exp));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
+// ---------- sesión (cookie firmada, por usuario) y permisos (users.js) ----------
+initUsers(db);
+const session = makeSession(SECRET);
 const cookie = (req) => Object.fromEntries((req.headers.cookie || '').split(/;\s*/).filter(Boolean).map((c) => { const i = c.indexOf('='); return [c.slice(0, i), decodeURIComponent(c.slice(i + 1))]; }));
-const authed = (req) => validToken(cookie(req).acm);
-function requireAuth(req, res, next) { if (authed(req)) return next(); res.status(401).json({ error: 'Sin sesión' }); }
+const userOf = (req) => userFromSession(db, session.read(cookie(req).acm));
+const authed = (req) => !!userOf(req);
+// sesión + permiso: niega todo lo que no esté permitido para el rol (y lo de otros proyectos)
+function requireAuth(req, res, next) {
+  const user = req.user || userOf(req);
+  const no = permit(db, user, req.method, req.originalUrl.split('?')[0], req.body);
+  if (no) return res.status(no.status).json({ error: no.error });
+  req.user = user; next();
+}
+function requireMedia(req, res, next) {
+  const user = userOf(req);
+  if (!user) return res.status(401).json({ error: 'Sin sesión' });
+  if (!mediaAllowed(db, user, path.basename(req.path))) return res.status(404).end();
+  req.user = user; next();
+}
 
 // ---------- app ----------
 const app = express();
@@ -190,15 +197,25 @@ async function login(req, res) {
   a.n++; total.n++; attempts.set(ip, a);
   // el contador global no bloquea (no puede dejar afuera al dueño): solo frena, y como van en fila, frena a todos
   await new Promise((r) => setTimeout(r, total.n > 20 ? Math.min(5000, (total.n - 20) * 250) : 300));
-  const given = Buffer.from(String(req.body?.password || ''));
-  const want = Buffer.from(PASSWORD);
-  if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return res.status(401).json({ error: 'Contraseña incorrecta' });
+  // con mail: un usuario; sin mail: el dueño con la contraseña maestra
+  const email = String(req.body?.email || '').trim().toLowerCase(), pw = String(req.body?.password || '');
+  let user = null;
+  if (email) {
+    const u = get('SELECT * FROM users WHERE email = ?', email);
+    // si el mail no existe igual se calcula un hash, así la demora no delata qué mails hay
+    const ok = checkPassword(pw, u?.pass_hash || 'scrypt$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    if (u && ok) { user = u; run("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", u.id); }
+  } else {
+    const given = Buffer.from(pw), want = Buffer.from(PASSWORD);
+    if (given.length === want.length && crypto.timingSafeEqual(given, want)) user = { id: 0, ver: 1 };
+  }
+  if (!user) return res.status(401).json({ error: email ? 'Mail o contraseña incorrectos' : 'Contraseña incorrecta' });
   attempts.delete(ip); total.n = Math.max(0, total.n - 1);
-  res.set('Set-Cookie', `acm=${makeToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}${PROD ? '; Secure' : ''}`);
+  res.set('Set-Cookie', `acm=${session.token(user)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}${PROD ? '; Secure' : ''}`);
   res.json({ ok: true });
 }
 app.post('/api/logout', (req, res) => { res.set('Set-Cookie', 'acm=; Path=/; HttpOnly; Max-Age=0'); res.json({ ok: true }); });
-app.get('/api/session', (req, res) => res.json({ ok: authed(req) }));
+app.get('/api/session', (req, res) => { const u = userOf(req); res.json({ ok: !!u, user: u ? { id: u.id, name: u.name, email: u.email, role: u.role, project_id: u.project_id } : null }); });
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // ---------- editor (orquestador de ediciones): habla con ACM con un token, no con la sesión de una persona ----------
@@ -297,6 +314,7 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
 });
 
 app.use('/api', requireAuth);
+mountUsers(app, { db });
 
 // links para compartir sin cuenta (el dirigente aprueba desde el celular): gestión con sesión; /s y /pub, públicas con el token
 initShare(db);
@@ -320,9 +338,11 @@ app.get('/s/:token', (req, res) => res.sendFile(path.resolve('public/compartido.
 // vuelta de la pantalla de autorizar de TikTok o Google
 app.get('/oauth/:network/callback', async (req, res) => {
   const back = (pid, q) => res.redirect(`/?${new URLSearchParams(q)}${pid ? `#/p/${pid}/cuentas` : ''}`);
-  if (!authed(req)) return back(null, { conexion: 'error', motivo: 'Se cerró la sesión de ACM: entrá y volvé a tocar Conectar.' });
+  const me = userOf(req);
+  if (!me) return back(null, { conexion: 'error', motivo: 'Se cerró la sesión de ACM: entrá y volvé a tocar Conectar.' });
   const st = readState(SECRET, req.query.state);
-  const a = st && get('SELECT * FROM accounts WHERE id = ?', st.accountId);
+  const a0 = st && get('SELECT * FROM accounts WHERE id = ?', st.accountId);
+  const a = a0 && !permit(db, me, 'PUT', `/api/accounts/${a0.id}/connection`) ? a0 : null;
   if (!a || a.network !== req.params.network) return back(a?.project_id, { conexion: 'error', motivo: 'El pedido de conexión venció o no es de esta cuenta. Probá de nuevo.' });
   // la persona dijo que no, o la red devolvió un error
   if (req.query.error || !req.query.code) return back(a.project_id, { conexion: 'error', motivo: `No se autorizó: ${String(req.query.error_description || req.query.error || 'sin código').slice(0, 200)}` });
@@ -335,12 +355,12 @@ app.get('/oauth/:network/callback', async (req, res) => {
   back(a.project_id, { conexion: 'ok', cuenta: get('SELECT connected_as FROM accounts WHERE id = ?', a.id).connected_as + missing });
 });
 // los videos en R2 se ven con un link firmado de una hora; los del disco, directo
-app.get('/media/:file', requireAuth, async (req, res, next) => {
+app.get('/media/:file', requireMedia, async (req, res, next) => {
   const r = get("SELECT file FROM reels WHERE file = ? AND storage = 'r2'", req.params.file);
   if (!r) return next();
   try { res.redirect(302, await getUrl(r.file)); } catch { res.status(502).json({ error: 'No pudimos abrir el video en el almacenamiento' }); }
 });
-app.use('/media', requireAuth, express.static(UPLOADS, { maxAge: '7d', immutable: true }));
+app.use('/media', requireMedia, express.static(UPLOADS, { maxAge: '7d', immutable: true }));
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -416,6 +436,8 @@ function projectSummary(full) {
 
 // vista general de todos los proyectos (Inicio)
 app.get('/api/overview', (req, res) => {
+  const sc = scopeOf(req.user);
+  if (sc) return res.json(overviewOf(sc[0]));
   res.json({
     upcoming: all(`SELECT p.id, p.scheduled_at, p.status, p.project_id, pr.name AS project, pr.color, r.title AS reel_title, a.network, a.handle
       FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id JOIN projects pr ON pr.id = p.project_id
@@ -427,8 +449,24 @@ app.get('/api/overview', (req, res) => {
   });
 });
 
+// el Inicio de un administrador de dirigente: lo mismo, solo de su proyecto
+function overviewOf(pid) {
+  return {
+    upcoming: all(`SELECT p.id, p.scheduled_at, p.status, p.project_id, pr.name AS project, pr.color, r.title AS reel_title, a.network, a.handle
+      FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id JOIN projects pr ON pr.id = p.project_id
+      WHERE p.project_id = ? AND p.status IN ('programado', 'publicando') AND p.scheduled_at >= ? ORDER BY p.scheduled_at LIMIT 14`, pid, localNow(-60)),
+    upcoming14: all('SELECT project_id, scheduled_at FROM posts WHERE project_id = ? AND scheduled_at >= ? AND scheduled_at < ?', pid, localNow().slice(0, 10), localNow(14 * 1440).slice(0, 10)),
+    networks: all(`SELECT network, count(*) AS total, sum(status = 'conectada') AS live, sum(CASE WHEN status = 'conectada' THEN followers ELSE 0 END) AS followers FROM accounts WHERE project_id = ? GROUP BY network`, pid),
+    byProject: all('SELECT project_id, network, count(*) AS n FROM accounts WHERE project_id = ? GROUP BY project_id, network', pid),
+    next: all(`SELECT project_id, min(scheduled_at) AS at FROM posts WHERE project_id = ? AND status = 'programado' AND scheduled_at >= ? GROUP BY project_id`, pid, localNow()),
+  };
+}
+
 // proyectos
-app.get('/api/projects', (req, res) => res.json(all('SELECT * FROM projects ORDER BY created_at DESC').map(projectSummary)));
+app.get('/api/projects', (req, res) => {
+  const sc = scopeOf(req.user), ps = all('SELECT * FROM projects ORDER BY created_at DESC').filter((p) => !sc || sc.includes(p.id)).map(projectSummary);
+  res.json(req.user.role === 'sombra' ? ps.map(sombraProject) : ps);
+});
 app.post('/api/projects', upload.single('photo'), (req, res) => {
   const b = req.body || {};
   if (!String(b.name || '').trim()) return res.status(400).json({ error: 'Falta el nombre' });
@@ -444,7 +482,7 @@ app.post('/api/projects', upload.single('photo'), (req, res) => {
 app.get('/api/projects/:id', (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe' });
-  res.json(projectSummary(p));
+  res.json(req.user.role === 'sombra' ? sombraProject(projectSummary(p)) : projectSummary(p));
 });
 app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
@@ -561,7 +599,11 @@ app.delete('/api/accounts/:id/connection', (req, res) => {
 app.delete('/api/accounts/:id', (req, res) => { run('DELETE FROM accounts WHERE id = ?', req.params.id); res.json({ ok: true }); });
 
 // reels
-app.get('/api/projects/:id/reels', (req, res) => res.json(all(`SELECT r.*, (SELECT count(*) FROM posts WHERE reel_id = r.id) AS posts FROM reels r WHERE project_id = ? ORDER BY created_at DESC`, req.params.id)));
+app.get('/api/projects/:id/reels', (req, res) => {
+  const R = all(`SELECT r.*, (SELECT count(*) FROM posts WHERE reel_id = r.id) AS posts FROM reels r WHERE project_id = ? ORDER BY created_at DESC`, req.params.id);
+  // la sombra ve solo los crudos que se subieron, sin publicaciones ni números
+  res.json(req.user.role === 'sombra' ? R.filter((r) => r.kind === 'crudo').map(sombraReel) : R);
+});
 app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe' });
   const files = req.files || [];
@@ -570,7 +612,7 @@ app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
     const title = (req.body?.title && files.length === 1) ? req.body.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
     const m = probe(f.path) || {};
     const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, req.body?.kind === 'crudo' ? 'crudo' : 'listo');
+      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, req.body?.kind === 'crudo' || req.user.role === 'sombra' ? 'crudo' : 'listo');
     return get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid);
   });
   res.json(out);
@@ -601,7 +643,7 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
   const pid = Number(req.params.id);
   if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe' });
   const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 50) : [];
-  const kind = req.body?.kind === 'crudo' ? 'crudo' : 'listo';
+  const kind = req.body?.kind === 'crudo' || req.user.role === 'sombra' ? 'crudo' : 'listo';
   const out = [];
   for (const it of items) {
     const key = String(it?.key || '');
@@ -776,6 +818,15 @@ app.get('/api/search', (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, 80);
   if (q.length < 2) return res.json({ projects: [], reels: [], accounts: [] });
   const like = `%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+  const sc = scopeOf(req.user);
+  if (sc) {
+    const pid = sc[0];
+    return res.json({
+      projects: all("SELECT id, name, role, org, color FROM projects WHERE id = ? AND (name LIKE ? ESCAPE '\\' OR role LIKE ? ESCAPE '\\' OR org LIKE ? ESCAPE '\\')", pid, like, like, like),
+      reels: all("SELECT r.id, r.title, r.kind, r.project_id, p.name AS project FROM reels r JOIN projects p ON p.id = r.project_id WHERE r.project_id = ? AND (r.title LIKE ? ESCAPE '\\' OR r.caption LIKE ? ESCAPE '\\') ORDER BY r.id DESC LIMIT 8", pid, like, like),
+      accounts: all("SELECT a.id, a.network, a.handle, a.connected_as, a.project_id, p.name AS project FROM accounts a JOIN projects p ON p.id = a.project_id WHERE a.project_id = ? AND (a.handle LIKE ? ESCAPE '\\' OR a.connected_as LIKE ? ESCAPE '\\') ORDER BY a.id DESC LIMIT 6", pid, like, like),
+    });
+  }
   res.json({
     projects: all("SELECT id, name, role, org, color FROM projects WHERE name LIKE ? ESCAPE '\\' OR role LIKE ? ESCAPE '\\' OR org LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT 6", like, like, like),
     reels: all("SELECT r.id, r.title, r.kind, r.project_id, p.name AS project FROM reels r JOIN projects p ON p.id = r.project_id WHERE r.title LIKE ? ESCAPE '\\' OR r.caption LIKE ? ESCAPE '\\' ORDER BY r.id DESC LIMIT 8", like, like),
@@ -1181,11 +1232,11 @@ app.get('/api/projects/:id/review', (req, res) => {
   res.json({ review_mode: p.review_mode, pending: pending.length, clips: pending, recent });
 });
 app.post('/api/clips/:clip_id/review', (req, res) => {
-  const out = reviewClip(req.params.clip_id, req.body || {});
+  const out = reviewClip(req.params.clip_id, req.body || {}, { reviewer: req.user.id ? `${req.user.name} <${req.user.email}>` : 'Dueño', ...(req.user.role === 'general' ? {} : { onlyProject: req.user.project_id }) });
   res.status(out.status).json(out.body);
 });
 // Aprobar o rechazar un recorte (todas sus ediciones). La usan el panel y el link compartido (onlyProject: el recorte tiene que ser de ese proyecto).
-function reviewClip(clipId, body, { onlyProject = null, onlyPending = false, origin = 'opinion_dueno', who = '' } = {}) {
+function reviewClip(clipId, body, { onlyProject = null, onlyPending = false, origin = 'opinion_dueno', who = '', reviewer = '' } = {}) {
   const fail = (status, error) => ({ status, body: { error } });
   const { decision, comentario } = body, note = String(comentario || '').trim();
   if (note.length > 2000) return fail(400, 'El comentario pasa de 2000 caracteres');
@@ -1213,7 +1264,7 @@ function reviewClip(clipId, body, { onlyProject = null, onlyPending = false, ori
   // lo ya programado de una edición rechazada no sale
   const why = 'El recorte se rechazó: ya no está aprobado.';
   for (const id of rejected) run("UPDATE posts SET status = 'bloqueado', note = ? WHERE reel_id = ? AND status = 'programado'", why, id);
-  run('INSERT INTO clip_reviews (clip_id, project_id, decision, rechazar_ids, comentario) VALUES (?, ?, ?, ?, ?)', clipId, projectId, decision, JSON.stringify([...rejected]), who ? `${note}${note ? ' ' : ''}(por link: ${who})`.trim() : note);
+  run('INSERT INTO clip_reviews (clip_id, project_id, decision, rechazar_ids, comentario, reviewer) VALUES (?, ?, ?, ?, ?, ?)', clipId, projectId, decision, JSON.stringify([...rejected]), who ? `${note}${note ? ' ' : ''}(por link: ${who})`.trim() : note, reviewer || (who ? `link: ${who}` : ''));
   for (const { r, wins } of affected) for (const [variable, value] of Object.entries(recipeVars(parseJson(r.recipe))))
     run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, NULL, ?, 1, ?)", projectId, variable, value, wins, origin);
   if (affected.some((x) => x.wins)) replanificar(projectId);

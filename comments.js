@@ -35,7 +35,7 @@ export function mountComments(app, { get, run, db }) {
   app.post('/api/reels/:id/comments', (req, res) => {
     const reel = get('SELECT id, project_id, duration FROM reels WHERE id = ?', req.params.id);
     if (!reel) return res.status(404).json({ error: 'No existe el reel' });
-    const out = addComment(db, reel, req.body, 'equipo');
+    const out = addComment(db, reel, req.body, req.user?.id ? req.user.name : 'equipo');
     res.status(out.status).json(out.body);
   });
   app.delete('/api/reel-comments/:id', (req, res) => { run('DELETE FROM reel_comments WHERE id = ?', req.params.id); res.json({ ok: true }); });

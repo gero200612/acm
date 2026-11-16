@@ -36,6 +36,7 @@ const ICON = {
   move: 'M12 3v18M3 12h18M12 3l-3 3m3-3 3 3M12 21l-3-3m3 3 3-3M3 12l3-3m-3 3 3 3M21 12l-3-3m3 3-3 3',
   file: 'M7 3h7l5 5v13H7zM14 3v5h5',
   flask: 'M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9',
+  users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1M16 3.5a4 4 0 0 1 0 7.5M19 14a5 5 0 0 1 3 5v2',
 };
 const icon = (k, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[k]}"/></svg>`;
 const netBadge = (n) => `<span class="net ${n}" title="${NETS[n]?.name || n}">${NETS[n]?.svg || ''}</span>`;
@@ -85,11 +86,15 @@ function toast(msg, err, action) {
 const fail = (e) => toast(e.message || 'Algo falló', true);
 
 // ---------- estado ----------
-const state = { authed: false, projects: [], project: null, accounts: [], reels: [], posts: [], uploads: [] };
+const state = { authed: false, me: null, projects: [], project: null, accounts: [], reels: [], posts: [], uploads: [] };
+// qué puede ver cada rol (el servidor igual niega lo que no corresponde)
+const isGeneral = () => state.me?.role === 'general', isSombra = () => state.me?.role === 'sombra', canUsers = () => ['general', 'admin'].includes(state.me?.role);
+const ROLE_NAME = { general: 'Administrador general', admin: 'Administrador del dirigente', sombra: 'Sombra del dirigente' };
 try { state.calMode = localStorage.getItem('acm.calMode') || 'mes'; } catch { state.calMode = 'mes'; }
 
 async function loadProjects() { state.projects = await api('/api/projects'); }
 async function loadProject(id) {
+  if (isSombra()) { const [p, r] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/reels`)]); state.project = p; state.reels = r; state.accounts = []; state.posts = []; return; }
   const [p, a, r, s] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/accounts`), api(`/api/projects/${id}/reels`), api(`/api/projects/${id}/posts`)]);
   state.project = p; state.accounts = a; state.reels = r; state.posts = s;
 }
@@ -98,23 +103,29 @@ function route() {
   const [, a, id, tab, sub] = location.hash.replace(/^#/, '').split('/');
   if (a === 'p' && id) return { view: 'project', id: Number(id), tab: tab || 'resumen', sub: Number(sub) || 0 };
   if (a === 'lab') return { view: 'lab', tab: id || 'corridas' };
+  if (a === 'usuarios') return { view: 'users' };
   return { view: 'home' };
 }
 
 // ---------- render ----------
 async function render() {
   const app = $('#app');
-  if (!state.authed) { app.innerHTML = loginView(); $('#pw')?.focus(); return; }
-  const r = route();
+  if (!state.authed) { app.innerHTML = loginView(); $('#em')?.focus(); return; }
+  let r = route();
+  // un administrador de dirigente o una sombra van directo a su proyecto; la sombra, a Para aprobar
+  if (!isGeneral() && (r.view === 'home' || r.view === 'lab' || (r.view === 'project' && r.id !== state.me?.project_id))) { location.replace(`#/p/${state.me.project_id}${isSombra() ? '/aprobar' : ''}`); return; }
+  if (r.view === 'users' && !canUsers()) { location.replace('#'); return; }
+  if (isSombra() && r.view === 'project' && !['crudos', 'aprobar'].includes(r.tab)) { location.replace(`#/p/${r.id}/aprobar`); return; }
   try {
     await loadProjects();
     if (state.storage == null) state.storage = await api('/api/storage').catch(() => ({ r2: false }));
-    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario') state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if ((r.tab || 'resumen') === 'resumen' && !r.sub) state.perf = await api(`/api/projects/${r.id}/performance?days=${state.perfDays || 30}`).catch(() => null); if (r.tab === 'comentarios') state.inbox = await api(`/api/projects/${r.id}/inbox`); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
+    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario') state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if ((r.tab || 'resumen') === 'resumen' && !r.sub && !isSombra()) state.perf = await api(`/api/projects/${r.id}/performance?days=${state.perfDays || 30}`).catch(() => null); if (r.tab === 'comentarios') state.inbox = await api(`/api/projects/${r.id}/inbox`); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion' && state.agent == null) state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
+    else if (r.view === 'users') state.users = await api('/api/users');
     else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
-  const head = r.view === 'lab' ? `<div><h1 class="page-title">Laboratorio</h1><p class="lead">Lo que hizo ACM paso a paso, el banco de pruebas y el control técnico de los reels.</p></div>` : r.view === 'project' ? projectHead(state.project) : `<div><h1 class="page-title">Inicio</h1><p class="lead">Todas las campañas, sus cuentas y lo que sale publicado.</p></div><button class="btn primary" data-act="new-project">${icon('plus')} Nuevo proyecto</button>`;
-  const body = r.view === 'lab' ? labView(r.tab) : r.view === 'project' ? projectView(r.tab) : homeView();
+  const head = r.view === 'users' ? `<div><h1 class="page-title">Usuarios</h1><p class="lead">${isGeneral() ? 'Quién entra a ACM y qué puede hacer.' : 'Las sombras de tu dirigente: suben crudos y aprueban ediciones.'}</p></div><button class="btn primary" data-act="user-new">${icon('plus')} ${isGeneral() ? 'Nuevo usuario' : 'Nueva sombra'}</button>` : r.view === 'lab' ? `<div><h1 class="page-title">Laboratorio</h1><p class="lead">Lo que hizo ACM paso a paso, el banco de pruebas y el control técnico de los reels.</p></div>` : r.view === 'project' ? projectHead(state.project) : `<div><h1 class="page-title">Inicio</h1><p class="lead">Todas las campañas, sus cuentas y lo que sale publicado.</p></div><button class="btn primary" data-act="new-project">${icon('plus')} Nuevo proyecto</button>`;
+  const body = r.view === 'users' ? usersView() : r.view === 'lab' ? labView(r.tab) : r.view === 'project' ? projectView(r.tab) : homeView();
   app.innerHTML = `
   <div class="layout">
     <header class="mobilebar"><button class="burger" data-act="menu" aria-label="Abrir menú"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>ACM</header>
@@ -129,19 +140,21 @@ function sideNav(r) {
   return `
   <a class="brand" href="#"><span class="mark">${LOGO()}ACM</span><span class="sub">Agentic Campaign Manager</span></a>
   <nav aria-label="Principal">
-    <a class="item ${r.view === 'home' ? 'active' : ''}" href="#">${icon('home', 20)}<span class="t">Inicio</span></a>
-    <a class="item ${r.view === 'lab' ? 'active' : ''}" href="#/lab">${icon('flask', 20)}<span class="t">Laboratorio</span></a>
-    <button class="item pal-btn" data-act="palette">${icon('search', 20)}<span class="t">Buscar</span><kbd>⌘K</kbd></button>
+    ${isGeneral() ? `<a class="item ${r.view === 'home' ? 'active' : ''}" href="#">${icon('home', 20)}<span class="t">Inicio</span></a>
+    <a class="item ${r.view === 'lab' ? 'active' : ''}" href="#/lab">${icon('flask', 20)}<span class="t">Laboratorio</span></a>` : ''}
+    ${canUsers() ? `<a class="item ${r.view === 'users' ? 'active' : ''}" href="#/usuarios">${icon('users', 20)}<span class="t">Usuarios</span></a>` : ''}
+    ${isSombra() ? '' : `<button class="item pal-btn" data-act="palette">${icon('search', 20)}<span class="t">Buscar</span><kbd>⌘K</kbd></button>`}
     <div class="nav-label">Proyectos</div>
     ${pinnedFirst(state.projects).map((p) => `<a class="item ${r.id === p.id ? 'active' : ''} ${isPinned(p.id) ? 'pinned' : ''}" href="#/p/${p.id}">${avatar(p, 'sm')}<span class="t">${esc(p.name)}</span>${p.review_pending ? `<span class="count" title="Recortes para aprobar">${p.review_pending}</span>` : ''}<button class="pin" data-act="pin" data-pin="${p.id}" title="${isPinned(p.id) ? 'Desfijar' : 'Fijar arriba'}" aria-label="${isPinned(p.id) ? 'Desfijar' : 'Fijar arriba'}" aria-pressed="${isPinned(p.id)}">${icon('star', 14)}</button></a>`).join('')}
-    <button class="item add" data-act="new-project">${icon('plus', 20)}<span class="t">Nuevo proyecto</span></button>
+    ${isGeneral() ? `<button class="item add" data-act="new-project">${icon('plus', 20)}<span class="t">Nuevo proyecto</span></button>` : ''}
   </nav>
-  <div class="side-foot"><span class="live"><i></i>En línea</span><button data-act="logout">Salir</button></div>`;
+  <div class="side-foot"><span class="live" title="${esc(ROLE_NAME[state.me?.role] || '')}"><i></i>${esc(state.me?.name || 'En línea')}</span><button data-act="logout">Salir</button></div>`;
 }
 
 function loginView() {
   return `<div class="login"><form id="login-form">
     <div><div class="mark">${LOGO()}ACM</div><p class="muted small">Agentic Campaign Manager</p></div>
+    <label class="field">Mail<input class="input" id="em" type="email" autocomplete="username"></label>
     <label class="field">Contraseña<input class="input" id="pw" type="password" autocomplete="current-password" required></label>
     <div class="err" id="login-err"></div>
     <button class="btn primary" type="submit">Entrar</button>
@@ -288,15 +301,17 @@ function labReels() {
 // ---------- proyecto ----------
 function projectHead(p) {
   return `<div class="who">${avatar(p, true)}<div style="min-width:0"><h1 class="page-title">${esc(p.name)}</h1><p class="lead">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Proyecto')}</p></div></div>
-  <div class="row">${p.demo ? '<span class="chip s-pausada" title="No publica ni pauta nada">Demo · no publica</span>' : ''}${countdown(p)}${p.padron ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
+  <div class="row">${p.demo ? '<span class="chip s-pausada" title="No publica ni pauta nada">Demo · no publica</span>' : ''}${countdown(p)}${p.padron && !isSombra() ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
 }
 const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['memoria', 'Memoria'], ['investigacion', 'Investigación'], ['comentarios', 'Comentarios'], ['ajustes', 'Ajustes']];
 function projectView(tab) {
   const p = state.project;
   const counts = { cuentas: state.accounts.length, reels: state.reels.length, aprobar: p.review_pending, calendario: state.posts.filter((x) => x.status === 'programado').length };
   const on = tab === 'reel' ? 'reels' : tab;
-  const tabs = `<nav class="tabs">${TABS.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
-  const views = { resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, memoria: memoriaView, reel: reelDetailView, investigacion: investigacionView, comentarios: comentariosView, ajustes: ajustesView };
+  const T = isSombra() ? [['crudos', 'Subir crudos'], ['aprobar', 'Para aprobar']] : TABS;
+  if (isSombra()) counts.crudos = state.reels.length;
+  const tabs = `<nav class="tabs">${T.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
+  const views = { crudos: crudosView, resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, memoria: memoriaView, reel: reelDetailView, investigacion: investigacionView, comentarios: comentariosView, ajustes: ajustesView };
   return tabs + (views[tab] || resumenView)();
 }
 
@@ -338,7 +353,7 @@ function aprobarView() {
   const auto = R.review_mode === 'auto';
   const head = `<div class="ap-head"><div><h2 class="h2">Para aprobar <span class="count">${R.pending}</span></h2><p class="muted small">${R.pending ? `${R.pending} ${R.pending === 1 ? 'recorte espera' : 'recortes esperan'} tu decisión. Aprobás o rechazás todas sus versiones juntas.` : 'No hay recortes esperando.'}</p></div>
     <div class="row"><span class="chip ${auto ? 's-conectada' : 'nodot'}" title="${auto ? 'Lo que el analista aprueba entra solo; lo dudoso siempre espera acá. Un rechazo tuyo la vuelve a manual.' : 'Con 19 de los últimos 20 recortes aprobados pasa a automática.'}">Revisión ${auto ? 'automática' : 'manual'}</span>
-    <button class="btn sm" data-act="share-open">${icon('link', 15)} Compartir para aprobar</button></div></div>`;
+    ${isSombra() ? '' : `<button class="btn sm" data-act="share-open">${icon('link', 15)} Compartir para aprobar</button>`}</div></div>`;
   const rec = (R.recent || []).length ? `<h2 class="h2" style="margin-top:8px">Aprobados recientes</h2>${R.recent.map((c) => `
   <section class="card ap-clip" data-clip="${esc(c.clip_id)}">
     <div class="card-head"><h2 class="h2">${esc(c.moment?.tema || c.clip_id)}</h2><span class="small muted">${c.reels.filter((r) => r.review === 'aprobado').length} aprobadas</span></div>
@@ -524,6 +539,53 @@ function cuentasView() {
   </tr>`).join('')}
   </tbody></table></div>` : `<div class="empty"><h2 class="h2">Sin cuentas todavía</h2><p>Elegí una red a la derecha para agregar la primera.</p></div>`;
   return `<div class="ac"><section class="card ac-main"><div class="card-head"><div><h2 class="h2">Cuentas</h2><p class="small muted">${live} de ${A.length} conectadas</p></div></div>${table}</section>${side}</div>`;
+}
+
+// ---------- Subir crudos (lo que ve una sombra): solo la subida y en qué va cada crudo, sin números ----------
+const CRUDO_ESTADO = { en_cola: 'En cola', transcribiendo: 'Transcribiendo', buscando_momentos: 'Buscando momentos', editando: 'Editando', revisando: 'Revisando', listo: 'Ediciones listas', sin_momentos: 'Sin momentos para editar', error: 'Con error' };
+function crudosView() {
+  state.upKind = 'crudo';
+  const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
+  const list = state.reels.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Crudo</th><th>Subido</th><th>Estado</th></tr></thead><tbody>${state.reels.map((r) => `<tr>
+    <td>${esc(r.title)}</td><td class="small muted">${esc(String(r.created_at || '').slice(0, 16))}</td>
+    <td><span class="chip ${r.status === 'error' ? 's-error' : r.status === 'listo' ? 's-conectada' : 'nodot'}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(CRUDO_ESTADO[r.status] || 'Subido')}</span></td></tr>`).join('')}</tbody></table></div>`
+    : '<p class="muted" style="margin-top:12px">Todavía no subiste crudos.</p>';
+  return `<section class="card"><div class="card-head"><div><h2 class="h2">Subir crudos</h2><p class="small muted">Videos sin editar. El editor saca las ediciones y aparecen en «Para aprobar».</p></div></div>
+    ${up}<label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los crudos acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
+    ${list}</section>`;
+}
+
+// ---------- Usuarios ----------
+function usersView() {
+  const U = state.users || [], P = state.projects, pn = (id) => P.find((p) => p.id === id)?.name || '—';
+  const rows = U.map((u) => `<tr data-uid="${u.id}"><td><b>${esc(u.name)}</b><div class="small muted">${esc(u.email)}</div></td>
+    <td>${esc(ROLE_NAME[u.role] || u.role)}</td><td>${u.role === 'general' ? '<span class="muted">Todos</span>' : esc(pn(u.project_id))}</td>
+    <td class="small muted">${u.last_login_at ? esc(u.last_login_at.slice(0, 16)) : 'Nunca entró'}</td>
+    <td class="r nowrap">${u.id === state.me?.id ? '<span class="small muted">Vos</span>' : `<button class="btn sm" data-act="user-edit">Editar</button><button class="icon-btn danger" data-act="user-del" title="Borrar">${icon('trash', 16)}</button>`}</td></tr>`).join('');
+  const help = isGeneral() ? `<p class="small muted" style="margin-top:12px">El dueño entra con el mail vacío y la contraseña maestra. Además puede haber 2 administradores generales.</p>` : '';
+  return `<section class="card">${U.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Persona</th><th>Rol</th><th>Dirigente</th><th>Última entrada</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no hay usuarios.</p>'}${help}</section>`;
+}
+function userDialog(u) {
+  const P = state.projects, role = u?.role || (isGeneral() ? 'admin' : 'sombra');
+  const roles = isGeneral() ? Object.entries(ROLE_NAME) : [['sombra', ROLE_NAME.sombra]];
+  const d = openDialog(u ? `Editar a ${esc(u.name)}` : (isGeneral() ? 'Nuevo usuario' : 'Nueva sombra'), `<form class="form" id="user-form">
+    <label class="field">Nombre<input class="input" name="name" required maxlength="80" value="${esc(u?.name || '')}"></label>
+    ${u ? `<p class="small muted">${esc(u.email)}</p>` : '<label class="field">Mail<input class="input" name="email" type="email" required autocomplete="off"></label>'}
+    ${isGeneral() ? `<label class="field">Rol<select class="input" name="role">${roles.map(([k, l]) => `<option value="${k}" ${k === role ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <label class="field" id="user-proj">Dirigente<select class="input" name="project_id">${P.map((p) => `<option value="${p.id}" ${p.id === u?.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>` : ''}
+    <label class="field">${u ? 'Contraseña nueva <span class="small muted">(vacía = no cambia)</span>' : 'Contraseña <span class="small muted">(mínimo 8; se la pasás vos)</span>'}<input class="input" name="password" type="password" minlength="8" ${u ? '' : 'required'} autocomplete="new-password"></label>
+    <p class="small muted" id="user-what"></p>
+    <div class="row"><button class="btn primary" type="submit">${u ? 'Guardar' : 'Dar de alta'}</button></div></form>`);
+  const f = d.querySelector('form');
+  const what = { general: 'Ve y maneja todo, de todos los dirigentes.', admin: 'Maneja todo el proyecto de su dirigente, y nada de los otros.', sombra: 'Solo sube crudos y aprueba ediciones de su dirigente. No ve números.' };
+  const sync = () => { const r = f.role?.value || 'sombra'; const pj = d.querySelector('#user-proj'); if (pj) pj.hidden = r === 'general'; d.querySelector('#user-what').textContent = what[r]; };
+  f.role?.addEventListener('change', sync); sync();
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = { name: f.name.value, ...(f.email ? { email: f.email.value } : {}), ...(f.password.value ? { password: f.password.value } : {}) };
+    if (f.role) { body.role = f.role.value; if (body.role !== 'general') body.project_id = Number(f.project_id.value); }
+    try { await api(u ? `/api/users/${u.id}` : '/api/users', { method: u ? 'PUT' : 'POST', body }); d.close(); toast(u ? 'Usuario guardado' : 'Usuario dado de alta'); render(); } catch (err) { fail(err); }
+  });
 }
 
 function reelsView() {
@@ -1333,7 +1395,7 @@ function ajustesView() {
         <p class="small">Excel (.xlsx) o CSV. Se detectan solas las columnas de teléfono y mail.</p></label>
       <p class="small muted" style="margin-top:12px">Del archivo no se guardan nombres ni DNI: solo cuántos socios hay y la huella cifrada de cada teléfono y mail, que es lo que Meta usa para mostrarle la propaganda solo a ellos. El archivo no queda en el servidor.</p>
     </section>
-    <section class="card"><div class="card-head"><h2 class="h2">Borrar proyecto</h2></div><p class="muted small">Se borran sus cuentas, reels, publicaciones y el padrón. No se puede deshacer.</p><button class="btn danger" style="margin-top:14px" data-act="del-project">${icon('trash')} Borrar ${esc(p.name)}</button></section>
+    ${isGeneral() ? `<section class="card"><div class="card-head"><h2 class="h2">Borrar proyecto</h2></div><p class="muted small">Se borran sus cuentas, reels, publicaciones y el padrón. No se puede deshacer.</p><button class="btn danger" style="margin-top:14px" data-act="del-project">${icon('trash')} Borrar ${esc(p.name)}</button></section>` : ''}
   </div></div>`;
 }
 function projectForm(p = {}) {
@@ -1497,7 +1559,7 @@ function tabsFit() {
 let tabsQ = false;
 new MutationObserver(() => { if (!tabsQ) { tabsQ = true; requestAnimationFrame(() => { tabsQ = false; tabsFit(); }); } }).observe(document.body, { childList: true, subtree: true });
 addEventListener('resize', () => tabsFit());
-document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.authed) { e.preventDefault(); paletteOpen(); } });
+document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.authed && !isSombra()) { e.preventDefault(); paletteOpen(); } });
 function confirmBox(title, text, okLabel = 'Borrar') {
   return new Promise((res) => {
     const d = openDialog(title, `<p class="muted">${text}</p>`, `<button class="btn" data-close>Cancelar</button><button class="btn danger" data-ok>${okLabel}</button>`);
@@ -1826,7 +1888,7 @@ function afterRender(r) {
 document.addEventListener('submit', async (e) => {
   if (e.target.id !== 'login-form') return;
   e.preventDefault();
-  try { await api('/api/login', { method: 'POST', body: { password: $('#pw').value } }); state.authed = true; render(); }
+  try { await api('/api/login', { method: 'POST', body: { email: $('#em').value, password: $('#pw').value } }); const s = await api('/api/session'); state.authed = s.ok; state.me = s.user; render(); }
   catch (err) { $('#login-err').textContent = err.message; }
 });
 
@@ -1837,8 +1899,11 @@ document.addEventListener('click', async (e) => {
   try {
     switch (act) {
       case 'menu': $('.side').classList.toggle('open'); $('.scrim').classList.toggle('open'); break;
-      case 'logout': await api('/api/logout', { method: 'POST' }); state.authed = false; location.hash = ''; render(); break;
+      case 'logout': await api('/api/logout', { method: 'POST' }); state.authed = false; state.me = null; location.hash = ''; render(); break;
       case 'new-project': newProjectDialog(); break;
+      case 'user-new': userDialog(); break;
+      case 'user-edit': userDialog(state.users.find((u) => u.id === Number(el.closest('[data-uid]').dataset.uid))); break;
+      case 'user-del': { const u = state.users.find((x) => x.id === Number(el.closest('[data-uid]').dataset.uid)); if (await confirmBox('Borrar usuario', `${u.name} ya no va a poder entrar a ACM.`)) { await api(`/api/users/${u.id}`, { method: 'DELETE' }); toast('Usuario borrado'); render(); } break; }
       case 'new-account': addAccountDialog(); break;
       case 'add-net': { const acc = await api(`/api/projects/${state.project.id}/accounts`, { method: 'POST', body: { network: el.dataset.net } }); await render(); connectPanel(acc); break; }
       case 'cal-prev': case 'cal-next': case 'cal-today': {
@@ -1963,4 +2028,4 @@ window.addEventListener('hashchange', () => { $('.side')?.classList.remove('open
 // vuelta de «Conectar con TikTok / Google»: el servidor manda ?conexion=ok|error en la dirección
 { const q = new URLSearchParams(location.search); const c = q.get('conexion');
   if (c) { history.replaceState(null, '', location.pathname + location.hash); setTimeout(() => toast(c === 'ok' ? `Cuenta conectada: ${q.get('cuenta') || ''}` : `No se pudo conectar. ${q.get('motivo') || ''}`, c !== 'ok'), 600); } }
-api('/api/session').then((s) => { state.authed = s.ok; render(); }).catch(() => render());
+api('/api/session').then((s) => { state.authed = s.ok; state.me = s.user; render(); }).catch(() => render());

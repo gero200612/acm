@@ -87,7 +87,23 @@ export async function startSandbox(bases) {
   const editorApi = (url, body) => als.exit(async () => { const r = await fetch(base + url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${EDITOR_TOKEN}` }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, j }; });
   const editorGet = (url, token = EDITOR_TOKEN) => als.exit(async () => { const r = await fetch(base + url, { headers: token ? { authorization: `Bearer ${token}` } : {} }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, j }; });
   const write = (q, ...a) => { const d = new DatabaseSync(path.join(data, 'acm.db')); try { return d.prepare(q).run(...a); } finally { d.close(); } };
-  return { api, raw, editorApi, editorGet, write, password, stop, base, sql: (q, ...a) => { const d = new DatabaseSync(path.join(data, 'acm.db'), { readOnly: true }); try { return d.prepare(q).all(...a); } finally { d.close(); } }, simLog: () => bases.__log || [] };
+  // otro navegador: entra con mail y contraseña y guarda su propia cookie
+  const client = async (email, password) => {
+    let ck = '';
+    const call = (method, url, body, isForm) => als.exit(async () => {
+      const opt = { method, headers: { cookie: ck }, signal: AbortSignal.timeout(60000) };
+      if (body !== undefined && !isForm) { opt.headers['content-type'] = 'application/json'; opt.body = JSON.stringify(body); }
+      if (isForm) opt.body = body;
+      const r = await fetch(base + url, opt);
+      const sc = r.headers.get('set-cookie'); if (sc) ck = sc.split(';')[0];
+      let j = null; try { j = await r.json(); } catch {}
+      return { status: r.status, j };
+    });
+    const l = await call('POST', '/api/login', { email, password });
+    if (l.status !== 200) throw new Error(`no entró ${email}: ${l.status} ${l.j?.error || ''}`);
+    return call;
+  };
+  return { api, client, raw, editorApi, editorGet, write, password, stop, base, sql: (q, ...a) => { const d = new DatabaseSync(path.join(data, 'acm.db'), { readOnly: true }); try { return d.prepare(q).all(...a); } finally { d.close(); } }, simLog: () => bases.__log || [] };
 }
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -115,6 +131,62 @@ export function recorridoCases(sb) {
       const r = await api('POST', '/api/projects', form({ name: 'Recorrido', election_date: '2026-12-13', propaganda_until: '2026-12-10' }), true);
       yes(r.j?.id, 'no devolvió el proyecto'); c.p = r.j.id;
       eq((await api('POST', '/api/projects', { name: '  ' })).status, 400, 'sin nombre');
+    }],
+    [G('roles'), 'Usuarios: el general da de alta admin y sombra; tope de 2 generales; mail repetido y contraseña corta rechazados', async () => {
+      c.otro = (await api('POST', '/api/projects', form({ name: 'Otro dirigente' }), true)).j.id;
+      const mk = (b) => api('POST', '/api/users', { password: 'clave-segura-1', ...b });
+      eq((await mk({ email: 'adm@x.com', name: 'Adm', role: 'admin', project_id: c.p })).status, 200, 'alta admin');
+      eq((await mk({ email: 'som@x.com', name: 'Som', role: 'sombra', project_id: c.p })).status, 200, 'alta sombra');
+      eq((await mk({ email: 'som@x.com', name: 'Otra', role: 'sombra', project_id: c.p })).status, 409, 'mail repetido');
+      eq((await mk({ email: 'c@x.com', name: 'C', role: 'sombra', project_id: c.p, password: 'corta' })).status, 400, 'contraseña corta');
+      eq((await mk({ email: 'd@x.com', name: 'D', role: 'admin' })).status, 400, 'admin sin dirigente');
+      eq((await mk({ email: 'g1@x.com', name: 'G1', role: 'general' })).status, 200, 'general 1');
+      eq((await mk({ email: 'g2@x.com', name: 'G2', role: 'general' })).status, 200, 'general 2');
+      eq((await mk({ email: 'g3@x.com', name: 'G3', role: 'general' })).status, 400, 'tercer general (además del dueño)');
+      eq((await api('POST', '/api/login', { email: 'som@x.com', password: 'mala-mala-1' })).status, 401, 'sombra con contraseña mala');
+      eq((await api('POST', '/api/login', { password: sb.box.password })).status, 200, 'el dueño sigue entrando');
+    }],
+    [G('roles'), 'Administrador de dirigente: todo su proyecto, nada del otro, sin Laboratorio ni proyectos nuevos; solo da de alta sombras suyas', async () => {
+      const u = await sb.box.client('adm@x.com', 'clave-segura-1');
+      eq((await u('GET', '/api/projects')).j?.map((p) => p.id), [c.p], 've solo su proyecto');
+      eq((await u('GET', `/api/projects/${c.p}/performance`)).status, 200, 'números de su proyecto');
+      eq((await u('GET', `/api/projects/${c.p}/campaigns`)).status, 200, 'campañas de su proyecto');
+      eq((await u('GET', `/api/projects/${c.otro}`)).status, 404, 'proyecto ajeno');
+      eq((await u('GET', `/api/projects/${c.otro}/reels`)).status, 404, 'reels ajenos');
+      eq((await u('GET', '/api/lab/runs')).status, 403, 'laboratorio');
+      eq((await u('POST', '/api/projects', { name: 'Nuevo' })).status, 403, 'crear proyecto');
+      eq((await u('DELETE', `/api/projects/${c.p}`)).status, 403, 'borrar su proyecto');
+      eq((await u('POST', '/api/users', { email: 's2@x.com', name: 'S2', password: 'clave-segura-2' })).j?.role, 'sombra', 'alta de sombra propia');
+      eq((await u('POST', '/api/users', { email: 's3@x.com', name: 'S3', role: 'sombra', project_id: c.otro, password: 'clave-segura-2' })).status, 403, 'sombra de otro dirigente');
+      eq((await u('POST', '/api/users', { email: 'a2@x.com', name: 'A2', role: 'admin', project_id: c.p, password: 'clave-segura-2' })).status, 403, 'otro admin');
+      eq((await u('POST', '/api/users', { email: 'g9@x.com', name: 'G9', role: 'general', password: 'clave-segura-2' })).status, 403, 'un general');
+      eq((await u('GET', '/api/users')).j?.every((x) => x.project_id === c.p), true, 've solo usuarios de su proyecto');
+      const gen = (await api('GET', '/api/users')).j.find((x) => x.email === 'g1@x.com');
+      eq((await u('DELETE', `/api/users/${gen.id}`)).status, 404, 'borrar un general');
+    }],
+    [G('roles'), 'Sombra: sube crudos (aunque pida «listo») y ve Para aprobar; no ve números, cuentas ni otro proyecto', async () => {
+      const u = await sb.box.client('som@x.com', 'clave-segura-1');
+      const ps = (await u('GET', '/api/projects')).j;
+      eq(ps.map((p) => p.id), [c.p], 've solo su proyecto');
+      eq(['padron', 'pauta', 'accounts', 'published', 'scheduled'].filter((k) => k in ps[0]), [], 'sin números en el proyecto');
+      for (const url of [`/api/projects/${c.p}/performance`, `/api/projects/${c.p}/accounts`, `/api/projects/${c.p}/posts`, `/api/projects/${c.p}/campaigns`, `/api/projects/${c.p}/memory`, '/api/overview', '/api/users', '/api/search?q=re', `/api/projects/${c.p}/knowledge`])
+        eq((await u('GET', url)).status, 403, url);
+      eq((await u('PUT', `/api/projects/${c.p}`, { name: 'x' })).status, 403, 'editar el proyecto');
+      eq((await u('GET', `/api/projects/${c.otro}/review`)).status, 404, 'Para aprobar de otro');
+      eq((await u('GET', `/api/projects/${c.p}/review`)).status, 200, 'su Para aprobar');
+      const up = await u('POST', `/api/projects/${c.p}/reels`, form({ kind: 'listo', files: [[new Blob([Buffer.alloc(2048)], { type: 'video/mp4' }), 'crudo.mp4']] }), true);
+      eq([up.status, up.j?.[0]?.kind], [200, 'crudo'], 'sube y queda como crudo');
+      const rs = (await u('GET', `/api/projects/${c.p}/reels`)).j;
+      eq([rs.every((r) => r.kind === 'crudo'), rs.some((r) => 'posts' in r)], [true, false], 'solo crudos, sin publicaciones');
+      eq((await u('DELETE', `/api/reels/${up.j[0].id}`)).status, 403, 'borrar un reel');
+    }],
+    [G('roles'), 'Al cambiarle la contraseña a un usuario se le cierra la sesión', async () => {
+      const u = await sb.box.client('som@x.com', 'clave-segura-1');
+      eq((await u('GET', '/api/me')).status, 200, 'entra');
+      const som = (await api('GET', '/api/users')).j.find((x) => x.email === 'som@x.com');
+      eq((await api('PUT', `/api/users/${som.id}`, { password: 'clave-nueva-123' })).status, 200, 'cambio de contraseña');
+      eq((await u('GET', '/api/me')).status, 401, 'la sesión vieja ya no vale');
+      eq((await (await sb.box.client('som@x.com', 'clave-nueva-123'))('GET', '/api/me')).j?.role, 'sombra', 'entra con la nueva');
     }],
     [G('circuito'), 'Proyecto político: TikTok sin pauta; el tipo inválido da 400; al cambiar de tipo vuelven los valores por defecto', async () => {
       const r = await api('POST', '/api/projects', form({ name: 'Política', kind: 'politica' }), true);
