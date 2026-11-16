@@ -375,10 +375,10 @@ function aprobarView() {
         <ul class="ap-recipe">${recetaResumen(r.recipe)}</ul>
         <p class="ap-cap">${esc(r.caption || '')}</p>
         ${r.hashtags ? `<p class="small muted">${esc(r.hashtags)}</p>` : ''}
-        ${r.review === 'rechazado' ? '' : `<label class="small ap-pick"><input type="checkbox" data-rid="${r.id}"> Rechazar solo esta</label>`}
+        ${r.review === 'rechazado' || c.reels.length < 2 ? '' : `<label class="small ap-pick"><input type="checkbox" data-rid="${r.id}"> Rechazar solo esta</label>`}
       </article>`).join('')}</div>
     <label class="field">Comentario <span class="small muted">(obligatorio para rechazar; sirve para aprender qué te gusta)</span><textarea class="input ap-note" rows="2" maxlength="2000" placeholder="Por ejemplo: los subtítulos tapan la cara"></textarea></label>
-    <div class="row"><button class="btn primary" data-act="ap-ok">Aprobar las 3</button><button class="btn" data-act="ap-no">Rechazar lo marcado</button><button class="btn" data-act="ap-no-all">Rechazar las 3</button></div>
+    <div class="row">${(() => { const n = c.reels.filter((r) => r.review !== 'rechazado').length; const las = n === 1 ? '' : ` las ${n}`; return `<button class="btn primary" data-act="ap-ok">Aprobar${n === 1 ? 'la' : las}</button>${n > 1 ? '<button class="btn" data-act="ap-no">Rechazar lo marcado</button>' : ''}<button class="btn" data-act="ap-no-all">Rechazar${n === 1 ? 'la' : las}</button>`; })()}</div>
   </section>`).join('')}${rec}</div>`;
 }
 
