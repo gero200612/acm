@@ -626,7 +626,9 @@ export function recorridoCases(sb) {
     [G('editor'), 'Públicos: se cargan en el proyecto, le llegan al editor, la edición guarda el de su fragmento, la cuenta toma uno y no se programa en otra de otro público', async () => {
       eq((await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'Mayores', descripcion: '45+' }, { nombre: 'Jóvenes', descripcion: '18 a 35' }] })).j?.publicos?.map((x) => x.clave), ['mayores', 'jovenes'], 'públicos guardados');
       eq((await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'A' }, { nombre: 'a' }] })).status, 400, 'nombres repetidos');
-      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.publicos?.length, 2, 'le llegan al editor');
+      const conEstilo = (await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'Mayores', descripcion: '45+', estilo: { ritmo: ['normal', 'inventado'], largo: [] } }, { nombre: 'Jóvenes', descripcion: '18 a 35', estilo: { ritmo: ['rapido'], largo: ['corto'] } }] })).j;
+      eq([conEstilo.publicos[0].estilo, conEstilo.publicos[1].estilo], [{ ritmo: ['normal'] }, { ritmo: ['rapido'], largo: ['corto'] }], 'el estilo se guarda limpio');
+      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.publicos?.map((x) => x.estilo?.ritmo), [['normal'], ['rapido']], 'le llegan al editor con su estilo');
       const base = { crudo_id: c.crudo, review: 'pendiente', file_url: `${sb.editor.base}/video.mp4` };
       const ej = await sb.box.editorApi('/api/editor/edicion', { ...base, clip_id: 'clip-pub-j', edicion_id: '0a1b2c3d-0000-4000-8000-000000000901', moment: { inicio_s: 1, fin_s: 9, publico: 'jovenes' } });
       const ex = await sb.box.editorApi('/api/editor/edicion', { ...base, clip_id: 'clip-pub-x', edicion_id: '0a1b2c3d-0000-4000-8000-000000000902', moment: { inicio_s: 1, fin_s: 9, publico: 'chicos' } });

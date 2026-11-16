@@ -12,7 +12,7 @@ import { crearRunner } from './runner.js';
 import { repo } from './db.js';
 import { validarMomentos, crearElegirMomentos } from './momentos.js';
 import { herramientaMomentos, HERRAMIENTA_MOMENTOS, usuarioMomentos } from './prompts.js';
-import { crearArmarRecetas, elegirVariables, normalizarAprendizajes } from './recetas.js';
+import { crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas } from './recetas.js';
 import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
@@ -319,6 +319,17 @@ casos.push(
     const h = herramientaMomentos(PUB).input_schema.properties.momentos.items;
     eq([h.properties.publico.enum, h.required.includes('publico'), HERRAMIENTA_MOMENTOS.input_schema.properties.momentos.items.properties.publico], [['mayores', 'jovenes'], true, undefined], 'esquema con público, sin tocar el original');
     yes(/fragmentos DISTINTOS/.test(usuarioMomentos({ palabras: pal, publicos: PUB })), 'la consigna pide fragmentos distintos por público');
+  }],
+  ['Recetas', 'El estilo del público limita las opciones: solo ritmo rápido y largo corto; con aprendizajes fuera del estilo no los usa', async () => {
+    const estilo = { ritmo: ['rapido'], largo: ['corto'], subtitulos: ['karaoke', 'grande'], musica: ['inventada'] };
+    for (const semilla of [0, 1, 2, 7]) {
+      const vs = elegirVariables({ semilla, estilo });
+      yes(vs.every((v) => v.ritmo === 'rapido' && v.largo === 'corto' && ['karaoke', 'grande'].includes(v.subtitulos)), `semilla ${semilla}: ${JSON.stringify(vs)}`);
+      yes(vs.every((v) => ['energico', 'calido', 'sin'].includes(v.musica)), 'una opción desconocida no restringe');
+    }
+    const conAp = elegirVariables({ semilla: 3, estilo, aprendizajes: { ritmo: 'lento', subtitulos: 'grande' } });
+    yes(conAp.every((v) => v.ritmo === 'rapido') && conAp[0].subtitulos === 'grande', `aprendizaje permitido sí, prohibido no: ${JSON.stringify(conAp)}`);
+    eq(opcionesPermitidas({}).ritmo, ['rapido', 'normal', 'lento'], 'sin estilo, todas');
   }],
   ['Claude', 'Pide JSON con output_config (sin forzar herramienta), limpia el esquema y con Sonnet 5.5 manda fallbacks', async () => {
     const pedidos = [];

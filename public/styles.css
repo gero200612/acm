@@ -1055,3 +1055,8 @@ kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 
 .kn-card.kn-pub .kn-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; }
 .kn-card.kn-pub .kn-top .chip { font-size: 11.5px; }
 .cal-head .cal-nav { margin-left: auto; }
+.pub-estilo { grid-column: 1 / -1; font-size: 13px; }
+.pub-estilo summary { cursor: pointer; font-weight: 600; margin: 2px 0 6px; }
+.pub-dim { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 4px 0; }
+.pub-dim > span { width: 88px; color: var(--muted, #6b6b6b); }
+.pub-dim label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }

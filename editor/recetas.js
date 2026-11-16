@@ -25,19 +25,26 @@ export function normalizarAprendizajes(a) {
   return out;
 }
 
-// qué variables ganadoras sirven para armar recetas (valor conocido; la música acepta cualquier clima)
-function ganadoras(a) {
+// Estilo de un público: por cada dimensión, qué opciones se permiten (vacío o desconocido = todas).
+export function opcionesPermitidas(estilo) {
+  const o = {};
+  for (const d of DIMS) { const l = Array.isArray(estilo?.[d]) ? estilo[d].filter((x) => OPCIONES[d].includes(x)) : []; o[d] = l.length ? l : OPCIONES[d]; }
+  return o;
+}
+
+// qué variables ganadoras sirven para armar recetas (valor permitido; la música acepta cualquier clima si no hay restricción)
+function ganadoras(a, O = OPCIONES) {
   const n = normalizarAprendizajes(a), g = {};
-  for (const d of DIMS) if (n[d] && (OPCIONES[d].includes(n[d]) || (d === 'musica' && n[d].length <= 40))) g[d] = n[d];
+  for (const d of DIMS) if (n[d] && (O[d].includes(n[d]) || (d === 'musica' && O[d] === OPCIONES.musica && n[d].length <= 40))) g[d] = n[d];
   return g;
 }
 
-const elegir = (d, i) => OPCIONES[d][((i % OPCIONES[d].length) + OPCIONES[d].length) % OPCIONES[d].length];
-const otroDistinto = (d, actual) => { const o = OPCIONES[d]; const i = o.indexOf(actual); return o[(i + 1) % o.length]; };
-
-// Las elecciones de las 3 versiones: [{gancho, subtitulos, musica, ritmo, largo, explora}]
-export function elegirVariables({ semilla = 0, aprendizajes } = {}) {
-  const s = Math.abs(Math.trunc(semilla)) || 0, g = ganadoras(aprendizajes), hay = Object.keys(g).length > 0;
+// Las elecciones de las 3 versiones: [{gancho, subtitulos, musica, ritmo, largo, explora}]. `estilo` limita las opciones (el del público del fragmento).
+export function elegirVariables({ semilla = 0, aprendizajes, estilo } = {}) {
+  const O = opcionesPermitidas(estilo);
+  const elegir = (d, i) => O[d][((i % O[d].length) + O[d].length) % O[d].length];
+  const otroDistinto = (d, actual) => { const o = O[d]; const i = o.indexOf(actual); return o[(i + 1) % o.length]; };
+  const s = Math.abs(Math.trunc(semilla)) || 0, g = ganadoras(aprendizajes, O), hay = Object.keys(g).length > 0;
   // sin aprendizajes: cada dimensión rota con su propio desfase, así las 3 difieren y, entre momentos, se reparten parejo
   const rotada = (i) => ({ gancho: elegir('gancho', s + i), subtitulos: elegir('subtitulos', 2 * s + i), musica: elegir('musica', s + i + 1), ritmo: elegir('ritmo', s + i + 1), largo: elegir('largo', s + i + 2) });
   if (!hay) return [0, 1, 2].map((i) => ({ ...rotada(i), explora: false }));
@@ -47,6 +54,7 @@ export function elegirVariables({ semilla = 0, aprendizajes } = {}) {
   let cambios = 0;
   for (const d of [...DIMS.filter((x) => g[x]), ...DIMS.filter((x) => !g[x])]) {
     if (cambios >= 2) break;
+    if (O[d].length < 2) continue; // con una sola opción permitida no hay qué explorar
     exp[d] = otroDistinto(d, base[0][d]); cambios++;
   }
   return [...base, exp];
@@ -102,7 +110,7 @@ export function validarTextos(resp) {
 export function crearArmarRecetas({ claude, modelo = MODELOS.textos } = {}) {
   return async ({ momento, transcripcion, palabras, aprendizajes } = {}) => {
     palabras = palabras || transcripcion?.palabras || [];
-    const vars = elegirVariables({ semilla: momento.idx ?? momento.id ?? 0, aprendizajes });
+    const vars = elegirVariables({ semilla: momento.idx ?? momento.id ?? 0, aprendizajes, estilo: momento.datos?.publico_estilo });
     const enMomento = palabras.filter((p) => p.fin_s > momento.inicio_s && p.inicio_s < momento.fin_s);
     const pedido = { modelo, system: SYSTEM_TEXTOS, herramienta: HERRAMIENTA_TEXTOS, maxTokens: 2000, usuario: usuarioTextos({ momento, texto: enMomento.map((p) => p.texto).join(' ').slice(0, 6000), versiones: vars }) };
     let textos;

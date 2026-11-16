@@ -390,12 +390,16 @@ function update(table, id, data) {
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
 const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode', 'score_weights', 'publicos'];
-// públicos del proyecto: [{clave, nombre, descripcion}] (hasta 6). La clave sale del nombre.
+// opciones de edición del editor (editor/recetas.js OPCIONES): un público puede quedarse con algunas
+const OPCIONES_EDICION = { gancho: ['directo', 'pregunta', 'adelanto'], subtitulos: ['karaoke', 'placa', 'minimo', 'frase', 'grande'], musica: ['energico', 'calido', 'sin'], ritmo: ['rapido', 'normal', 'lento'], largo: ['completo', 'medio', 'corto'] };
+// públicos del proyecto: [{clave, nombre, descripcion, estilo}] (hasta 6). La clave sale del nombre.
 const claveDe = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
 function limpiarPublicos(v) {
   let l = v; if (typeof l === 'string') { try { l = JSON.parse(l); } catch { return null; } }
   if (!Array.isArray(l) || l.length > 6) return null;
-  const out = l.map((x) => ({ nombre: String(x?.nombre || '').trim().slice(0, 40), descripcion: String(x?.descripcion || '').trim().slice(0, 400) })).filter((x) => x.nombre).map((x) => ({ clave: claveDe(x.nombre), ...x }));
+  // estilo: por dimensión de la edición, qué opciones usa este público (las mismas del editor; vacío = todas)
+  const estiloDe = (e) => { const o = {}; for (const [d, ops] of Object.entries(OPCIONES_EDICION)) { const v = Array.isArray(e?.[d]) ? [...new Set(e[d].filter((x) => ops.includes(x)))] : []; if (v.length) o[d] = v; } return o; };
+  const out = l.map((x) => ({ nombre: String(x?.nombre || '').trim().slice(0, 40), descripcion: String(x?.descripcion || '').trim().slice(0, 400), estilo: estiloDe(x?.estilo) })).filter((x) => x.nombre).map((x) => ({ clave: claveDe(x.nombre), ...x }));
   return new Set(out.map((x) => x.clave)).size === out.length && out.every((x) => x.clave) ? out : null;
 }
 const publicosDe = (pid) => { try { return JSON.parse(get('SELECT publicos FROM projects WHERE id = ?', pid)?.publicos || '[]'); } catch { return []; } };

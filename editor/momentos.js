@@ -26,7 +26,7 @@ export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_
     const pub = publicos.find((x) => x.clave === m.publico);
     if (publicos.length && !pub) { descartar(`sin un público válido («${m.publico ?? ''}»)`, 'sin público'); continue; }
     validos.push({ inicio_s, fin_s, tema: String(m.tema || '').trim(), motivo: String(m.motivo || '').trim(), actualidad: m.actualidad === true, interes: Number(m.interes) || 0,
-      ...(pub ? { publico: pub.clave, publico_nombre: pub.nombre, publico_desc: pub.descripcion } : {}) });
+      ...(pub ? { publico: pub.clave, publico_nombre: pub.nombre, publico_desc: pub.descripcion, ...(pub.estilo ? { publico_estilo: pub.estilo } : {}) } : {}) });
   }
   return { validos, descartados };
 }

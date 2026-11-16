@@ -1413,7 +1413,10 @@ function publicosCard(p) {
     <div class="row" style="margin-top:12px"><button type="button" class="btn sm" data-act="pub-add">${icon('plus', 15)} Agregar público</button><button type="button" class="btn sm primary" data-act="pub-save">Guardar públicos</button></div>
   </section>`;
 }
-const pubRow = (x = {}) => `<div class="pub-row"><input class="input" data-pub="nombre" maxlength="40" placeholder="Nombre (ej.: Mayores)" value="${esc(x.nombre || '')}"><textarea class="input" data-pub="descripcion" rows="2" maxlength="400" placeholder="A quién le habla, tono y qué fragmentos le sirven">${esc(x.descripcion || '')}</textarea><button type="button" class="icon-btn danger" data-act="pub-del" title="Quitar">${icon('trash', 15)}</button></div>`;
+// opciones de edición (las mismas del editor): cada público marca las que usa; sin marcar = todas
+const ESTILO = { ritmo: ['Ritmo', { rapido: 'Rápido', normal: 'Normal', lento: 'Lento' }], largo: ['Largo', { corto: 'Corto', medio: 'Medio', completo: 'Completo' }], subtitulos: ['Subtítulos', { karaoke: 'Palabra por palabra', grande: 'Grandes', frase: 'Frase', placa: 'Con placa', minimo: 'Mínimos' }], musica: ['Música', { energico: 'Enérgica', calido: 'Cálida', sin: 'Sin música' }], gancho: ['Arranque', { directo: 'Directo', pregunta: 'Pregunta', adelanto: 'Adelanto' }] };
+const pubRow = (x = {}) => `<div class="pub-row"><input class="input" data-pub="nombre" maxlength="40" placeholder="Nombre (ej.: Mayores)" value="${esc(x.nombre || '')}"><textarea class="input" data-pub="descripcion" rows="2" maxlength="400" placeholder="A quién le habla, tono y qué fragmentos le sirven">${esc(x.descripcion || '')}</textarea><button type="button" class="icon-btn danger" data-act="pub-del" title="Quitar">${icon('trash', 15)}</button>
+  <details class="pub-estilo"${Object.keys(x.estilo || {}).length ? ' open' : ''}><summary>Estilo de edición <span class="small muted">(sin marcar = el editor prueba todo)</span></summary>${Object.entries(ESTILO).map(([d, [l, ops]]) => `<div class="pub-dim" data-dim="${d}"><span>${l}</span>${Object.entries(ops).map(([k, n]) => `<label><input type="checkbox" value="${k}" ${(x.estilo?.[d] || []).includes(k) ? 'checked' : ''}> ${n}</label>`).join('')}</div>`).join('')}</details></div>`;
 const pubName = (k) => state.project?.publicos?.find((x) => x.clave === k)?.nombre || k;
 function projectForm(p = {}) {
   return `<form class="form" id="project-form">
@@ -1922,7 +1925,7 @@ document.addEventListener('click', async (e) => {
       case 'pub-add': if ($$('#pub-list .pub-row').length >= 6) { toast('Hasta 6 públicos', true); break; } $('#pub-list').insertAdjacentHTML('beforeend', pubRow()); break;
       case 'pub-del': el.closest('.pub-row').remove(); break;
       case 'pub-save': {
-        const publicos = $$('#pub-list .pub-row').map((r) => ({ nombre: $('[data-pub=nombre]', r).value.trim(), descripcion: $('[data-pub=descripcion]', r).value.trim() })).filter((x) => x.nombre);
+        const publicos = $$('#pub-list .pub-row').map((r) => ({ nombre: $('[data-pub=nombre]', r).value.trim(), descripcion: $('[data-pub=descripcion]', r).value.trim(), estilo: Object.fromEntries($$('.pub-dim', r).map((g) => [g.dataset.dim, $$('input:checked', g).map((i) => i.value)])) })).filter((x) => x.nombre);
         await api(`/api/projects/${state.project.id}`, { method: 'PUT', body: { publicos } }); toast('Públicos guardados'); render(); break; }
       case 'user-edit': userDialog(state.users.find((u) => u.id === Number(el.closest('[data-uid]').dataset.uid))); break;
       case 'user-del': { const u = state.users.find((x) => x.id === Number(el.closest('[data-uid]').dataset.uid)); if (await confirmBox('Borrar usuario', `${esc(u.name)} ya no va a poder entrar a ACM.`)) { await api(`/api/users/${u.id}`, { method: 'DELETE' }); toast('Usuario borrado'); render(); } break; }
