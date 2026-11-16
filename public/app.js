@@ -89,6 +89,8 @@ const fail = (e) => toast(e.message || 'Algo falló', true);
 const state = { authed: false, me: null, projects: [], project: null, accounts: [], reels: [], posts: [], uploads: [] };
 // qué puede ver cada rol (el servidor igual niega lo que no corresponde)
 const isGeneral = () => state.me?.role === 'general', isSombra = () => state.me?.role === 'sombra', canUsers = () => ['general', 'admin'].includes(state.me?.role);
+// a quién le llega: en un club, socios; en política, vecinos
+const gente = (p = state.project, pl = true) => p?.kind === 'politica' ? (pl ? 'vecinos' : 'vecino') : (pl ? 'socios' : 'socio');
 const ROLE_NAME = { general: 'Administrador general', admin: 'Administrador del dirigente', sombra: 'Sombra del dirigente' };
 try { state.calMode = localStorage.getItem('acm.calMode') || 'mes'; } catch { state.calMode = 'mes'; }
 
@@ -182,7 +184,7 @@ function homeView() {
         <div><span class="lbl">Padrón</span><b>${p.padron ? fmt(p.padron) : '—'}</b><span>${p.padron_contacts ? fmt(p.padron_contacts) + ' contactables' : 'sin archivo'}</span></div>
         <div><span class="lbl">Cuentas</span><b>${p.accounts_live}/${p.accounts}</b><span class="hp-nets">${nets(p.id).map((x) => `${netBadge(x.network)}<small>${x.n}</small>`).join('') || 'ninguna'}</span></div>
         <div><span class="lbl">Reels</span><b>${p.reels}</b><span>${p.scheduled} programadas · ${p.published} publicadas</span></div>
-        <div><span class="lbl">Pauta</span><b>${c.budget ? usd(c.budget) : '—'}</b><span>${c.budget ? `cada socio la ve ${fmt(c.freq, c.freq < 10 ? 1 : 0)} veces` : 'sin cargar'}</span></div>
+        <div><span class="lbl">Pauta</span><b>${c.budget ? usd(c.budget) : '—'}</b><span>${c.budget ? `cada ${gente(p, false)} la ve ${fmt(c.freq, c.freq < 10 ? 1 : 0)} veces` : 'sin cargar'}</span></div>
         <div><span class="lbl">Próxima</span><b>${nx ? fmtTime(nx) : '—'}</b><span>${nx ? fmtDay(nx) : 'nada programado'}</span></div>
       </div>
     </a>`; }).join('');
@@ -487,7 +489,7 @@ function resumenView() {
     <a class="rs-stat" href="#/p/${p.id}/ajustes"><span class="lbl">Padrón</span><b>${p.padron ? fmt(p.padron) : '—'}</b><span class="sub">${p.padron_contacts ? `${fmt(p.padron_contacts)} con teléfono o mail` : 'subí el archivo en Ajustes'}</span></a>
     <a class="rs-stat" href="#/p/${p.id}/cuentas"><span class="lbl">Cuentas conectadas</span><b>${live.length}<small>/${A.length}</small></b><span class="sub nets">${Object.keys(NETS).filter((n) => A.some((a) => a.network === n)).map((n) => netBadge(n)).join('') || 'agregá la primera'}</span></a>
     <a class="rs-stat" href="#/p/${p.id}/reels"><span class="lbl">Reels</span><b>${state.reels.length}</b><span class="sub">${upcoming.length} publicaciones programadas · ${p.published} publicadas</span></a>
-    <a class="rs-stat" href="#/p/${p.id}/pauta"><span class="lbl">Pauta</span><b>${c.budget ? usd(c.budget) : '—'}</b><span class="sub">${c.budget ? `cada socio la ve ${fmt(c.freq, c.freq < 10 ? 1 : 0)} veces <span class="chip v-${v[0]}">${v[1]}</span>` : 'cargá la inversión'}</span></a>
+    <a class="rs-stat" href="#/p/${p.id}/pauta"><span class="lbl">Pauta</span><b>${c.budget ? usd(c.budget) : '—'}</b><span class="sub">${c.budget ? `cada ${gente(p, false)} la ve ${fmt(c.freq, c.freq < 10 ? 1 : 0)} veces <span class="chip v-${v[0]}">${v[1]}</span>` : 'cargá la inversión'}</span></a>
   </div>
 
   ${perfCard(p)}
@@ -985,7 +987,7 @@ function ttRead(box) {
 
 function pautaView() {
   const p = state.project, pa = p.pauta || {};
-  if (!p.padron) return `<div class="card empty"><h2 class="h2">Falta el padrón</h2><p>Subí el padrón en Ajustes para calcular a cuántos socios llega la pauta.</p><a class="btn primary" href="#/p/${p.id}/ajustes">Ir a Ajustes</a></div>`;
+  if (!p.padron) return `<div class="card empty"><h2 class="h2">Falta el padrón</h2><p>Subí el padrón en Ajustes para calcular a cuántos ${gente(p)} llega la pauta.</p><a class="btn primary" href="#/p/${p.id}/ajustes">Ir a Ajustes</a></div>`;
   const c = pautaCalc(p, pa);
   return `<div class="pz2">
     <aside class="card pz-ctl" id="pauta-form">
@@ -1092,11 +1094,11 @@ function pautaOut(p, c) {
       <div><span class="lbl">Por día</span><b>${has ? usd(c.perDay) : '—'}</b><span class="sub">${has ? `${usd(c.perDay * 7)} por semana` : ''}</span></div>
     </section>
     <section class="card pz-chart-card">
-      <div class="card-head"><h2 class="h2">Vistas por socio, acumuladas</h2><span class="small muted">${has ? v[2] : 'Poné un monto para ver la curva.'}</span></div>
-      <svg class="pz-chart" viewBox="0 0 ${VW} ${H}" preserveAspectRatio="none" role="img" aria-label="Vistas por socio acumuladas por semana">
+      <div class="card-head"><h2 class="h2">Vistas por ${gente(state.project, false)}, acumuladas</h2><span class="small muted">${has ? v[2] : 'Poné un monto para ver la curva.'}</span></div>
+      <svg class="pz-chart" viewBox="0 0 ${VW} ${H}" preserveAspectRatio="none" role="img" aria-label="Vistas por ${gente(state.project, false)} acumuladas por semana">
         <line class="axis" x1="0" x2="${VW}" y1="${H - padB}" y2="${H - padB}"/>
         <line class="ref" x1="0" x2="${VW}" y1="${refY}" y2="${refY}"/>
-        ${W.map((w) => `<g class="pz-bar"><rect x="${w.i * bw + bw * 0.2}" y="${y(w.cum)}" width="${bw * 0.6}" height="${Math.max(has ? 2 : 0, H - padB - y(w.cum))}" rx="4"/><rect class="hit" x="${w.i * bw}" y="0" width="${bw}" height="${H - padB}"><title>${fmtShort(ymd(w.d0))} al ${fmtShort(ymd(w.d1))}: ${fmt(w.cum, 1)} vistas por socio acumuladas</title></rect></g>`).join('')}
+        ${W.map((w) => `<g class="pz-bar"><rect x="${w.i * bw + bw * 0.2}" y="${y(w.cum)}" width="${bw * 0.6}" height="${Math.max(has ? 2 : 0, H - padB - y(w.cum))}" rx="4"/><rect class="hit" x="${w.i * bw}" y="0" width="${bw}" height="${H - padB}"><title>${fmtShort(ymd(w.d0))} al ${fmtShort(ymd(w.d1))}: ${fmt(w.cum, 1)} vistas por ${gente(state.project, false)} acumuladas</title></rect></g>`).join('')}
       </svg>
       <div class="pz-xl" style="grid-template-columns:repeat(${W.length},1fr)">${W.map((w) => `<span>${has ? `<b>${fmt(w.cum, 1)}</b>` : ''}${w.d0.getDate()}/${w.d0.getMonth() + 1}</span>`).join('')}</div>
       <p class="pz-ref-t">- - - 8 vistas: el mensaje se instala</p>
@@ -1105,9 +1107,9 @@ function pautaOut(p, c) {
 function pautaTabla(p, c) {
   const W = pautaWeeks(c), has = c.budget > 0;
   const n = (x, d = 0) => has ? fmt(x, d) : '—', u = (x) => has ? usd(x) : '—';
-  return `<div class="card-head"><h2 class="h2">Detalle semana a semana</h2><span class="small muted">La inversión se reparte pareja entre los días · ${fmt(c.people)} socios alcanzados</span></div>
+  return `<div class="card-head"><h2 class="h2">Detalle semana a semana</h2><span class="small muted">La inversión se reparte pareja entre los días · ${fmt(c.people)} ${gente()} alcanzados</span></div>
   <div class="table-wrap"><table class="list pz-table">
-    <thead><tr><th>Semana</th><th class="r">Días</th><th class="r">Inversión</th><th class="r">Pauta</th><th class="r">IVA</th><th class="r">Vistas</th><th class="r">Vistas por socio</th><th class="r">Acumulado por socio</th></tr></thead>
+    <thead><tr><th>Semana</th><th class="r">Días</th><th class="r">Inversión</th><th class="r">Pauta</th><th class="r">IVA</th><th class="r">Vistas</th><th class="r">Vistas por ${gente(state.project, false)}</th><th class="r">Acumulado por ${gente(state.project, false)}</th></tr></thead>
     <tbody>${W.map((w) => `<tr><td>${fmtShort(ymd(w.d0))} – ${fmtShort(ymd(w.d1))}</td><td class="r num">${w.dd}</td><td class="r num">${u(w.budget)}</td><td class="r num">${u(w.net)}</td><td class="r num">${u(w.iva)}</td><td class="r num">${n(w.imps)}</td><td class="r num">${n(w.per, 1)}</td><td class="r num">${n(w.cum, 1)}</td></tr>`).join('')}</tbody>
     <tfoot><tr><td>Total</td><td class="r num">${c.days}</td><td class="r num">${u(c.budget)}</td><td class="r num">${u(c.net)}</td><td class="r num">${u(c.budget - c.net)}</td><td class="r num">${n(c.imps)}</td><td class="r num">${n(c.freq, 1)}</td><td class="r num">${n(c.freq, 1)}</td></tr></tfoot>
   </table></div>
@@ -1256,16 +1258,18 @@ function campDialog(c) {
 const ASK = { pid: null, turns: [], busy: false };
 function askCard() {
   return `<section class="card ask" id="ask">
-    <div class="card-head"><div><h2 class="h2">Preguntale a la investigación</h2><p class="small muted">Responde solo con las fichas del proyecto y cita cada dato. Ej.: «¿Quién es Fulano y qué le conviene decir?»</p></div></div>
+    <div class="card-head"><div><h2 class="h2">Preguntale a la investigación</h2><p class="small muted">Claude lee las fichas de abajo y te responde en texto, citando de qué ficha sale cada dato.</p></div></div>
     <div class="ask-log" id="ask-log"></div>
-    ${state.agent ? `<form class="kn-row" id="ask-form"><input class="input" name="q" placeholder="Este es el dirigente X: ¿dónde está parado y qué temas le sirven?" autocomplete="off" maxlength="2000"><button class="btn primary" type="submit">Preguntar</button></form>`
-      : '<p class="banner">Falta la clave de Claude en el servidor (ANTHROPIC_API_KEY). Mientras tanto, usá la búsqueda de abajo.</p>'}
+    ${state.agent ? `<form class="kn-row" id="ask-form"><input class="input" name="q" placeholder="${esc(`¿Qué temas le convienen a ${state.project.name} y cómo contarlos?`)}" autocomplete="off" maxlength="2000"><button class="btn primary" type="submit">Preguntar</button></form>`
+      : '<p class="banner">Falta la clave de Claude en el servidor (ANTHROPIC_API_KEY). Mientras tanto, podés filtrar las fichas de abajo.</p>'}
   </section>`;
 }
+// convierte lo poco de markdown que pueda venir en texto prolijo (ya escapado): **negrita**, títulos y viñetas
+const prosa = (h) => h.replace(/^#{1,6}\s*(.+)$/gm, '<b>$1</b>').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^\s*[-*]\s+/gm, '• ').replace(/(^|\s)\*(\S[^*\n]*?)\*(?=\s|[.,;:]|$)/g, '$1$2');
 function askDraw() {
   const log = $('#ask-log'); if (!log) return;
   log.innerHTML = ASK.turns.map((t) => t.role === 'user' ? `<div class="ask-q">${esc(t.content)}</div>`
-    : `<div class="ask-a ${t.error ? 'err' : ''}">${esc(t.content).replace(/\[(\d+)\]/g, (m, n) => { const s = t.sources?.find((x) => x.n === Number(n)); return s ? `<a href="${/^https?:/.test(s.source || '') ? esc(s.source) : '#'}" target="_blank" rel="noopener noreferrer" class="cite" title="${esc(s.title)}">${n}</a>` : m; }).replace(/\n/g, '<br>')}
+    : `<div class="ask-a ${t.error ? 'err' : ''}">${prosa(esc(t.content)).replace(/\[(\d+)\]/g, (m, n) => { const s = t.sources?.find((x) => x.n === Number(n)); return s ? `<a href="${/^https?:/.test(s.source || '') ? esc(s.source) : '#'}" target="_blank" rel="noopener noreferrer" class="cite" title="${esc(s.title)}">${n}</a>` : m; }).replace(/\n/g, '<br>')}
       ${t.sources?.length ? `<div class="ask-src">${t.sources.map((s) => `<span><b>${s.n}</b> ${esc(s.title)}</span>`).join('')}</div>` : ''}</div>`).join('') + (ASK.busy ? '<div class="ask-a muted">Leyendo las fichas…</div>' : '');
   log.scrollTop = log.scrollHeight;
 }
@@ -1284,8 +1288,9 @@ const CONF = { alta: 'Confianza alta', media: 'Confianza media', baja: 'Sin conf
 function investigacionView() {
   return `${askCard()}<div class="kn">
     <form class="card kn-search" id="kn-form">
-      <div class="kn-row"><input class="input" name="q" placeholder="Preguntá algo: ¿quién está cerca de la AFA? ¿qué propone cada uno sobre la deuda? ¿qué le funciona a Gaudio?" value="${esc(K.q)}" autocomplete="off">
-      <button class="btn primary" type="submit">Buscar</button></div>
+      <div class="card-head"><div><h2 class="h2">Fichas</h2><p class="small muted">Filtrá las fichas por palabra o tema. No usa Claude: solo busca.</p></div></div>
+      <div class="kn-row"><input class="input" name="q" placeholder="Un tema, un barrio, una persona…" value="${esc(K.q)}" autocomplete="off">
+      <button class="btn" type="submit">Filtrar</button></div>
       <div class="kn-chips" id="kn-chips"></div>
     </form>
     <div class="kn-grid"><section id="kn-list" class="kn-list"><div class="card muted small">Cargando…</div></section>
@@ -1389,11 +1394,11 @@ function ajustesView() {
   <div class="stack">
     <section class="card"><div class="card-head"><h2 class="h2">Padrón</h2>${p.padron_file ? `<button class="btn sm danger" data-act="del-padron">Quitar</button>` : ''}</div>
       ${p.padron_file ? `<div class="pad-ok">${icon('file', 22)}<div><b>${esc(p.padron_file)}</b><span class="small muted">subido el ${fmtDate(p.padron_at)}</span></div></div>
-        <div class="pad-nums"><div><b>${fmt(p.padron)}</b><span>socios</span></div><div><b>${fmt(p.padron_phones)}</b><span>con teléfono</span></div><div><b>${fmt(p.padron_emails)}</b><span>con mail</span></div><div><b>${fmt(p.padron_contacts)}</b><span>contactables</span></div></div>` : ''}
+        <div class="pad-nums"><div><b>${fmt(p.padron)}</b><span>${gente(p)}</span></div><div><b>${fmt(p.padron_phones)}</b><span>con teléfono</span></div><div><b>${fmt(p.padron_emails)}</b><span>con mail</span></div><div><b>${fmt(p.padron_contacts)}</b><span>contactables</span></div></div>` : ''}
       <label class="drop pad-drop" id="pad-drop"><input type="file" id="pad-input" accept=".csv,.xlsx,.txt" hidden>${icon('up', 26)}
         <p style="margin-top:6px"><b>${p.padron_file ? 'Soltá otro archivo para reemplazarlo' : 'Tirá el padrón acá'}</b> o tocá para elegirlo</p>
         <p class="small">Excel (.xlsx) o CSV. Se detectan solas las columnas de teléfono y mail.</p></label>
-      <p class="small muted" style="margin-top:12px">Del archivo no se guardan nombres ni DNI: solo cuántos socios hay y la huella cifrada de cada teléfono y mail, que es lo que Meta usa para mostrarle la propaganda solo a ellos. El archivo no queda en el servidor.</p>
+      <p class="small muted" style="margin-top:12px">Del archivo no se guardan nombres ni DNI: solo cuántos ${gente(p)} hay y la huella cifrada de cada teléfono y mail, que es lo que Meta usa para mostrarle la propaganda solo a ellos. El archivo no queda en el servidor.</p>
     </section>
     ${isGeneral() ? `<section class="card"><div class="card-head"><h2 class="h2">Borrar proyecto</h2></div><p class="muted small">Se borran sus cuentas, reels, publicaciones y el padrón. No se puede deshacer.</p><button class="btn danger" style="margin-top:14px" data-act="del-project">${icon('trash')} Borrar ${esc(p.name)}</button></section>` : ''}
   </div></div>`;
@@ -1862,7 +1867,7 @@ function afterRender(r) {
       if (!f) return;
       const fd = new FormData(); fd.append('file', f);
       pd.classList.add('over'); pd.querySelector('b').textContent = 'Leyendo el padrón…';
-      try { const r = await api(`/api/projects/${state.project.id}/padron`, { method: 'POST', body: fd }); toast(`Padrón cargado: ${fmt(r.padron)} socios, ${fmt(r.padron_contacts)} contactables`); if (!r.columns.phone && !r.columns.email) toast('No encontré columnas de teléfono ni de mail', true); }
+      try { const r = await api(`/api/projects/${state.project.id}/padron`, { method: 'POST', body: fd }); toast(`Padrón cargado: ${fmt(r.padron)} ${gente()}, ${fmt(r.padron_contacts)} contactables`); if (!r.columns.phone && !r.columns.email) toast('No encontré columnas de teléfono ni de mail', true); }
       catch (err) { fail(err); }
       render();
     };
@@ -1965,7 +1970,7 @@ document.addEventListener('click', async (e) => {
       case 'lab-banco': { state.lab.running = true; render(); try { const r = await api('/api/lab/banco', { method: 'POST' }); state.lab.bancoSel = r.run?.id; toast(r.ok === r.total ? `Pasaron los ${r.total} casos` : `Pasaron ${r.ok} de ${r.total}`, r.ok !== r.total); } catch (err) { fail(err); } state.lab.running = false; render(); break; }
       case 'post-now': { const box = el.closest('.pd')?.querySelector('.tt-opts'); const options = box ? ttRead(box) : undefined; if (options === null) break; el.disabled = true; el.textContent = 'Publicando…'; await api(`/api/posts/${id}/now`, { method: 'POST', body: options ? { options } : {} }); toast('Se está publicando: en un rato cambia el estado'); el.closest('dialog')?.close(); break; }
       case 'open-day': postDialog(state.posts.filter((x) => ymd(pdate(x.scheduled_at)) === el.dataset.day).map((x) => x.id)); break;
-      case 'del-padron': if (await confirmBox('Quitar padrón', 'Se borran las huellas de teléfonos y mails. El número de socios queda.', 'Quitar')) { await api(`/api/projects/${state.project.id}/padron`, { method: 'DELETE' }); toast('Padrón quitado'); render(); } break;
+      case 'del-padron': if (await confirmBox('Quitar padrón', `Se borran las huellas de teléfonos y mails. El número de ${gente()} queda.`, 'Quitar')) { await api(`/api/projects/${state.project.id}/padron`, { method: 'DELETE' }); toast('Padrón quitado'); render(); } break;
       case 'connect-account': connectPanel(state.accounts.find((a) => a.id === id)); break;
       case 'pause-account': { const a = state.accounts.find((x) => x.id === id); await api(`/api/accounts/${id}`, { method: 'PUT', body: { status: a.status === 'pausada' ? 'activa' : 'pausada' } }); toast(a.status === 'pausada' ? 'Cuenta reanudada' : 'Cuenta pausada: no recibe publicaciones nuevas'); render(); break; }
       case 'del-account': if (await confirmBox('Borrar cuenta', 'Se quitan también sus publicaciones programadas.')) { await api(`/api/accounts/${id}`, { method: 'DELETE' }); render(); } break;

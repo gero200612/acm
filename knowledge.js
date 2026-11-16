@@ -11,7 +11,7 @@ let pipe = null, loading = null, failed = '';
 
 export const KINDS = {
   eleccion: 'Elección', candidato: 'Candidatos', propuesta: 'Propuestas', apoyos: 'Apoyos', politica: 'Política',
-  economia: 'Economía', historia: 'Historia', deportivo: 'Deportivo', tema: 'Temas del socio', cuenta: 'Cuentas',
+  economia: 'Economía', historia: 'Historia', deportivo: 'Deportivo', tema: 'Temas de la gente', cuenta: 'Cuentas',
   medio: 'Medios', aprendizaje: 'Qué funciona', publicacion: 'Publicaciones', nota: 'Notas',
 };
 
