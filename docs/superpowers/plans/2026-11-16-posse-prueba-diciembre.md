@@ -43,7 +43,7 @@ Lo que sale de esto para el editor:
 - [ ] Generar los roles de las 8 cuentas (nombre, a quién le habla, tono, qué recorta del crudo; mayores y jóvenes sin contenido repetido) y que el editor los use. Hoy ACM no guarda un rol por cuenta
 - [ ] Conseguir o comprar las 8 cuentas y conectarlas en ACM (proyecto 3)
 - [ ] Comprar los 2 servidores en Contabo (editor y normal)
-- [ ] Arreglar `editor/claude.js`: fuerza `tool_choice` con Sonnet 5.5 y la API lo rechaza (400)
+- [x] Arreglar `editor/claude.js`: fuerza `tool_choice` con Sonnet 5.5 y la API lo rechaza (400) — ahora usa salida JSON (output_config.format); probado contra la API real el 16/11
 - [ ] Cargar ANTHROPIC_API_KEY y crear el bucket R2 `acm-media` (CORS + token) con vps/apps.py
 - [ ] Ver cómo están las aprobaciones: Meta (17 permisos, enviados el 31/10), TikTok producción (sin auditoría solo publica en privado) y verificación de Google — 16/11: TikTok y Google siguen en revisión
 

@@ -305,6 +305,23 @@ casos.push(
     msg = ''; try { await crearClaude({ apiKey: '' }).estructurado({ modelo: 'x', system: '', usuario: '', herramienta: { name: 't' } }); } catch (e) { msg = e.message; }
     yes(/Falta ANTHROPIC_API_KEY/.test(msg), 'sin key: mensaje en español');
   }],
+  ['Claude', 'Pide JSON con output_config (sin forzar herramienta), limpia el esquema y con Sonnet 5.5 manda fallbacks', async () => {
+    const pedidos = [];
+    const respuesta = { stop_reason: 'end_turn', content: [{ type: 'text', text: '{"versiones":[]}' }] };
+    const sdk = { messages: { async create(p) { pedidos.push(['normal', p]); return respuesta; } }, beta: { messages: { async create(p) { pedidos.push(['beta', p]); return respuesta; } } } };
+    const c = crearClaude({ sdk });
+    const herramienta = { name: 'h', description: 'd', input_schema: { type: 'object', properties: { versiones: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'object', properties: { n: { type: 'integer', minimum: 0 } } } } }, required: ['versiones'] } };
+    eq(await c.estructurado({ modelo: 'claude-haiku-5-5', system: 's', usuario: 'u', herramienta }), { versiones: [] }, 'devuelve el JSON');
+    await c.estructurado({ modelo: 'claude-sonnet-5-5', system: 's', usuario: 'u', herramienta });
+    const [[via1, p1], [via2, p2]] = pedidos;
+    eq([via1, via2], ['normal', 'beta'], 'Haiku por la vía normal, Sonnet 5.5 por beta con respaldo');
+    eq([p1.tool_choice, p1.tools, p2.fallbacks], [undefined, undefined, 'default'], 'sin herramienta forzada');
+    const sch = p1.output_config.format.schema;
+    eq([sch.additionalProperties, sch.properties.versiones.minItems, sch.properties.versiones.items.additionalProperties, sch.properties.versiones.items.properties.n.minimum], [false, undefined, false, undefined], 'esquema limpio');
+    yes(p1.max_tokens >= 16000, 'margen para el pensamiento');
+    let msg = ''; try { await crearClaude({ sdk: { messages: { async create() { return { stop_reason: 'refusal', stop_details: { category: 'cyber' }, content: [] }; } } } }).estructurado({ modelo: 'claude-haiku-5-5', system: '', usuario: '', herramienta }); } catch (e) { msg = e.message; }
+    yes(/no quiso responder/.test(msg), `rechazo: ${msg}`);
+  }],
 );
 
 let ok = 0;
