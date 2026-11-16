@@ -63,10 +63,12 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     return ms;
   }
 
-  async function armar(t, ms, transcripcion, aprendizajes, marca = {}) {
+  async function armar(t, ms, transcripcion, aprendizajes, marca = {}, porPublico = {}) {
+    // cada fragmento se arma con lo aprendido de SU público; si ese público todavía no aprendió nada, con lo del proyecto
+    const delPublico = (m) => { const a = porPublico[m.datos?.publico]; return a && Object.keys(a).length ? [a] : aprendizajes; };
     if (R.ediciones(t.id).length) return;
     for (const m of ms.filter((x) => x.estado !== 'candidato')) {
-      const recetas = ((await armarRecetas({ trabajo: t, momento: m, transcripcion, aprendizajes, marca })) || []).slice(0, MAX_RECETAS);
+      const recetas = ((await armarRecetas({ trabajo: t, momento: m, transcripcion, aprendizajes: delPublico(m), marca })) || []).slice(0, MAX_RECETAS);
       recetas.forEach((r, i) => R.guardarEdicion(t.id, m.id, i, r));
     }
   }
@@ -154,12 +156,12 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     try {
       motivoSinMomentos = '';
       const ctx = acm.contexto ? await acm.contexto(t.project_id, t.reel_id) : { aprendizajes: (await acm.aprendizajes?.(t.project_id)) ?? [] };
-      const aprendizajes = ctx.aprendizajes ?? [], investigacion = ctx.investigacion ?? [], publicos = ctx.publicos ?? [], marca = ctx.marca ?? {};
+      const aprendizajes = ctx.aprendizajes ?? [], investigacion = ctx.investigacion ?? [], publicos = ctx.publicos ?? [], marca = ctx.marca ?? {}, porPublico = ctx.porPublico ?? {};
       const transcripcion = await transcribir(t);
       t = R.trabajo(id);
       const ms = await momentos(t, transcripcion, aprendizajes, investigacion, publicos);
       if (!ms.length) { await etapa(t, 'sin_momentos', motivoSinMomentos || 'No encontramos momentos para recortar en este video'); return R.trabajo(id); }
-      await armar(t, ms, transcripcion, aprendizajes, marca);
+      await armar(t, ms, transcripcion, aprendizajes, marca, porPublico);
       if (!R.ediciones(t.id).length) { await etapa(t, 'sin_momentos', 'Hay momentos pero ninguna receta para editarlos'); return R.trabajo(id); }
       await etapa(t, 'editando', `${R.ediciones(t.id).length} ediciones`);
       await editar(t, ms, transcripcion);

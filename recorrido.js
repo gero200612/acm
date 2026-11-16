@@ -645,6 +645,10 @@ export function recorridoCases(sb) {
       eq((await api('PUT', `/api/reels/${c.crudo}`, { etiqueta: '  Béccar   ❤️ ' })).status, 200, 'etiqueta del crudo');
       eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}?crudo=${c.crudo}`)).j?.marca, { acento: '#C6E85A', largo_max_s: 60, etiqueta: 'Béccar ❤️' }, 'al editor le llega la marca con la etiqueta');
       eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.marca?.etiqueta, undefined, 'sin crudo, sin etiqueta');
+      // tipo de público: sin estilo a mano arranca con el del tipo; el editor recibe lo aprendido de cada público
+      const pt = (await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'Mayores', tipo: 'mayores' }, { nombre: 'Jóvenes', tipo: 'jovenes', estilo: { ritmo: ['normal'] } }] })).j.publicos;
+      eq([pt[0].estilo.subtitulos, pt[1].estilo], [['grande', 'frase'], { ritmo: ['normal'] }], 'estilo del tipo, salvo que se toque a mano');
+      eq(Object.keys((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.por_publico || {}), ['mayores', 'jovenes'], 'lo aprendido por público');
     }],
     [G('editor'), 'POST /api/editor/edicion con token crea el reel listo con source_id, clip_id y review pendiente', async () => {
       const b = { crudo_id: c.crudo, clip_id: 'clip-abc', moment: { inicio_s: 1, fin_s: 9 }, recipe: { id: 'rapido' }, review: 'aprobado', edicion_id: "0a1b2c3d-0000-4000-8000-000000000501", caption: 'Un corte', hashtags: 'club, deporte', file_url: `${sb.editor.base}/video.mp4`, cover_url: `${sb.editor.base}/portada.jpg`, duration: 8, expires_at: '2026-12-01 12:00' };

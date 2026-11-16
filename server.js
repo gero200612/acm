@@ -132,6 +132,8 @@ CREATE TABLE IF NOT EXISTS clip_reviews (
   id INTEGER PRIMARY KEY, clip_id TEXT NOT NULL, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, decision TEXT NOT NULL,
   rechazar_ids TEXT DEFAULT '[]', comentario TEXT DEFAULT '', at TEXT DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS clip_reviews_project ON clip_reviews(project_id, id);`);
+// lo aprendido queda anotado con el público de la edición (cada público aprende por separado)
+if (!cols('learnings').includes('publico')) db.exec("ALTER TABLE learnings ADD COLUMN publico TEXT DEFAULT ''");
 initTrace(db);
 initKnowledge(db);
 initAlerts(db);
@@ -252,6 +254,8 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
   const w = winningVariables(db, pid);
   // pedidos: comentarios por segundo y motivos de rechazo (para no repetir el error); referencias: reels de otros que el equipo marcó como inspiración
   res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid), publicos: publicosDe(pid),
+    // lo aprendido de cada público por separado (sus aprobaciones y comparaciones): el editor arma las versiones de ese público con esto
+    por_publico: Object.fromEntries(publicosDe(pid).map((x) => [x.clave, winningVariables(db, pid, { publico: x.clave })])),
     // la marca del proyecto y, si el editor pregunta por un crudo, su etiqueta (el barrio)
     marca: { ...marcaDe(pid), ...(() => { const e = Number(req.query.crudo) > 0 ? get("SELECT etiqueta FROM reels WHERE id = ? AND project_id = ? AND kind = 'crudo'", Number(req.query.crudo), pid)?.etiqueta : ''; return e ? { etiqueta: e } : {}; })() } });
 });
@@ -408,14 +412,24 @@ const etiquetaDe = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 3
 const marcaDe = (pid) => { try { return JSON.parse(get('SELECT marca FROM projects WHERE id = ?', pid)?.marca || '{}'); } catch { return {}; } };
 // opciones de edición del editor (editor/recetas.js OPCIONES): un público puede quedarse con algunas
 const OPCIONES_EDICION = { gancho: ['directo', 'pregunta', 'adelanto'], subtitulos: ['karaoke', 'placa', 'minimo', 'frase', 'grande'], musica: ['energico', 'calido', 'sin'], ritmo: ['rapido', 'normal', 'lento'], largo: ['completo', 'medio', 'corto'] };
-// públicos del proyecto: [{clave, nombre, descripcion, estilo}] (hasta 6). La clave sale del nombre.
+// Estilo inicial por tipo de público (investigación del 16/11/2026: guías de edición por edad y el estudio de Bertelsmann sobre
+// video político corto). La evidencia es floja: es solo el arranque; después mandan las aprobaciones de cada público.
+//   jóvenes: cortes rápidos, corto, palabra por palabra, música con energía, arranque que pega en el primer segundo; producción limpia, lenguaje simple.
+//   adultos: ritmo medio y estable, largo medio, frase o grande.
+//   mayores: más pausado, largo medio o completo, subtítulos grandes y de alto contraste sin animar, música baja o sin, arranque directo.
+const ESTILO_POR_TIPO = {
+  jovenes: { ritmo: ['rapido'], largo: ['corto', 'medio'], subtitulos: ['karaoke', 'grande'], musica: ['energico'], gancho: ['pregunta', 'directo'] },
+  adultos: { ritmo: ['normal', 'rapido'], largo: ['medio'], subtitulos: ['frase', 'grande'], musica: ['calido', 'energico'], gancho: ['directo', 'adelanto'] },
+  mayores: { ritmo: ['normal', 'lento'], largo: ['medio', 'completo'], subtitulos: ['grande', 'frase'], musica: ['calido', 'sin'], gancho: ['directo'] },
+};
+// públicos del proyecto: [{clave, nombre, descripcion, tipo, estilo}] (hasta 6). La clave sale del nombre; sin estilo a mano, el del tipo.
 const claveDe = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
 function limpiarPublicos(v) {
   let l = v; if (typeof l === 'string') { try { l = JSON.parse(l); } catch { return null; } }
   if (!Array.isArray(l) || l.length > 6) return null;
   // estilo: por dimensión de la edición, qué opciones usa este público (las mismas del editor; vacío = todas)
   const estiloDe = (e) => { const o = {}; for (const [d, ops] of Object.entries(OPCIONES_EDICION)) { const v = Array.isArray(e?.[d]) ? [...new Set(e[d].filter((x) => ops.includes(x)))] : []; if (v.length) o[d] = v; } return o; };
-  const out = l.map((x) => ({ nombre: String(x?.nombre || '').trim().slice(0, 40), descripcion: String(x?.descripcion || '').trim().slice(0, 400), estilo: estiloDe(x?.estilo) })).filter((x) => x.nombre).map((x) => ({ clave: claveDe(x.nombre), ...x }));
+  const out = l.map((x) => { const tipo = ESTILO_POR_TIPO[x?.tipo] ? x.tipo : ''; const manual = estiloDe(x?.estilo); return { nombre: String(x?.nombre || '').trim().slice(0, 40), descripcion: String(x?.descripcion || '').trim().slice(0, 400), tipo, estilo: Object.keys(manual).length ? manual : (tipo ? ESTILO_POR_TIPO[tipo] : {}) }; }).filter((x) => x.nombre).map((x) => ({ clave: claveDe(x.nombre), ...x }));
   return new Set(out.map((x) => x.clave)).size === out.length && out.every((x) => x.clave) ? out : null;
 }
 const publicosDe = (pid) => { try { return JSON.parse(get('SELECT publicos FROM projects WHERE id = ?', pid)?.publicos || '[]'); } catch { return []; } };
@@ -1319,7 +1333,7 @@ function reviewClip(clipId, body, { onlyProject = null, onlyPending = false, ori
   for (const id of rejected) run("UPDATE posts SET status = 'bloqueado', note = ? WHERE reel_id = ? AND status = 'programado'", why, id);
   run('INSERT INTO clip_reviews (clip_id, project_id, decision, rechazar_ids, comentario, reviewer) VALUES (?, ?, ?, ?, ?, ?)', clipId, projectId, decision, JSON.stringify([...rejected]), who ? `${note}${note ? ' ' : ''}(por link: ${who})`.trim() : note, reviewer || (who ? `link: ${who}` : ''));
   for (const { r, wins } of affected) for (const [variable, value] of Object.entries(recipeVars(parseJson(r.recipe))))
-    run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, NULL, ?, 1, ?)", projectId, variable, value, wins, origin);
+    run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin, publico) VALUES (?, ?, ?, NULL, ?, 1, ?, ?)", projectId, variable, value, wins, origin, r.publico || '');
   if (affected.some((x) => x.wins)) replanificar(projectId);
   const mode = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
   const next = reviewMode(mode, all('SELECT decision FROM clip_reviews WHERE id IN (SELECT max(id) FROM clip_reviews WHERE project_id = ? GROUP BY clip_id) ORDER BY id DESC LIMIT 20', projectId).map((x) => x.decision));

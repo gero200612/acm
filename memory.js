@@ -33,8 +33,16 @@ export function recipeVars(recipe) {
 const weightOf = (origin) => (origin === 'opinion_dueno' || origin === 'opinion_dirigente' ? OWNER_WEIGHT : 1);
 
 // Ganadora = variable (o, por red, horario) con trials >= 5 y la mayor tasa de victorias. Las opiniones del dueño pesan 3×.
-export function winningVariables(db, projectId) {
-  const rows = db.prepare('SELECT variable, value, network, wins, trials, origin FROM learnings WHERE project_id = ?').all(projectId);
+// ¿la tabla tiene la columna? (las bases viejas y las de prueba pueden no tenerla)
+const tieneCol = (db, t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c);
+
+// Las variables ganadoras del proyecto; con `publico`, solo lo aprendido de las ediciones de ese público.
+export function winningVariables(db, projectId, { publico } = {}) {
+  const porPublico = publico && tieneCol(db, 'learnings', 'publico');
+  if (publico && !porPublico) return {};
+  const rows = porPublico
+    ? db.prepare('SELECT variable, value, network, wins, trials, origin FROM learnings WHERE project_id = ? AND publico = ?').all(projectId, publico)
+    : db.prepare('SELECT variable, value, network, wins, trials, origin FROM learnings WHERE project_id = ?').all(projectId);
   const tally = new Map(); // variable|network -> value -> {w, n}
   for (const r of rows) {
     const k = r.variable === 'horario' ? `horario|${r.network || ''}` : r.variable;
@@ -142,7 +150,12 @@ export async function compareSiblings(clipId, deps = {}) {
     const ins = db.prepare('INSERT OR IGNORE INTO comparisons (project_id, clip_id, winner_reel_id, winner_recipe, diff, scores, hypothesis) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(projectId, clipId, winner.reel_id, JSON.stringify(winner.recipe || {}), diff, JSON.stringify(eds.map((e) => ({ reel_id: e.reel_id, score: Math.round(e.score * 10000) / 10000 }))), hypothesis.slice(0, 2000));
     if (ins.changes) {
-      const add = db.prepare("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, ?, ?, 1, 'comparacion')");
+      // lo aprendido queda anotado con el público del recorte (las hermanas comparten fragmento, así que comparten público)
+      const conPub = tieneCol(db, 'learnings', 'publico') && tieneCol(db, 'reels', 'publico');
+      const pub = conPub ? (db.prepare('SELECT publico FROM reels WHERE clip_id = ? AND project_id = ? LIMIT 1').get(clipId, projectId)?.publico || '') : '';
+      const add = conPub
+        ? (() => { const st = db.prepare("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin, publico) VALUES (?, ?, ?, ?, ?, 1, 'comparacion', ?)"); return { run: (...a) => st.run(...a, pub) }; })()
+        : db.prepare("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, ?, ?, 1, 'comparacion')");
       for (const e of eds) {
         const w = e === winner ? 1 : 0;
         for (const [variable, value] of Object.entries(e.vars)) add.run(projectId, variable, value, null, w);

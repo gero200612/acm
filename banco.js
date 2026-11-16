@@ -194,6 +194,16 @@ function cases(video, sim) {
       const h = memFixture(); h.clip('c3', 1, 30, [1, 2, 3]); h.d.prepare('DELETE FROM posts WHERE reel_id IN (31, 32)').run();
       eq((await compareSiblings('c3', { db: h.d, now: h.now, hypothesize: hypo })).skipped, 'menos de 2 hermanas publicadas', 'con 1 no compara');
     }],
+    ['Memoria', 'Cada público aprende por separado: con el público solo cuenta lo suyo; sin la columna, no hay nada por público', async () => {
+      const d = new DatabaseSync(':memory:');
+      d.exec("CREATE TABLE learnings (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, variable TEXT NOT NULL, value TEXT NOT NULL, network TEXT, wins REAL, trials REAL, origin TEXT DEFAULT 'comparacion', publico TEXT DEFAULT '')");
+      const L = (variable, value, wins, publico) => d.prepare("INSERT INTO learnings (project_id, variable, value, wins, trials, origin, publico) VALUES (1, ?, ?, ?, 1, 'comparacion', ?)").run(variable, value, wins, publico);
+      for (let i = 0; i < 5; i++) { L('ritmo', 'rapido', 1, 'jovenes'); L('ritmo', 'lento', 1, 'mayores'); }
+      eq([winningVariables(d, 1, { publico: 'jovenes' }).ritmo, winningVariables(d, 1, { publico: 'mayores' }).ritmo], ['rapido', 'lento'], 'cada uno lo suyo');
+      eq(winningVariables(d, 1, { publico: 'adultos' }), {}, 'un público sin datos');
+      const v = new DatabaseSync(':memory:'); v.exec('CREATE TABLE learnings (id INTEGER PRIMARY KEY, project_id INTEGER, variable TEXT, value TEXT, network TEXT, wins REAL, trials REAL, origin TEXT)');
+      eq(winningVariables(v, 1, { publico: 'jovenes' }), {}, 'base vieja');
+    }],
     ['Memoria', 'Un 👎 de Gero cuenta 3×; winningVariables no devuelve nada con menos de 5 intentos, elige la mayor tasa y no mezcla proyectos', async () => {
       const f = memFixture(); const d = f.d;
       const L = (p, variable, value, wins, trials, origin, network = null) => d.prepare('INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, ?, ?, ?, ?)').run(p, variable, value, network, wins, trials, origin);

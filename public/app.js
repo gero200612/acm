@@ -1420,8 +1420,15 @@ function publicosCard(p) {
 }
 // opciones de edición (las mismas del editor): cada público marca las que usa; sin marcar = todas
 const ESTILO = { ritmo: ['Ritmo', { rapido: 'Rápido', normal: 'Normal', lento: 'Lento' }], largo: ['Largo', { corto: 'Corto', medio: 'Medio', completo: 'Completo' }], subtitulos: ['Subtítulos', { karaoke: 'Palabra por palabra', grande: 'Grandes', frase: 'Frase', placa: 'Con placa', minimo: 'Mínimos' }], musica: ['Música', { energico: 'Enérgica', calido: 'Cálida', sin: 'Sin música' }], gancho: ['Arranque', { directo: 'Directo', pregunta: 'Pregunta', adelanto: 'Adelanto' }] };
-const pubRow = (x = {}) => `<div class="pub-row"><input class="input" data-pub="nombre" maxlength="40" placeholder="Nombre (ej.: Mayores)" value="${esc(x.nombre || '')}"><textarea class="input" data-pub="descripcion" rows="2" maxlength="400" placeholder="A quién le habla, tono y qué fragmentos le sirven">${esc(x.descripcion || '')}</textarea><button type="button" class="icon-btn danger" data-act="pub-del" title="Quitar">${icon('trash', 15)}</button>
-  <details class="pub-estilo"${Object.keys(x.estilo || {}).length ? ' open' : ''}><summary>Estilo de edición <span class="small muted">(sin marcar = el editor prueba todo)</span></summary>${Object.entries(ESTILO).map(([d, [l, ops]]) => `<div class="pub-dim" data-dim="${d}"><span>${l}</span>${Object.entries(ops).map(([k, n]) => `<label><input type="checkbox" value="${k}" ${(x.estilo?.[d] || []).includes(k) ? 'checked' : ''}> ${n}</label>`).join('')}</div>`).join('')}</details></div>`;
+// el estilo con el que arranca cada tipo de público (el mismo del servidor); después lo ajustan las aprobaciones de ese público
+const ESTILO_POR_TIPO = {
+  jovenes: { ritmo: ['rapido'], largo: ['corto', 'medio'], subtitulos: ['karaoke', 'grande'], musica: ['energico'], gancho: ['pregunta', 'directo'] },
+  adultos: { ritmo: ['normal', 'rapido'], largo: ['medio'], subtitulos: ['frase', 'grande'], musica: ['calido', 'energico'], gancho: ['directo', 'adelanto'] },
+  mayores: { ritmo: ['normal', 'lento'], largo: ['medio', 'completo'], subtitulos: ['grande', 'frase'], musica: ['calido', 'sin'], gancho: ['directo'] },
+};
+const TIPOS = [['', 'Elegir a mano'], ['jovenes', 'Jóvenes (18 a 34)'], ['adultos', 'Adultos (35 a 54)'], ['mayores', 'Mayores (55 o más)']];
+const pubRow = (x = {}) => `<div class="pub-row"><input class="input" data-pub="nombre" maxlength="40" placeholder="Nombre (ej.: Mayores)" value="${esc(x.nombre || '')}"><select class="input" data-act="pub-tipo" data-pub="tipo" aria-label="Tipo de público">${TIPOS.map(([k, l]) => `<option value="${k}" ${(x.tipo || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select><textarea class="input" data-pub="descripcion" rows="2" maxlength="400" placeholder="A quién le habla, tono y qué fragmentos le sirven">${esc(x.descripcion || '')}</textarea><button type="button" class="icon-btn danger" data-act="pub-del" title="Quitar">${icon('trash', 15)}</button>
+  <details class="pub-estilo"${!x.tipo && Object.keys(x.estilo || {}).length ? ' open' : ''}><summary>Estilo de edición <span class="small muted">(arranca con el del tipo; las aprobaciones de este público eligen lo que más funciona dentro de esto)</span></summary>${Object.entries(ESTILO).map(([d, [l, ops]]) => `<div class="pub-dim" data-dim="${d}"><span>${l}</span>${Object.entries(ops).map(([k, n]) => `<label><input type="checkbox" value="${k}" ${(x.estilo?.[d] || []).includes(k) ? 'checked' : ''}> ${n}</label>`).join('')}</div>`).join('')}</details></div>`;
 const pubName = (k) => state.project?.publicos?.find((x) => x.clave === k)?.nombre || k;
 function projectForm(p = {}) {
   return `<form class="form" id="project-form">
@@ -1934,7 +1941,7 @@ document.addEventListener('click', async (e) => {
       case 'pub-add': if ($$('#pub-list .pub-row').length >= 6) { toast('Hasta 6 públicos', true); break; } $('#pub-list').insertAdjacentHTML('beforeend', pubRow()); break;
       case 'pub-del': el.closest('.pub-row').remove(); break;
       case 'pub-save': {
-        const publicos = $$('#pub-list .pub-row').map((r) => ({ nombre: $('[data-pub=nombre]', r).value.trim(), descripcion: $('[data-pub=descripcion]', r).value.trim(), estilo: Object.fromEntries($$('.pub-dim', r).map((g) => [g.dataset.dim, $$('input:checked', g).map((i) => i.value)])) })).filter((x) => x.nombre);
+        const publicos = $$('#pub-list .pub-row').map((r) => ({ nombre: $('[data-pub=nombre]', r).value.trim(), descripcion: $('[data-pub=descripcion]', r).value.trim(), tipo: $('[data-pub=tipo]', r).value, estilo: Object.fromEntries($$('.pub-dim', r).map((g) => [g.dataset.dim, $$('input:checked', g).map((i) => i.value)])) })).filter((x) => x.nombre);
         await api(`/api/projects/${state.project.id}`, { method: 'PUT', body: { publicos } }); toast('Públicos guardados'); render(); break; }
       case 'user-edit': userDialog(state.users.find((u) => u.id === Number(el.closest('[data-uid]').dataset.uid))); break;
       case 'user-del': { const u = state.users.find((x) => x.id === Number(el.closest('[data-uid]').dataset.uid)); if (await confirmBox('Borrar usuario', `${esc(u.name)} ya no va a poder entrar a ACM.`)) { await api(`/api/users/${u.id}`, { method: 'DELETE' }); toast('Usuario borrado'); render(); } break; }
@@ -2052,6 +2059,7 @@ document.addEventListener('change', async (e) => {
   const id = Number(el.closest('[data-id]')?.dataset.id);
   try {
     if (el.dataset.act === 'post-status') { await api(`/api/posts/${id}`, { method: 'PUT', body: { status: el.value } }); const x = state.posts.find((y) => y.id === id); if (x) x.status = el.value; toast('Publicación actualizada'); if (!el.closest('dialog')) render(); }
+    if (el.dataset.act === 'pub-tipo') { const e = ESTILO_POR_TIPO[el.value]; if (e) $$('.pub-dim', el.closest('.pub-row')).forEach((g) => $$('input', g).forEach((i) => { i.checked = (e[g.dataset.dim] || []).includes(i.value); })); return; }
     if (el.dataset.act === 'acc-pub') { await api(`/api/accounts/${id}`, { method: 'PUT', body: { publico: el.value } }); const x = state.accounts.find((y) => y.id === id); if (x) x.publico = el.value; toast(el.value ? `Ahora le habla a ${pubName(el.value)}` : 'Recibe de cualquier público'); }
     if (el.dataset.act === 'reel-title' && el.value.trim()) { await api(`/api/reels/${id}`, { method: 'PUT', body: { title: el.value.trim() } }); toast('Título guardado'); }
   } catch (err) { fail(err); }
