@@ -22,6 +22,7 @@ import { r2Ready, putUrl, getUrl, head as r2Head, remove as r2Remove, download a
 import { postBlocked, pautaNumbers, PROJECT_KINDS, defaultAdsNetworks, scheduleBlocked, withinWindow, NETWORK_CAPS, reviewMode, bestSlots } from './rules.js';
 import { FIELDS, makeVault, publicFields, mergeFields, testConnection } from './connections.js';
 import { makeState, readState, authUrl, exchange, oauthReady, redirectUri, PUBLIC_URL } from './oauth.js';
+import { metaPublic, authorizePage, authorizeAds, MetaChoice } from './meta-connect.js';
 import { initAlerts, addAlert } from './alerts.js';
 import { flushAlerts, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR, weeklyReport } from './notify.js';
 import { initPlanner, planProject, expiredBlocked, localExpiry, bestSlotsOf } from './planner.js';
@@ -648,7 +649,26 @@ app.post('/api/accounts/:id/test', async (req, res) => {
 });
 
 // conectar con un clic (TikTok y YouTube): qué redes tienen app cargada, y el link a la pantalla de autorizar
-app.get('/api/oauth', (req, res) => res.json({ tiktok: oauthReady('tiktok'), youtube: oauthReady('youtube'), redirect: { tiktok: redirectUri('tiktok'), youtube: redirectUri('youtube') } }));
+app.get('/api/oauth', (req, res) => res.json({ tiktok: oauthReady('tiktok'), youtube: oauthReady('youtube'), meta: metaPublic(), redirect: { tiktok: redirectUri('tiktok'), youtube: redirectUri('youtube') } }));
+// «Conectar con Facebook» (Instagram y Facebook): la pantalla trae el código del diálogo de Meta; si autorizó varias páginas, elige y vuelve
+const choiceOut = (res, e) => res.status(409).json({ error: e.message, choose: e.kind, options: e.options });
+app.post('/api/accounts/:id/meta', async (req, res) => {
+  const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
+  if (!a) return res.status(404).json({ error: 'No existe' });
+  if (!['instagram', 'facebook'].includes(a.network)) return res.status(400).json({ error: 'Esta cuenta no es de Meta.' });
+  let creds;
+  try { creds = await traced({ kind: 'conexion', title: `Conectar ${a.network === 'instagram' ? 'Instagram' : 'Facebook'} con Facebook`, project_id: a.project_id, account_id: a.id, network: a.network },
+    async () => { const c = await authorizePage(a.network, req.body?.code, req.body?.pageId); return { ...c, summary: `Página ${c.pageId}` }; }); }
+  catch (e) {
+    if (e instanceof MetaChoice) return choiceOut(res, e);
+    run("UPDATE accounts SET last_error = ?, status = CASE WHEN status = 'pausada' THEN 'pausada' ELSE 'error' END WHERE id = ?", e.message, a.id);
+    return res.status(400).json({ error: e.message });
+  }
+  const { summary, ...clean } = creds;
+  const err = await testAccount(a, clean);
+  if (err) return res.status(400).json({ error: err });
+  res.json(accountOut(get('SELECT * FROM accounts WHERE id = ?', a.id)));
+});
 app.post('/api/accounts/:id/oauth', (req, res) => {
   const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
   if (!a) return res.status(404).json({ error: 'No existe' });
@@ -1058,6 +1078,18 @@ app.post('/api/projects/:id/ads/unblock', (req, res) => {
   delete b[net];
   run('UPDATE projects SET ads_blocked = ? WHERE id = ?', JSON.stringify(b), p.id);
   sendProject(res, p.id);
+});
+// «Conectar cuenta publicitaria» con Facebook: guarda la cuenta y el token y la prueba enseguida
+app.post('/api/projects/:id/ads/meta', async (req, res) => {
+  const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });
+  let got;
+  try { got = await traced({ kind: 'meta_ads', title: 'Conectar cuenta publicitaria con Facebook', project_id: p.id, network: 'meta' },
+    async () => { const x = await authorizeAds(req.body?.code, req.body?.accountId); return { ...x, summary: `${x.name} (${x.currency})` }; }); }
+  catch (e) { if (e instanceof MetaChoice) return choiceOut(res, e); return adsFail(res, p.id, e); }
+  const c = { ...vault.open(p.ads_creds), adAccountId: got.adAccountId, accessToken: got.accessToken, via: 'oauth' };
+  run('UPDATE projects SET ads_creds = ? WHERE id = ?', vault.seal(c), p.id);
+  try { const r = await testAds(c); run("UPDATE projects SET ads_name = ?, ads_currency = ?, ads_error = '' WHERE id = ?", r.name, r.currency, p.id); sendProject(res, p.id); }
+  catch (e) { adsFail(res, p.id, e); }
 });
 app.post('/api/projects/:id/ads/test', async (req, res) => {
   const p = projectRow(req.params.id); if (!p) return res.status(404).json({ error: 'No existe' });

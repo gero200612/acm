@@ -6,6 +6,7 @@ import { startSimulator } from './simulator.js';
 import { traced, step, mask } from './trace.js';
 import { publicUrl } from './oauth.js';
 import { testConnection } from './connections.js';
+import { authorizePage, authorizeAds, MetaChoice, metaPublic } from './meta-connect.js';
 import { publish } from './publisher.js';
 import { uploadAudience, createCampaign, testAds } from './ads.js';
 import ExcelJS from 'exceljs';
@@ -250,6 +251,48 @@ function cases(video, sim) {
     ['Conexiones', 'Instagram: trae el usuario y los seguidores', async () => { const r = await testConnection('instagram', { pageId: 'PAGE1', pageAccessToken: IG.pageAccessToken }); eq(r.connectedAs, '@mock.ig', 'usuario'); eq(r.extra.instagramBusinessId, 'IG1', 'ID de Instagram'); }],
     ['Conexiones', 'Facebook: trae el nombre de la Página', async () => { const r = await testConnection('facebook', { pageId: 'PAGE1', pageAccessToken: IG.pageAccessToken }); eq(r.connectedAs, 'Página Mock', 'nombre'); }],
     ['Conexiones', 'TikTok: renueva solo el token vencido', async () => { const r = await testConnection('tiktok', { accessToken: 'TT_VIEJO', refreshToken: 'R', clientKey: 'k', clientSecret: 's' }); eq(r.connectedAs, '@mock.tt', 'usuario'); eq(r.extra.accessToken, 'TT_OK', 'token nuevo'); }],
+    ['Conexiones', 'Conectar con Facebook: Instagram trae la página, su token y el Instagram, y la conexión anda', async () => {
+      const k = process.env.ACM_SINCRO_WA_KEY; process.env.ACM_SINCRO_WA_KEY = 'WA_KEY';
+      try {
+        const c = await authorizePage('instagram', 'FBCODE-1234567');
+        eq([c.pageId, c.instagramBusinessId, c.via], ['PAGE1', 'IG1', 'oauth'], 'datos');
+        eq((await testConnection('instagram', c)).connectedAs, '@mock.ig', 'conexión');
+        const f = await authorizePage('facebook', 'FBCODE-1234567');
+        eq([f.pageId, 'instagramBusinessId' in f], ['PAGE1', false], 'Facebook sin Instagram en los datos');
+      } finally { process.env.ACM_SINCRO_WA_KEY = k ?? ''; if (k === undefined) delete process.env.ACM_SINCRO_WA_KEY; }
+    }],
+    ['Conexiones', 'Conectar con Facebook: con varias páginas pide elegir y con la elegida conecta; sin Instagram avisa', async () => {
+      const k = process.env.ACM_SINCRO_WA_KEY; process.env.ACM_SINCRO_WA_KEY = 'WA_KEY';
+      try {
+        let ch = null; try { await authorizePage('instagram', 'FBCODE-VARIAS'); } catch (e) { ch = e; }
+        yes(ch instanceof MetaChoice && ch.kind === 'pagina', 'tenía que pedir elegir página');
+        eq(ch.options.map((o) => o.id), ['PAGE1', 'PAGE2'], 'opciones');
+        eq((await authorizePage('instagram', 'FBCODE-VARIAS', 'PAGE1')).pageId, 'PAGE1', 'elegida');
+        let e2 = null; try { await authorizePage('instagram', 'FBCODE-SINIG'); } catch (e) { e2 = e; }
+        yes(e2 && /no tiene una cuenta de Instagram/.test(e2.message), 'sin Instagram: ' + e2?.message);
+        let e3 = null; try { await authorizePage('instagram', 'MALO-12345678'); } catch (e) { e3 = e; }
+        yes(e3 && /rechazó el código/.test(e3.message), 'código malo: ' + e3?.message);
+      } finally { if (k === undefined) delete process.env.ACM_SINCRO_WA_KEY; else process.env.ACM_SINCRO_WA_KEY = k; }
+    }],
+    ['Conexiones', 'Conectar cuenta publicitaria con Facebook: trae la cuenta y el token; con varias pide elegir', async () => {
+      const k = process.env.ACM_SINCRO_WA_KEY; process.env.ACM_SINCRO_WA_KEY = 'WA_KEY';
+      try {
+        const a = await authorizeAds('FBCODE-1234567');
+        eq([a.adAccountId, a.accessToken], ['999', 'EAAADSMOCKTOKEN'], 'cuenta');
+        eq((await testAds(a)).name, 'Cuenta Mock', 'la cuenta anda');
+        let ch = null; try { await authorizeAds('FBCODE-VARIAS'); } catch (e) { ch = e; }
+        yes(ch instanceof MetaChoice && ch.kind === 'cuenta' && ch.options.length === 2, 'tenía que pedir elegir cuenta');
+        eq((await authorizeAds('FBCODE-VARIAS', '998')).adAccountId, '998', 'elegida');
+      } finally { if (k === undefined) delete process.env.ACM_SINCRO_WA_KEY; else process.env.ACM_SINCRO_WA_KEY = k; }
+    }],
+    ['Conexiones', 'Conectar con Facebook: sin la app cargada el botón no aparece y el pedido explica que se conecta a mano', async () => {
+      const k = process.env.ACM_SINCRO_WA_KEY; delete process.env.ACM_SINCRO_WA_KEY;
+      try {
+        eq(metaPublic().appId, '', 'sin clave no hay botón');
+        let e = null; try { await authorizePage('instagram', 'FBCODE-1234567'); } catch (x) { e = x; }
+        yes(e && /a mano/.test(e.message), 'mensaje: ' + e?.message);
+      } finally { if (k !== undefined) process.env.ACM_SINCRO_WA_KEY = k; }
+    }],
     ['Conexiones', 'YouTube: trae el canal', async () => { const r = await testConnection('youtube', { clientId: 'c', clientSecret: 's', refreshToken: 'r' }); eq(r.connectedAs, '@canalmock', 'canal'); }],
     ['Métricas', 'Cada red devuelve sus métricas', async () => {
       const ig = await readMetrics('instagram', IG, 'M1', { duration: 15 });

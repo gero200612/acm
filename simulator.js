@@ -56,6 +56,20 @@ export function startSimulator(port = 0) {
     if (p === '/graph/M1') return send(res, 200, { permalink: 'https://www.instagram.com/reel/M1/' });
     if (p === '/graph/PAGE1/video_reels') return params.upload_phase === 'start' ? send(res, 200, { video_id: 'V1', upload_url: `${B}/rup/fb/V1` }) : params.upload_phase === 'finish' && params.video_state === 'PUBLISHED' ? send(res, 200, { success: true }) : send(res, 400, { error: { message: 'fase' } });
     if (p === '/rup/fb/V1') return Number(req.headers.file_size) === body.length ? send(res, 200, { success: true }) : send(res, 400, { error: { message: 'tamaño' } });
+    // sincro-wa (canje de «Conectar con Facebook»): clave WA_KEY; FBCODE-VARIAS pide elegir, FBCODE-SINIG da una página sin Instagram
+    if (p === '/wa/autorizar-pagina' || p === '/wa/conectar-anuncios') {
+      if (req.headers.authorization !== 'Bearer WA_KEY') return send(res, 401, { error: 'sin_clave' });
+      const j = JSON.parse(body.toString() || '{}'); log.push(`wa ${p.slice(4)} ${j.pagina_id || j.cuenta_id || ''}`);
+      if (!/^FBCODE/.test(j.codigo || '')) return send(res, 502, { code: 'meta', mensaje: 'Meta rechazó el código.' });
+      if (p === '/wa/conectar-anuncios') {
+        if (j.codigo === 'FBCODE-VARIAS' && !j.cuenta_id) return send(res, 409, { code: 'elegir_cuenta', mensaje: 'Autorizaste más de una cuenta publicitaria: elegí cuál conectar.', cuentas: [{ id: 'act_999', nombre: 'Ads Mock', moneda: 'USD' }, { id: 'act_998', nombre: 'Otra', moneda: 'ARS' }] });
+        return send(res, 200, { token: 'EAAADSMOCKTOKEN', cuenta: { id: j.cuenta_id || 'act_999', nombre: 'Ads Mock', moneda: 'USD' }, pixel: null });
+      }
+      if (j.codigo === 'FBCODE-VARIAS' && !j.pagina_id) return send(res, 409, { code: 'elegir_pagina', mensaje: 'Autorizaste más de una página: elegí cuál conectar.', paginas: [{ id: 'PAGE1', nombre: 'Página Mock', instagram: 'mock.ig' }, { id: 'PAGE2', nombre: 'Otra', instagram: null }] });
+      if (j.pagina_id && !['PAGE1', 'PAGE2'].includes(j.pagina_id)) return send(res, 409, { code: 'pagina_ajena', mensaje: 'Esa página no está entre las que autorizaste.' });
+      if (j.codigo === 'FBCODE-SINIG') return send(res, 200, { pagina: { id: 'PAGE1', nombre: 'Página Mock' }, token_pagina: 'EAAPAGEMOCKTOKEN', instagram: null });
+      return send(res, 200, { pagina: { id: 'PAGE1', nombre: 'Página Mock' }, token_pagina: 'EAAPAGEMOCKTOKEN', instagram: { id: 'IG1', usuario: 'mock.ig' } });
+    }
     // TikTok
     if (p === '/tt/v2/user/info/') return ['Bearer TT_OK', 'Bearer TT_PUBLICA'].includes(req.headers.authorization) ? send(res, 200, { data: { user: { username: 'mock.tt', follower_count: 50 } }, ...ok }) : send(res, 401, { error: { code: 'access_token_invalid', message: 'vencido' } });
     if (p === '/tt/v2/oauth/token/') {
@@ -167,7 +181,7 @@ export function startSimulator(port = 0) {
     B = `http://127.0.0.1:${server.address().port}`;
     resolve({
       url: B, log, disapproved,
-      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, youtubeAnalytics: `${B}/ytan`, ytUpload: `${B}/ytup`, tiktokAds: `${B}/ttads`, googleAds: `${B}/gads`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, telegram: `${B}/telegram`, r2: B },
+      bases: { graph: `${B}/graph`, rupload: `${B}/rup`, tiktok: `${B}/tt`, googleOauth: `${B}/goauth`, youtube: `${B}/yt`, youtubeAnalytics: `${B}/ytan`, ytUpload: `${B}/ytup`, tiktokAds: `${B}/ttads`, googleAds: `${B}/gads`, tiktokAuth: `${B}/ttauth`, googleAuth: `${B}/gauth`, anthropic: `${B}/anthropic`, telegram: `${B}/telegram`, sincroWa: `${B}/wa`, r2: B },
       close: () => new Promise((r) => server.close(r)),
     });
   }));

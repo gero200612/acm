@@ -63,6 +63,8 @@ export const BASES = {
   youtubeAnalytics: process.env.ACM_YT_ANALYTICS_URL || 'https://youtubeanalytics.googleapis.com',
   ytUpload: process.env.ACM_YT_UPLOAD_URL || 'https://www.googleapis.com',
   telegram: process.env.ACM_TELEGRAM_URL || 'https://api.telegram.org',
+  // sincro-wa: canjea los códigos de «Conectar con Facebook» (tiene el secreto de la app de Meta)
+  sincroWa: process.env.ACM_SINCRO_WA_URL || '',
   // pantallas donde la persona autoriza (conectar con un clic)
   tiktokAuth: process.env.ACM_TIKTOK_AUTH_URL || 'https://www.tiktok.com',
   googleAuth: process.env.ACM_GOOGLE_AUTH_URL || 'https://accounts.google.com',

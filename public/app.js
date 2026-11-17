@@ -71,7 +71,7 @@ async function api(url, opt = {}) {
   const r = await fetch(url, o);
   if (r.status === 401 && !url.endsWith('/login')) { state.authed = false; render(); throw new Error('Sin sesión'); }
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || 'Algo falló');
+  if (!r.ok) throw Object.assign(new Error(data.error || 'Algo falló'), { data, status: r.status });
   return data;
 }
 function toast(msg, err, action) {
@@ -99,6 +99,8 @@ async function loadProject(id) {
   if (isSombra()) { const [p, r] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/reels`)]); state.project = p; state.reels = r; state.accounts = []; state.posts = []; return; }
   const [p, a, r, s] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/accounts`), api(`/api/projects/${id}/reels`), api(`/api/projects/${id}/posts`)]);
   state.project = p; state.accounts = a; state.reels = r; state.posts = s;
+  // qué redes se conectan con un clic (el botón de Facebook también está en Meta Ads)
+  if (state.oauth === undefined) state.oauth = await api('/api/oauth').catch(() => null);
 }
 
 function route() {
@@ -1042,6 +1044,7 @@ function adsCard(p) {
     ${p.ads_error ? `<p class="banner err">${esc(p.ads_error)}</p>` : ''}
     <div class="ads-grid">
       ${step(1, ok, 'Conectá la cuenta publicitaria', `
+        ${state.oauth?.meta?.ads ? `<div class="row" style="margin:6px 0 10px"><button class="btn primary sm" data-act="ads-meta">${netBadge('facebook')} ${ok ? 'Cambiar con Facebook' : 'Conectar con Facebook'}</button><span class="small muted">Elegís la cuenta en Facebook y queda conectada. O cargala a mano:</span></div>` : ''}
         <p class="small muted">En Configuración del negocio, Cuentas publicitarias, copiá el ID (act_…). Asignala al usuario del sistema y generá un token con <code>ads_management</code> y <code>ads_read</code>.</p>
         <div class="two"><label class="field">ID de la cuenta publicitaria<input class="input" data-ads="adAccountId" value="${esc(a.adAccountId)}" placeholder="act_1234567890"></label>
         <label class="field">Token<input class="input masked" data-ads="accessToken" autocomplete="off" placeholder="${a.token ? 'Guardado · pegá uno nuevo para cambiarlo' : 'EAA…'}"></label></div>
@@ -1592,6 +1595,45 @@ let tabsQ = false;
 new MutationObserver(() => { if (!tabsQ) { tabsQ = true; requestAnimationFrame(() => { tabsQ = false; tabsFit(); }); } }).observe(document.body, { childList: true, subtree: true });
 addEventListener('resize', () => tabsFit());
 document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.authed && !isSombra()) { e.preventDefault(); paletteOpen(); } });
+// «Conectar con Facebook»: Facebook Login for Business con el SDK de Meta (se carga recién al tocar el botón).
+// El diálogo devuelve un código; el servidor lo canjea por sincro-wa. Si se autorizaron varias páginas o cuentas, se elige y se repite.
+let fbLoading = null;
+function fbSdk(appId) {
+  return (fbLoading ??= new Promise((resolve, reject) => {
+    window.fbAsyncInit = () => { window.FB.init({ appId, autoLogAppEvents: false, xfbml: false, version: 'v23.0' }); resolve(window.FB); };
+    const s = document.createElement('script');
+    s.src = 'https://connect.facebook.net/es_LA/sdk.js'; s.async = true; s.defer = true; s.crossOrigin = 'anonymous';
+    s.onerror = () => { fbLoading = null; reject(new Error('No se pudo abrir Facebook. Revisá que el navegador no lo bloquee y probá de nuevo.')); };
+    document.body.append(s);
+  }));
+}
+async function fbCode(configId) {
+  const fb = await fbSdk(state.oauth.meta.appId);
+  return new Promise((resolve, reject) => fb.login((r) => (r?.authResponse?.code ? resolve(r.authResponse.code) : reject(Object.assign(new Error('Se cerró la ventana de Facebook sin conectar.'), { cancelled: true }))),
+    { config_id: configId, response_type: 'code', override_default_response_type: true }));
+}
+function chooseBox(title, text, options) {
+  return new Promise((res) => {
+    const d = openDialog(title, `<p class="muted">${esc(text)}</p><div class="stack" style="display:grid;gap:8px;margin-top:12px">${options.map((o, i) => `<button class="btn" data-pick="${i}" style="justify-content:flex-start">${esc(o.label)}${o.sub ? ` <span class="small muted">${esc(o.sub)}</span>` : ''}</button>`).join('')}</div>`, '<button class="btn" data-close>Cancelar</button>');
+    d.querySelectorAll('[data-pick]').forEach((b) => { b.onclick = () => { res(options[Number(b.dataset.pick)]); d.close(); }; });
+    d.addEventListener('close', () => res(null));
+  });
+}
+// abre Facebook, manda el código y, si hay que elegir, pregunta y vuelve a abrir (cada código sirve una sola vez)
+async function fbConnect(configId, url, pickKey) {
+  let pick;
+  for (let i = 0; i < 2; i++) {
+    const code = await fbCode(configId);
+    try { return await api(url, { method: 'POST', body: { code, ...(pick ? { [pickKey]: pick } : {}) } }); }
+    catch (e) {
+      if (e.status !== 409 || !e.data?.choose || pick) throw e;
+      const opts = e.data.options.map((o) => ({ id: o.id, label: o.nombre || o.id, sub: e.data.choose === 'pagina' ? (o.instagram ? '@' + o.instagram : 'sin Instagram') : [o.id, o.moneda].filter(Boolean).join(' · ') }));
+      const c = await chooseBox(e.data.choose === 'pagina' ? 'Elegí la página' : 'Elegí la cuenta publicitaria', e.data.error + ' Facebook se abre una vez más para confirmar.', opts);
+      if (!c) throw Object.assign(new Error('Conexión cancelada.'), { cancelled: true });
+      pick = c.id;
+    }
+  }
+}
 function confirmBox(title, text, okLabel = 'Borrar') {
   return new Promise((res) => {
     const d = openDialog(title, `<p class="muted">${text}</p>`, `<button class="btn" data-close>Cancelar</button><button class="btn danger" data-ok>${okLabel}</button>`);
@@ -1684,9 +1726,14 @@ function connectPanel(acc) {
   const fieldDone = (k) => (a.fields[k]?.set || a.fields[k]?.value || values[k]);
   const stepDone = (i) => steps[i].test ? a.status === 'conectada' : steps[i].fields ? steps[i].fields.filter((k) => k !== 'instagramBusinessId').every(fieldDone) : i < active || a.status === 'conectada';
   const dirty = () => Object.values(values).some((v) => v !== undefined);
-  // conectar con un clic: solo TikTok y YouTube, y solo si el servidor tiene la app cargada
-  const ONE = { tiktok: 'Conectar con TikTok', youtube: 'Conectar con Google' };
-  const quick = () => !ONE[a.network] || !state.oauth?.[a.network] ? '' : `<div class="cp-quick">
+  // conectar con un clic: TikTok y YouTube (la red vuelve a ACM) e Instagram y Facebook (diálogo de Meta), si el servidor tiene la app cargada
+  const ONE = { tiktok: 'Conectar con TikTok', youtube: 'Conectar con Google', instagram: 'Conectar con Facebook', facebook: 'Conectar con Facebook' };
+  const isMeta = ['instagram', 'facebook'].includes(a.network);
+  const ready = () => isMeta ? !!state.oauth?.meta?.pages : !!state.oauth?.[a.network];
+  const quick = () => !ONE[a.network] || !ready() ? '' : isMeta ? `<div class="cp-quick">
+    <div><b>${a.status === 'conectada' ? 'Volver a conectar' : 'La forma rápida'}</b><p class="small muted">Se abre Facebook, elegís la página${a.network === 'instagram' ? ' que tiene vinculado el Instagram' : ''} y queda conectada. No hace falta copiar nada.</p></div>
+    <button class="btn primary" data-cp="meta" ${busy ? 'disabled' : ''}>${netBadge('facebook')} ${busy === 'meta' ? 'Conectando…' : ONE[a.network]}</button></div>
+    <p class="small muted cp-or">o seguí los pasos para conectarla a mano</p>` : `<div class="cp-quick">
     <div><b>${a.status === 'conectada' ? 'Volver a conectar' : 'La forma rápida'}</b><p class="small muted">Te lleva a ${a.network === 'tiktok' ? 'TikTok' : 'Google'}, autorizás con la cuenta${a.network === 'youtube' ? ' dueña del canal' : ''} y volvés acá conectado. No hace falta copiar nada.</p></div>
     <button class="btn primary" data-cp="oauth" ${busy ? 'disabled' : ''}>${netBadge(a.network)} ${ONE[a.network]}</button></div>
     <p class="small muted cp-or">o seguí los pasos para conectarla a mano</p>`;
@@ -1739,6 +1786,11 @@ function connectPanel(acc) {
     if (act === 'show') { const k = b.dataset.k; shown.has(k) ? shown.delete(k) : shown.add(k); return draw(); }
     try {
       if (act === 'oauth') { busy = 'oauth'; draw(); const r = await api(`/api/accounts/${a.id}/oauth`, { method: 'POST' }); location.href = r.url; return; }
+      if (act === 'meta') {
+        busy = 'meta'; draw();
+        try { a = await fbConnect(state.oauth.meta.pages, `/api/accounts/${a.id}/meta`, 'pageId'); active = steps.length - 1; toast(`Conectada como ${a.connected_as}`); }
+        catch (err) { if (!err.cancelled) throw err; toast(err.message); }
+      }
       if (act === 'save') { busy = 'guardar'; draw(); a = await api(`/api/accounts/${a.id}/connection`, { method: 'PUT', body: payload() }); for (const k in values) delete values[k]; toast('Datos guardados'); }
       if (act === 'test') {
         busy = 'probar'; active = steps.length - 1; draw();
@@ -1978,6 +2030,11 @@ document.addEventListener('click', async (e) => {
       case 'kn-kind': K.kind = el.dataset.k; knLoad(); break;
       case 'kn-handle': K.handle = K.handle === el.dataset.h ? '' : el.dataset.h; K.kind = K.handle ? 'publicacion' : ''; knLoad(); break;
       case 'kn-del': if (await confirmBox('Borrar ficha', 'La ficha se borra de la investigación del proyecto.', 'Borrar')) { await api(`/api/knowledge/${el.dataset.id}`, { method: 'DELETE' }); knLoad(); } break;
+      case 'ads-meta': {
+        el.disabled = true;
+        try { await fbConnect(state.oauth.meta.ads, `/api/projects/${state.project.id}/ads/meta`, 'accountId'); toast('Cuenta publicitaria conectada'); }
+        catch (err) { if (!err.cancelled) fail(err); else toast(err.message); }
+        await loadProject(state.project.id); render(); break; }
       case 'ads-save': {
         const box = $('#ads-card'), body = {};
         $$('[data-ads]', box).forEach((i) => { const k = i.dataset.ads; if (i.type === 'checkbox') body[k] = i.checked; else if (i.value || k !== 'accessToken') body[k] = i.value; });
