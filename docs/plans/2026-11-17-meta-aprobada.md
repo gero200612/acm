@@ -15,4 +15,4 @@ Gero, 17/11/2026: la revisión de Meta (17 permisos, submission 1428735972133497
 - [x] Demo (demo.apps.punchi.dev): probar Conectar Facebook e Instagram y Conectar anuncios con el botón (antes daban #3 y #200) — 17/11 anda: «Página Sincro · @sincro_ar» y «Homer (act_980029277705534) · ARS»
 - [x] Efaysto: `Meta__PagesConfigId` de /root/env/efaysto-back.env → 1462375322666999 (Gero corre el comando en Contabo) y reconectar con el botón — 17/11: se sumó también Meta__AdsConfigId=1103102822587035 (faltaba); «Página Efaysto · @efaysto.oficial» y «Efaysto (act_489381437402565) · USD»
 - [ ] Efaysto: mensajes y comentarios en vivo (bandeja) y prender el interruptor de acciones en Meta
-- [ ] Limpieza: borrar el post de IG DfIbWoZDIbd y la campaña «Prueba revisión Meta» 120255658350160029
+- [ ] Limpieza: borrar el post de IG DfIbWoZDIbd (la API da #10: lo borra Gero desde el celu) — campaña «Prueba revisión Meta» 120255658350160029 BORRADA por API el 17/11
