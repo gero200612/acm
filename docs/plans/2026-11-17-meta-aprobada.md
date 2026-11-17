@@ -7,7 +7,7 @@ Gero, 17/11/2026: la revisión de Meta (17 permisos, submission 1428735972133497
 - [x] ACM: botón «Conectar con Facebook» en cuentas de Instagram/Facebook y en Meta Ads (SDK de JS + canje por sincro-wa, elegir página/cuenta) + banco (4 casos) + vps/meta.py
 - [x] Pushear multicodigo-back (despliega sincro-wa) y ACM (Gero da el ok) — 17/11, 6c1e4f4 y 16b4be3
 - [ ] Meta, app 1410095257330902: agregar https://acm.punchi.dev a «Dominios permitidos para el SDK de JavaScript» (Gero o Claude con el Chrome)
-- [ ] `ssh vps "python3 -" < vps/meta.py` (negocio ACM en sincro-wa + variables en Coolify + redespliegue)
+- [x] `ssh vps "python3 -" < vps/meta.py` — 17/11, negocio ACM = 4 en sincro-wa, variables cargadas, redespliegue a5uvtmn40bg19j4vnxmlnahf (negocio ACM en sincro-wa + variables en Coolify + redespliegue)
 - [ ] Probar en acm.punchi.dev con la página Sincro / @sincro_ar (proyecto «Demo para Google», id 2) y la cuenta publicitaria Homer
 
 ## Demo y Efaysto
