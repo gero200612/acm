@@ -9,7 +9,7 @@ Gero, 17/11/2026: la revisión de Meta (17 permisos, submission 1428735972133497
 - [x] Meta, app 1410095257330902: agregar https://acm.punchi.dev a «Dominios permitidos para el SDK de JavaScript» (Gero o Claude con el Chrome)
 - [x] `ssh vps "python3 -" < vps/meta.py` — 17/11, negocio ACM = 4 en sincro-wa, variables cargadas, redespliegue a5uvtmn40bg19j4vnxmlnahf (negocio ACM en sincro-wa + variables en Coolify + redespliegue)
 - [x] Probar en acm.punchi.dev con la página Sincro / @sincro_ar — 17/11 en «Demo para revisiones» (id 2): «Conectada como @sincro_ar · 231 seguidores»; cuenta de prueba borrada
-- [ ] Probar «Conectar con Facebook» de Meta Ads con la cuenta Homer (pisa la cuenta publicitaria del proyecto: elegir dónde)
+- [x] Probar «Conectar con Facebook» de Meta Ads con la cuenta Homer — 17/11 en un proyecto descartable (borrado): «Homer (ARS) act_980029277705534»
 
 ## Demo y Efaysto
 - [ ] Demo (demo.apps.punchi.dev): probar Conectar Facebook e Instagram y Conectar anuncios con el botón (antes daban #3 y #200)
