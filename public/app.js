@@ -634,9 +634,9 @@ function reelsView() {
       <div class="row" style="gap:6px">
         ${r.kind === 'crudo' ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${r.id}">Ver crudo</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length && !r.archived_at ? '' : 'disabled'}>Repartir</button>
         <button class="btn sm" data-act="reel-approve">${r.status === 'aprobado' ? 'A borrador' : 'Aprobar'}</button>`}
-        <span class="spacer"></span><button class="icon-btn danger" data-act="del-reel" title="Borrar">${icon('trash', 16)}</button>
       </div>
-    </div></article>`).join('')}</div>`
+    </div>
+    <button class="icon-btn danger reel-del" data-act="del-reel" title="Borrar reel" aria-label="Borrar reel">${icon('trash', 16)}</button></article>`).join('')}</div>`
     : `<div class="card empty rl-empty"><h2 class="h2">Todavía no hay reels</h2><p>Arrastrá los videos ya editados a la izquierda.</p></div>`;
   return `<div class="rl">${side}<div class="rl-main">${ALL.length ? filt : ''}${grid}</div></div>`;
 }

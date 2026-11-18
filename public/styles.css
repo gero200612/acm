@@ -162,7 +162,9 @@ table.list td.r, table.list th.r { text-align: right; }
 .drop b { color: var(--ink); }
 .reels { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
 .reel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; display: flex; flex-direction: column; }
-.reel video { width: 100%; aspect-ratio: 9 / 16; object-fit: contain; background: #000; display: block; }
+.reel { position: relative; }
+.reel video { width: 100%; aspect-ratio: 9 / 16; object-fit: contain; background: var(--line-2); display: block; }
+.reel-del { position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,.92); border-radius: 9px; box-shadow: 0 1px 4px rgba(0,0,0,.15); z-index: 2; }
 .reel .body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .reel .title { font-weight: 600; font-size: 14px; border: 0; padding: 4px 6px; margin: -4px -6px; border-radius: 6px; width: calc(100% + 12px); background: transparent; }
 .reel .title:hover { background: var(--line-2); }
@@ -170,9 +172,7 @@ table.list td.r, table.list th.r { text-align: right; }
 .reel .meta { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
 .reel .meta span { white-space: nowrap; }
 .reel .row { flex-wrap: nowrap; min-width: 0; }
-.reel .row .btn { flex: 1 1 auto; min-width: 0; padding: 0 10px; }
-.reel .row .spacer { display: none; }
-.reel .row .icon-btn { flex: none; margin-left: auto; }
+.reel .row .btn { flex: 1 1 0; min-width: 0; height: 38px; font-size: 14px; }
 .progress { height: 6px; background: var(--line-2); border-radius: 99px; overflow: hidden; margin-top: 10px; }
 .progress i { display: block; height: 100%; background: var(--blue-2); width: 0; transition: width .2s; }
 
@@ -419,7 +419,7 @@ dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
 @media (max-width: 560px) { .ttv-sum { grid-template-columns: repeat(2, 1fr); } }
 .pd { display: flex; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line-2); }
 .pd:last-child { border-bottom: 0; }
-.pd video { width: 170px; height: auto; aspect-ratio: 9/16; object-fit: contain; border-radius: 12px; background: #000; flex: none; align-self: flex-start; }
+.pd video { width: 170px; height: auto; aspect-ratio: 9/16; object-fit: contain; border-radius: 12px; background: var(--line-2); flex: none; align-self: flex-start; }
 .pd-info { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .pd-info b { font-size: 16px; }
 @media (max-width: 760px) {
