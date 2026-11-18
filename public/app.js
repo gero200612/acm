@@ -932,9 +932,8 @@ function postDialog(ids) {
     <div class="pd" data-id="${x.id}">
       <video src="/media/${esc(x.reel_file)}#t=0.5" preload="metadata" controls playsinline></video>
       <div class="pd-info"><b>${esc(x.reel_title)}</b>
-        <span class="row small">${netBadge(x.network)}${esc(x.handle ? '@' + x.handle : NETS[x.network].name + ' sin conectar')}</span>
-        <span class="small muted">${fmtDate(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}</span>
-        <span><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span>${x.published_at ? ` <span class="small muted">el ${fmtDay(x.published_at)} a las ${fmtTime(x.published_at)}</span>` : ''}</span>
+        <span class="row small pd-acc">${netBadge(x.network)}${esc(x.handle ? '@' + x.handle : NETS[x.network].name + ' sin conectar')}</span>
+        <span class="pd-when"><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span><span class="small muted">${x.published_at ? `salió el ${fmtDay(x.published_at)} a las ${fmtTime(x.published_at)}` : `${fmtDate(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</span></span>
         ${x.error ? `<p class="banner err" style="margin:0">${esc(x.error)}</p>` : ''}
         ${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}
         ${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">Ver en ${NETS[x.network].name} ↗</a>` : ''}
@@ -959,7 +958,8 @@ function postDialog(ids) {
       const c = await api(`/api/accounts/${box.dataset.acc}/tiktok`); box.innerHTML = ttForm(c, o);
       // la cuenta y el aviso de música van arriba, al lado del video: así no hace falta bajar
       const info = box.closest('.pd')?.querySelector('.pd-info');
-      if (info) { const who = $('.tt-who', box), decl = $('.tt-decl', box); if (who) info.append(who); if (decl) info.append(decl); }
+      // la cuenta de TikTok (foto, nombre y @) reemplaza la línea de la cuenta: no se repite el @
+      if (info) { const who = $('.tt-who', box), decl = $('.tt-decl', box), acc = $('.pd-acc', info); if (who) { if (acc) acc.replaceWith(who); else info.append(who); } const mode = $('.tt-mode', box); if (mode) info.append(mode); if (decl) info.append(decl); }
       ttWire(box);
     }
     catch (e) { box.innerHTML = `<p class="banner err" style="margin:0">${esc(e.message)}</p>`; }
@@ -993,22 +993,23 @@ function ttForm(c, o = {}) {
   </div>`;
 }
 function ttWire(box) {
+  const scope = box.closest('.pd') || box; // en Publicación, la cuenta, el modo y el aviso van arriba, fuera del recuadro
   const decl = () => {
     const bc = $('[data-tt=brandContent]', box)?.checked;
     $('.tt-decl', box.closest('.pd') || box).innerHTML = `Al publicar, aceptás ${bc ? 'la <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener noreferrer">Política de contenido de marca</a> y ' : ''}la <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener noreferrer">Confirmación de uso de música</a> de TikTok.`;
     $('.tt-brand', box).hidden = !$('[data-tt=commercial]', box).checked;
-    const d = $('[data-tt=mode][value=borrador]', box)?.checked; $('.tt-direct', box).hidden = !!d;
+    const d = $('[data-tt=mode][value=borrador]', scope)?.checked; $('.tt-direct', box).hidden = !!d;
     $('[data-tt=privacy]', box).required = !d; // en borrador la privacidad se elige en la app de TikTok
     const priv = $('[data-tt=privacy]', box), selfOnly = [...priv.options].find((op) => op.value === 'SELF_ONLY');
     if (selfOnly) selfOnly.disabled = !!bc; // TikTok no permite contenido de marca en privado
   };
-  box.addEventListener('change', decl); decl();
+  scope.addEventListener('change', decl); decl();
 }
 // lee el formulario; devuelve null y avisa si falta algo
 function ttRead(box) {
   if (!box) return {};
   const v = (k) => $(`[data-tt=${k}]`, box);
-  if ($('[data-tt=mode][value=borrador]', box)?.checked) return { mode: 'borrador' };
+  if ($('[data-tt=mode][value=borrador]', box.closest('.pd') || box)?.checked) return { mode: 'borrador' };
   if (!v('privacy')) { toast('No se pudo cargar la cuenta de TikTok: revisá la conexión', true); return null; }
   const o = { privacy: v('privacy').value, allowComment: v('allowComment').checked, allowDuet: v('allowDuet').checked, allowStitch: v('allowStitch').checked,
     brandOrganic: v('commercial').checked && v('brandOrganic').checked, brandContent: v('commercial').checked && v('brandContent').checked };
