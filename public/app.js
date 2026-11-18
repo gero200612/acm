@@ -137,7 +137,9 @@ async function render() {
   const head = r.view === 'users' ? `<div><h1 class="page-title">Usuarios</h1><p class="lead">${isGeneral() ? 'Quién entra a ACM y qué puede hacer.' : 'Las sombras de tu dirigente: suben crudos y aprueban ediciones.'}</p></div><button class="btn primary" data-act="user-new">${icon('plus')} ${isGeneral() ? 'Nuevo usuario' : 'Nueva sombra'}</button>` : r.view === 'lab' ? `<div><h1 class="page-title">Laboratorio</h1><p class="lead">Lo que hizo ACM paso a paso, el banco de pruebas y el control técnico de los reels.</p></div>` : r.view === 'project' ? projectHead(state.project) : `<div><h1 class="page-title">Inicio</h1><p class="lead">Todas las campañas, sus cuentas y lo que sale publicado.</p></div><button class="btn primary" data-act="new-project">${icon('plus')} Nuevo proyecto</button>`;
   const body = r.view === 'users' ? usersView() : r.view === 'lab' ? labView(r.tab) : r.view === 'project' ? projectView(r.tab) : homeView();
   // los videos que ya estaban cargados se reusan: volver a dibujar la página no los deja en negro mientras recargan
-  const keep = new Map([...app.querySelectorAll('video[src]')].filter((v) => v.readyState >= 2 && v.paused).map((v) => [v.getAttribute('src'), v]));
+  // (un mismo video puede estar dos veces, como en la Grilla: celu y compu)
+  const keep = new Map();
+  for (const v of app.querySelectorAll('video[src]')) if (v.readyState >= 2 && v.paused) { const k = v.getAttribute('src'); keep.set(k, [...(keep.get(k) || []), v]); }
   app.innerHTML = `
   <div class="layout">
     <header class="mobilebar"><button class="burger" data-act="menu" aria-label="Abrir menú"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>ACM</header>
@@ -145,7 +147,7 @@ async function render() {
     <aside class="side">${sideNav(r)}</aside>
     <div class="main"><header class="topbar">${head}</header><main class="page ${viewKey() !== state.lastView ? 'enter' : ''}">${body}</main></div>
   </div>`;
-  if (keep.size) app.querySelectorAll('video[src]').forEach((v) => { const old = keep.get(v.getAttribute('src')); if (old && old !== v) { keep.delete(v.getAttribute('src')); old.className = v.className; v.replaceWith(old); } });
+  if (keep.size) app.querySelectorAll('video[src]').forEach((v) => { const old = keep.get(v.getAttribute('src'))?.shift(); if (old && old !== v) { old.className = v.className; v.replaceWith(old); } });
   afterRender(r);
 }
 
