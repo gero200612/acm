@@ -74,6 +74,8 @@ export function tiktokOptions(o = {}) {
     privacy: PRIVACY.includes(o.privacy) ? o.privacy : '',
     allowComment: !!o.allowComment, allowDuet: !!o.allowDuet, allowStitch: !!o.allowStitch,
     brandOrganic: !!o.brandOrganic, brandContent: !!o.brandContent,
+    // «borrador»: el video va a la bandeja de la app de TikTok y la persona lo termina ahí (permiso video.upload)
+    mode: o.mode === 'borrador' ? 'borrador' : 'directo',
   };
 }
 async function tiktokAuth(c, save) {
@@ -87,9 +89,39 @@ export async function tiktokCreator(c, save = () => {}) {
   return { nickname: d.creator_nickname || '', username: d.creator_username || '', avatar: d.creator_avatar_url || '', privacyOptions: d.privacy_level_options || [],
     commentDisabled: !!d.comment_disabled, duetDisabled: !!d.duet_disabled, stitchDisabled: !!d.stitch_disabled, maxDuration: d.max_video_post_duration_sec || 0 };
 }
+// sube el archivo en pedazos al upload_url que dio TikTok
+async function tiktokUpload(url, file, size, chunk, count) {
+  const buf = fs.readFileSync(file);
+  for (let i = 0; i < count; i++) {
+    const a = i * chunk, b = i === count - 1 ? size : a + chunk;
+    await call('TikTok', url, { method: 'PUT', headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(b - a), 'Content-Range': `bytes ${a}-${b - 1}/${size}` }, body: buf.subarray(a, b) }, 600000);
+  }
+}
+const tiktokChunks = (size) => { const chunk = size <= 64 * 1024 * 1024 ? size : 10 * 1024 * 1024; return { chunk, count: Math.max(1, Math.floor(size / chunk)) }; };
+
+// Borrador (Content Posting API, Upload): el video llega a la bandeja de TikTok y la persona elige ahí privacidad, texto y sonido
+async function tiktokDraft(auth, file, log) {
+  const size = fs.statSync(file).size, { chunk, count } = tiktokChunks(size);
+  const { body: ini } = await call('TikTok', `${bases().tiktok}/v2/post/publish/inbox/video/init/`, {
+    method: 'POST', headers: auth, body: JSON.stringify({ source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunk, total_chunk_count: count } }),
+  });
+  await tiktokUpload(ini.data.upload_url, file, size, chunk, count);
+  log('video subido a los borradores');
+  const id = ini.data.publish_id;
+  for (let i = 0; i < 36; i++) {
+    const { body: st } = await call('TikTok', `${bases().tiktok}/v2/post/publish/status/fetch/`, { method: 'POST', headers: auth, body: JSON.stringify({ publish_id: id }) });
+    const s = st.data?.status;
+    if (s === 'SEND_TO_USER_INBOX' || s === 'PUBLISH_COMPLETE') return { id, url: '', note: 'en los borradores de TikTok: terminalo desde la app (te llega una notificación)' };
+    if (s === 'FAILED') throw new Error(`TikTok no recibió el video: ${st.data?.fail_reason || 'sin motivo'}`);
+    await sleep(5000);
+  }
+  return { id, url: '', note: 'TikTok sigue procesando el borrador' };
+}
+
 async function tiktok(c, file, caption, log, _title, save, opts = {}) {
   const auth = await tiktokAuth(c, save);
   const o = tiktokOptions(opts);
+  if (o.mode === 'borrador') return tiktokDraft(auth, file, log);
   if (!o.privacy) throw new Error('Falta elegir quién puede ver el video en TikTok: abrí la publicación y elegí la privacidad.');
   if (o.brandContent && o.privacy === 'SELF_ONLY') throw new Error('TikTok no deja que el contenido de marca sea privado: elegí otra privacidad.');
   const { body: ci } = await call('TikTok', `${bases().tiktok}/v2/post/publish/creator_info/query/`, { method: 'POST', headers: auth, body: '{}' });
@@ -97,8 +129,7 @@ async function tiktok(c, file, caption, log, _title, save, opts = {}) {
   if (opciones.length && !opciones.includes(o.privacy)) throw new Error(`Esta cuenta de TikTok no permite esa privacidad (puede: ${opciones.join(', ')}).`);
   const size = fs.statSync(file).size;
   // TikTok: un solo pedazo hasta 64 MB; si no, pedazos de 10 MB y el último se lleva el resto
-  const chunk = size <= 64 * 1024 * 1024 ? size : 10 * 1024 * 1024;
-  const count = Math.max(1, Math.floor(size / chunk));
+  const { chunk, count } = tiktokChunks(size);
   const init = async (privacy) => (await call('TikTok', `${bases().tiktok}/v2/post/publish/video/init/`, {
     method: 'POST', headers: auth,
     body: JSON.stringify({ post_info: { title: caption.slice(0, 2200), privacy_level: privacy,
@@ -116,11 +147,7 @@ async function tiktok(c, file, caption, log, _title, save, opts = {}) {
     privacy = 'SELF_ONLY'; aviso = 'publicado como privado: la app de TikTok todavía no está aprobada';
     ini = await init(privacy);
   }
-  const buf = fs.readFileSync(file);
-  for (let i = 0; i < count; i++) {
-    const a = i * chunk, b = i === count - 1 ? size : a + chunk;
-    await call('TikTok', ini.data.upload_url, { method: 'PUT', headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(b - a), 'Content-Range': `bytes ${a}-${b - 1}/${size}` }, body: buf.subarray(a, b) }, 600000);
-  }
+  await tiktokUpload(ini.data.upload_url, file, size, chunk, count);
   log('video subido');
   const id = ini.data.publish_id;
   for (let i = 0; i < 36; i++) { // hasta 3 minutos
@@ -131,6 +158,15 @@ async function tiktok(c, file, caption, log, _title, save, opts = {}) {
     await sleep(5000);
   }
   return { id, url: '', note: aviso || 'TikTok lo sigue procesando' };
+}
+
+// Los últimos videos de la cuenta con sus números (Display API, permiso video.list): se ven en el panel de la cuenta
+export async function tiktokVideos(c, save = () => {}, max = 12) {
+  const { body } = await call('TikTok', `${bases().tiktok}/v2/video/list/?fields=id,title,video_description,cover_image_url,share_url,create_time,duration,view_count,like_count,comment_count,share_count`,
+    { method: 'POST', headers: await tiktokAuth(c, save), body: JSON.stringify({ max_count: Math.min(20, max) }) });
+  return (body.data?.videos || []).map((v) => ({ id: String(v.id), title: v.title || v.video_description || '', cover: v.cover_image_url || '', url: v.share_url || '',
+    at: v.create_time ? new Date(v.create_time * 1000).toISOString() : '', duration: v.duration || 0,
+    views: v.view_count ?? null, likes: v.like_count ?? null, comments: v.comment_count ?? null, shares: v.share_count ?? null }));
 }
 
 const PUBLISHERS = { instagram, facebook, youtube, tiktok };

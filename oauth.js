@@ -13,7 +13,7 @@ export const redirectUri = (network) => `${PUBLIC_URL}/oauth/${network}/callback
 
 // lo mínimo para publicar y saber a qué cuenta se entró
 export const SCOPES = {
-  tiktok: ['user.info.basic', 'user.info.profile', 'user.info.stats', 'video.publish', 'video.list'], // video.list: métricas de cada video (/v2/video/query)
+  tiktok: ['user.info.basic', 'user.info.profile', 'user.info.stats', 'video.publish', 'video.upload', 'video.list'], // publish: directo · upload: a borradores · list: videos y métricas
   youtube: ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly'],
 };
 

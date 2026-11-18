@@ -8,7 +8,7 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { readPadron } from './padron.js';
-import { publish, tiktokOptions, tiktokCreator } from './publisher.js';
+import { publish, tiktokOptions, tiktokCreator, tiktokVideos } from './publisher.js';
 import { testAds, uploadAudience, createCampaign, campaignInsights } from './ads.js';
 import { testTikTokAds } from './ads-tiktok.js';
 import { testGoogleAds } from './ads-google.js';
@@ -1032,6 +1032,13 @@ app.get('/api/accounts/:id/tiktok', async (req, res) => {
   const creds = vault.open(a.creds);
   const save = (fresh) => run('UPDATE accounts SET creds = ? WHERE id = ?', vault.seal({ ...vault.open(get('SELECT creds FROM accounts WHERE id = ?', a.id).creds), ...fresh }), a.id);
   try { res.json(await tiktokCreator(creds, save)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// los últimos videos de la cuenta de TikTok con vistas y likes (video.list)
+app.get('/api/accounts/:id/tiktok/videos', async (req, res) => {
+  const a = get('SELECT * FROM accounts WHERE id = ?', req.params.id);
+  if (!a || a.network !== 'tiktok') return res.status(404).json({ error: 'No es una cuenta de TikTok' });
+  const save = (fresh) => run('UPDATE accounts SET creds = ? WHERE id = ?', vault.seal({ ...vault.open(get('SELECT creds FROM accounts WHERE id = ?', a.id).creds), ...fresh }), a.id);
+  try { res.json(await tiktokVideos(vault.open(a.creds), save)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/clock', (req, res) => res.json({ now: localNow(), tz: TZ }));
 

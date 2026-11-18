@@ -7,7 +7,7 @@ import { traced, step, mask } from './trace.js';
 import { publicUrl } from './oauth.js';
 import { testConnection } from './connections.js';
 import { authorizePage, authorizeAds, MetaChoice, metaPublic } from './meta-connect.js';
-import { publish } from './publisher.js';
+import { publish, tiktokVideos, tiktokOptions } from './publisher.js';
 import { uploadAudience, createCampaign, testAds } from './ads.js';
 import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
@@ -354,6 +354,16 @@ function cases(video, sim) {
     ['Publicación', 'Instagram: sube el video y publica el Reel', async () => { const r = await publish('instagram', IG, video, 'Prueba', 'Prueba'); eq(r.id, 'M1', 'publicación'); yes(r.url.includes('instagram.com'), 'sin link'); }],
     ['Publicación', 'Facebook: publica el Reel de la Página', async () => { const r = await publish('facebook', IG, video, 'Prueba', 'Prueba'); eq(r.id, 'V1', 'video'); }],
     ['Publicación', 'TikTok: sin app aprobada pasa a privado y avisa', async () => { const r = await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba', () => {}, () => {}, { privacy: 'PUBLIC_TO_EVERYONE', allowComment: true }); eq(r.id, 'P1', 'publicación'); yes(/privado/.test(r.note), 'no avisó que sale privado'); }],
+    ['Publicación', 'TikTok: «Mandar a borradores» sube a la bandeja sin privacidad ni post_info (video.upload)', async () => {
+      const r = await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba', () => {}, () => {}, { mode: 'borrador' });
+      eq(r.id, 'PD1', 'borrador'); yes(/borradores/.test(r.note), 'no avisó que quedó en borradores: ' + r.note);
+      eq(tiktokOptions({ mode: 'cualquiera' }).mode, 'directo', 'un modo desconocido publica directo');
+    }],
+    ['Conexiones', 'TikTok: «Videos de la cuenta» trae los últimos videos con vistas y likes (video.list)', async () => {
+      const v = await tiktokVideos({ accessToken: 'TT_OK' });
+      eq([v.length, v[0].id, v[0].views, v[0].likes], [1, 'TV1', 5000, 400], 'videos');
+      yes(v[0].at.startsWith('2025-') || v[0].at.startsWith('2026-'), 'fecha: ' + v[0].at);
+    }],
     ['Publicación', 'TikTok: sin privacidad elegida no publica (regla de TikTok)', async () => {
       let msg = ''; try { await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba'); } catch (e) { msg = e.message; }
       yes(/privacidad/.test(msg), `tendría que pedir la privacidad: ${msg}`);

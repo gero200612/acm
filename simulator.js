@@ -73,7 +73,7 @@ export function startSimulator(port = 0) {
     // TikTok
     if (p === '/tt/v2/user/info/') return ['Bearer TT_OK', 'Bearer TT_PUBLICA'].includes(req.headers.authorization) ? send(res, 200, { data: { user: { username: 'mock.tt', follower_count: 50 } }, ...ok }) : send(res, 401, { error: { code: 'access_token_invalid', message: 'vencido' } });
     if (p === '/tt/v2/oauth/token/') {
-      if (params.grant_type === 'authorization_code') return params.code === 'TTCODE' && params.client_key === 'tt-app' && params.redirect_uri ? send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2', open_id: 'OPEN1', scope: 'user.info.basic,user.info.profile,user.info.stats,video.publish,video.list' }) : send(res, 400, { error: 'invalid_grant', error_description: 'código o app incorrectos' });
+      if (params.grant_type === 'authorization_code') return params.code === 'TTCODE' && params.client_key === 'tt-app' && params.redirect_uri ? send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2', open_id: 'OPEN1', scope: 'user.info.basic,user.info.profile,user.info.stats,video.publish,video.upload,video.list' }) : send(res, 400, { error: 'invalid_grant', error_description: 'código o app incorrectos' });
       return send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2' });
     }
     // pantallas de autorizar (conectar con un clic): aprueban solas y vuelven con el código
@@ -92,7 +92,10 @@ export function startSimulator(port = 0) {
       return send(res, 200, { data: { publish_id: 'P1', upload_url: `${B}/tt-up` }, ...ok });
     }
     if (p === '/tt-up') return send(res, 201, {});
-    if (p === '/tt/v2/post/publish/status/fetch/') return send(res, 200, { data: { status: 'PUBLISH_COMPLETE', publicaly_available_post_id: ['TV1'] }, ...ok });
+    // borrador: va a la bandeja de la app (video.upload); no lleva post_info
+    if (p === '/tt/v2/post/publish/inbox/video/init/') { const j = JSON.parse(body); log.push('ttinbox ' + JSON.stringify(Object.keys(j))); return j.post_info ? send(res, 400, { error: { code: 'invalid_params', message: 'el borrador no lleva post_info' } }) : send(res, 200, { data: { publish_id: 'PD1', upload_url: `${B}/tt-up` }, ...ok }); }
+    if (p === '/tt/v2/post/publish/status/fetch/') return JSON.parse(body || '{}').publish_id === 'PD1' ? send(res, 200, { data: { status: 'SEND_TO_USER_INBOX' }, ...ok }) : send(res, 200, { data: { status: 'PUBLISH_COMPLETE', publicaly_available_post_id: ['TV1'] }, ...ok });
+    if (p === '/tt/v2/video/list/') return req.headers.authorization === 'Bearer TT_OK' ? send(res, 200, { data: { videos: [{ id: 'TV1', title: 'Reel de prueba', cover_image_url: 'https://example.com/c.jpg', share_url: 'https://www.tiktok.com/@mock.tt/video/TV1', create_time: 1763400000, duration: 8, view_count: 5000, like_count: 400, comment_count: 30, share_count: 60 }], has_more: false, cursor: 0 }, ...ok }) : send(res, 401, { error: { code: 'access_token_invalid', message: 'vencido' } });
     // Google
     if (p === '/goauth/token') {
       if (params.grant_type === 'authorization_code') return params.code === 'GCODE' && params.client_id === 'g-app' ? send(res, 200, { access_token: 'ya29.mock', refresh_token: 'G_REFRESH', scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly' }) : send(res, 400, { error: 'invalid_grant', error_description: 'código o app incorrectos' });
