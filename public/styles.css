@@ -755,6 +755,7 @@ dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
 .net-btn { border: 0; color: #fff; font-weight: 600; gap: 10px; }
 .net-btn .net-ico { width: 20px; height: 20px; display: inline-grid; place-items: center; flex: none; }
 .net-btn .net-ico svg { width: 20px; height: 20px; }
+.btn.sm.net-btn .net-ico, .btn.sm.net-btn .net-ico svg { width: 16px; height: 16px; }
 .net-btn.facebook, .net-btn.instagram { background: #0866FF; }
 .net-btn.facebook:hover:not(:disabled), .net-btn.instagram:hover:not(:disabled) { background: #0756d6; }
 .net-btn.tiktok { background: #000; }
