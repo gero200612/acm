@@ -74,6 +74,8 @@ export function tiktokOptions(o = {}) {
     privacy: PRIVACY.includes(o.privacy) ? o.privacy : '',
     allowComment: !!o.allowComment, allowDuet: !!o.allowDuet, allowStitch: !!o.allowStitch,
     brandOrganic: !!o.brandOrganic, brandContent: !!o.brandContent,
+    // «borrador»: el video va a la bandeja de la app de TikTok y la persona lo termina ahí (permiso video.upload)
+    mode: o.mode === 'borrador' ? 'borrador' : 'directo',
   };
 }
 async function tiktokAuth(c, save) {
@@ -97,9 +99,29 @@ async function tiktokUpload(url, file, size, chunk, count) {
 }
 const tiktokChunks = (size) => { const chunk = size <= 64 * 1024 * 1024 ? size : 10 * 1024 * 1024; return { chunk, count: Math.max(1, Math.floor(size / chunk)) }; };
 
+// Borrador (Content Posting API, Upload): el video llega a la bandeja de TikTok y la persona elige ahí privacidad, texto y sonido
+async function tiktokDraft(auth, file, log) {
+  const size = fs.statSync(file).size, { chunk, count } = tiktokChunks(size);
+  const { body: ini } = await call('TikTok', `${bases().tiktok}/v2/post/publish/inbox/video/init/`, {
+    method: 'POST', headers: auth, body: JSON.stringify({ source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunk, total_chunk_count: count } }),
+  });
+  await tiktokUpload(ini.data.upload_url, file, size, chunk, count);
+  log('video subido a los borradores');
+  const id = ini.data.publish_id;
+  for (let i = 0; i < 36; i++) {
+    const { body: st } = await call('TikTok', `${bases().tiktok}/v2/post/publish/status/fetch/`, { method: 'POST', headers: auth, body: JSON.stringify({ publish_id: id }) });
+    const s = st.data?.status;
+    if (s === 'SEND_TO_USER_INBOX' || s === 'PUBLISH_COMPLETE') return { id, url: '', note: 'en los borradores de TikTok: terminalo desde la app (te llega una notificación)' };
+    if (s === 'FAILED') throw new Error(`TikTok no recibió el video: ${st.data?.fail_reason || 'sin motivo'}`);
+    await sleep(5000);
+  }
+  return { id, url: '', note: 'TikTok sigue procesando el borrador' };
+}
+
 async function tiktok(c, file, caption, log, _title, save, opts = {}) {
   const auth = await tiktokAuth(c, save);
   const o = tiktokOptions(opts);
+  if (o.mode === 'borrador') return tiktokDraft(auth, file, log);
   if (!o.privacy) throw new Error('Falta elegir quién puede ver el video en TikTok: abrí la publicación y elegí la privacidad.');
   if (o.brandContent && o.privacy === 'SELF_ONLY') throw new Error('TikTok no deja que el contenido de marca sea privado: elegí otra privacidad.');
   const { body: ci } = await call('TikTok', `${bases().tiktok}/v2/post/publish/creator_info/query/`, { method: 'POST', headers: auth, body: '{}' });

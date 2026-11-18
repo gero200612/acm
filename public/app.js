@@ -959,7 +959,13 @@ const TT_PRIV = { PUBLIC_TO_EVERYONE: 'Todos', MUTUAL_FOLLOW_FRIENDS: 'Amigos (s
 function ttForm(c, o = {}) {
   const opts = c ? c.privacyOptions : Object.keys(TT_PRIV);
   const chk = (k, label, off) => `<label class="tt-chk ${off ? 'off' : ''}"><input type="checkbox" data-tt="${k}" ${o[k] && !off ? 'checked' : ''} ${off ? 'disabled' : ''}> ${label}${off ? ' <span class="small muted">(la cuenta lo tiene desactivado)</span>' : ''}</label>`;
+  const draft = o.mode === 'borrador', nm = 'ttmode-' + Math.random().toString(36).slice(2, 8);
   return `<div class="tt-box">
+    <div class="tt-mode" role="radiogroup" aria-label="Cómo sale en TikTok">
+      <label class="tt-chk"><input type="radio" name="${nm}" data-tt="mode" value="directo" ${draft ? '' : 'checked'}> <b>Publicar directo</b> <span class="small muted">sale en el perfil con lo que elijas acá</span></label>
+      <label class="tt-chk"><input type="radio" name="${nm}" data-tt="mode" value="borrador" ${draft ? 'checked' : ''}> <b>Mandar a borradores de TikTok</b> <span class="small muted">llega a la bandeja de la app y lo terminás ahí (texto, sonido, privacidad)</span></label>
+    </div>
+    <div class="tt-direct" ${draft ? 'hidden' : ''}>
     ${c ? `<div class="tt-who">${c.avatar ? `<img src="${esc(c.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<div><b>${esc(c.nickname)}</b><span class="small muted">@${esc(c.username)} · se publica en esta cuenta de TikTok</span></div></div>` : ''}
     <label class="field">¿Quién puede ver este video?<select class="select" data-tt="privacy" required>
       <option value="" ${o.privacy ? '' : 'selected'} disabled>Elegí la privacidad</option>
@@ -971,6 +977,7 @@ function ttForm(c, o = {}) {
       <label class="tt-chk"><input type="checkbox" data-tt="brandContent" ${o.brandContent ? 'checked' : ''}> Contenido de marca de un tercero: se etiqueta como «Colaboración pagada»</label>
     </div>
     <p class="small muted tt-decl"></p>
+    </div>
   </div>`;
 }
 function ttWire(box) {
@@ -978,6 +985,8 @@ function ttWire(box) {
     const bc = $('[data-tt=brandContent]', box)?.checked;
     $('.tt-decl', box).innerHTML = `Al publicar, aceptás ${bc ? 'la <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener noreferrer">Política de contenido de marca</a> y ' : ''}la <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener noreferrer">Confirmación de uso de música</a> de TikTok.`;
     $('.tt-brand', box).hidden = !$('[data-tt=commercial]', box).checked;
+    const d = $('[data-tt=mode][value=borrador]', box)?.checked; $('.tt-direct', box).hidden = !!d;
+    $('[data-tt=privacy]', box).required = !d; // en borrador la privacidad se elige en la app de TikTok
     const priv = $('[data-tt=privacy]', box), selfOnly = [...priv.options].find((op) => op.value === 'SELF_ONLY');
     if (selfOnly) selfOnly.disabled = !!bc; // TikTok no permite contenido de marca en privado
   };
@@ -987,6 +996,7 @@ function ttWire(box) {
 function ttRead(box) {
   if (!box) return {};
   const v = (k) => $(`[data-tt=${k}]`, box);
+  if ($('[data-tt=mode][value=borrador]', box)?.checked) return { mode: 'borrador' };
   if (!v('privacy')) { toast('No se pudo cargar la cuenta de TikTok: revisá la conexión', true); return null; }
   const o = { privacy: v('privacy').value, allowComment: v('allowComment').checked, allowDuet: v('allowDuet').checked, allowStitch: v('allowStitch').checked,
     brandOrganic: v('commercial').checked && v('brandOrganic').checked, brandContent: v('commercial').checked && v('brandContent').checked };
@@ -1739,7 +1749,7 @@ const CONNECT_STEPS = {
     { title: 'Probá la conexión', body: ['Guardá y probá. ACM trae el nombre de la Página y sus seguidores.'], test: true },
   ],
   tiktok: [
-    { title: 'Creá la app en TikTok for Developers', body: ['Entrá a developers.tiktok.com, creá una app y agregale los productos Login Kit, Content Posting API (Direct Post) y Display API.', 'Pedí los permisos que siguen. Hasta que TikTok apruebe la app, lo que se publica sale como privado.'], links: [{ label: 'Abrir TikTok for Developers', url: 'https://developers.tiktok.com/apps/' }], chips: ['user.info.basic', 'user.info.profile', 'user.info.stats', 'video.publish', 'video.list'] },
+    { title: 'Creá la app en TikTok for Developers', body: ['Entrá a developers.tiktok.com, creá una app y agregale los productos Login Kit, Content Posting API (Direct Post y Upload) y Display API.', 'Pedí los permisos que siguen. Hasta que TikTok apruebe la app, lo que se publica sale como privado.'], links: [{ label: 'Abrir TikTok for Developers', url: 'https://developers.tiktok.com/apps/' }], chips: ['user.info.basic', 'user.info.profile', 'user.info.stats', 'video.publish', 'video.upload', 'video.list'] },
     { title: 'Copiá las claves de la app', body: ['En la app, en Credenciales, copiá el Client key y el Client secret.'], fields: ['clientKey', 'clientSecret'] },
     { title: 'Autorizá la cuenta y pegá los tokens', body: ['Con la cuenta de TikTok abierta, autorizá la app (Login Kit). TikTok devuelve un token de acceso (dura 24 horas) y uno de renovación (dura un año).', 'Con los dos, ACM renueva el de acceso solo.'], fields: ['accessToken', 'refreshToken'] },
     { title: 'Probá la conexión', body: ['Guardá y probá. ACM trae el usuario y los seguidores.'], note: 'TikTok no acepta pauta política: en esta red el alcance es solo orgánico.', test: true },

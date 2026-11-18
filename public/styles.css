@@ -722,6 +722,7 @@ dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
 .cp-vlist img { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; flex: none; background: var(--line); }
 .cp-vlist li > div { display: grid; min-width: 0; }
 .cp-vlist a { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-mode { display: grid; gap: 6px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .cp-quick .btn .net { width: 22px; height: 22px; }
 .cp-or { text-align: center; margin: 6px 0 10px; }
 @media (max-width: 560px) { .cp-quick { flex-direction: column; align-items: stretch; } }
