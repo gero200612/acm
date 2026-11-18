@@ -73,7 +73,7 @@ export function startSimulator(port = 0) {
     // TikTok
     if (p === '/tt/v2/user/info/') return ['Bearer TT_OK', 'Bearer TT_PUBLICA'].includes(req.headers.authorization) ? send(res, 200, { data: { user: { username: 'mock.tt', follower_count: 50 } }, ...ok }) : send(res, 401, { error: { code: 'access_token_invalid', message: 'vencido' } });
     if (p === '/tt/v2/oauth/token/') {
-      if (params.grant_type === 'authorization_code') return params.code === 'TTCODE' && params.client_key === 'tt-app' && params.redirect_uri ? send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2', open_id: 'OPEN1', scope: 'user.info.basic,user.info.profile,user.info.stats,video.publish,video.upload' }) : send(res, 400, { error: 'invalid_grant', error_description: 'código o app incorrectos' });
+      if (params.grant_type === 'authorization_code') return params.code === 'TTCODE' && params.client_key === 'tt-app' && params.redirect_uri ? send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2', open_id: 'OPEN1', scope: 'user.info.basic,user.info.profile,user.info.stats,video.publish,video.list' }) : send(res, 400, { error: 'invalid_grant', error_description: 'código o app incorrectos' });
       return send(res, 200, { access_token: 'TT_OK', refresh_token: 'TT_R2' });
     }
     // pantallas de autorizar (conectar con un clic): aprueban solas y vuelven con el código
