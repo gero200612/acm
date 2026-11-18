@@ -934,7 +934,8 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 .gr-wrap { display: grid; grid-template-columns: 240px 330px minmax(0, 1fr); justify-content: center; gap: 36px; padding: 28px 24px; align-items: start; }
 @media (max-width: 1350px) { .gr-wrap { grid-template-columns: 240px 330px; } .laptop { display: none; } }
 .laptop { align-self: center; min-width: 0; }
-.lp-screen { background: #1b1c20; border-radius: 16px 16px 0 0; padding: 12px 12px 0; box-shadow: 0 0 0 2px #3a3b40; }
+.lp-screen { background: #1b1c20; border-radius: 16px 16px 6px 6px; padding: 12px 12px 18px; box-shadow: 0 0 0 2px #3a3b40; }
+.lp-page { border-radius: 0 0 4px 4px; }
 .lp-bar { display: flex; align-items: center; gap: 12px; background: #2a2b30; border-radius: 8px 8px 0 0; padding: 8px 12px; }
 .lp-dots { display: inline-flex; gap: 6px; } .lp-dots i { width: 10px; height: 10px; border-radius: 50%; background: #ff5f57; } .lp-dots i:nth-child(2) { background: #febc2e; } .lp-dots i:nth-child(3) { background: #28c840; }
 .lp-url { flex: 1; display: inline-flex; align-items: center; gap: 8px; background: #3a3b40; color: #d7d7da; border-radius: 6px; padding: 4px 10px; font-size: 12.5px; min-width: 0; overflow: hidden; white-space: nowrap; }
