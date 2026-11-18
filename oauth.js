@@ -36,7 +36,8 @@ export function readState(secret, state) {
 export function authUrl(network, state) {
   const a = appCreds(network);
   if (network === 'tiktok') {
-    const q = new URLSearchParams({ client_key: a.key, scope: SCOPES.tiktok.join(','), response_type: 'code', redirect_uri: redirectUri('tiktok'), state });
+    // disable_auto_auth=1: TikTok muestra siempre la pantalla de permisos, aunque la cuenta ya haya autorizado a ACM
+    const q = new URLSearchParams({ client_key: a.key, scope: SCOPES.tiktok.join(','), response_type: 'code', redirect_uri: redirectUri('tiktok'), state, disable_auto_auth: '1' });
     return `${bases().tiktokAuth}/v2/auth/authorize/?${q}`;
   }
   if (network === 'youtube') {
