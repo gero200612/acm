@@ -962,8 +962,8 @@ function ttForm(c, o = {}) {
   const draft = o.mode === 'borrador', nm = 'ttmode-' + Math.random().toString(36).slice(2, 8);
   return `<div class="tt-box">
     <div class="tt-mode" role="radiogroup" aria-label="Cómo sale en TikTok">
-      <label class="tt-chk"><input type="radio" name="${nm}" data-tt="mode" value="directo" ${draft ? '' : 'checked'}> <b>Publicar directo</b> <span class="small muted">sale en el perfil con lo que elijas acá</span></label>
-      <label class="tt-chk"><input type="radio" name="${nm}" data-tt="mode" value="borrador" ${draft ? 'checked' : ''}> <b>Mandar a borradores de TikTok</b> <span class="small muted">llega a la bandeja de la app y lo terminás ahí (texto, sonido, privacidad)</span></label>
+      <label class="tt-opt"><input type="radio" name="${nm}" data-tt="mode" value="directo" ${draft ? '' : 'checked'}><span><b>Publicar directo</b><small>Sale en el perfil con lo que elijas acá abajo.</small></span></label>
+      <label class="tt-opt"><input type="radio" name="${nm}" data-tt="mode" value="borrador" ${draft ? 'checked' : ''}><span><b>Mandar a borradores</b><small>Llega a la app de TikTok y lo terminás ahí.</small></span></label>
     </div>
     <div class="tt-direct" ${draft ? 'hidden' : ''}>
     ${c ? `<div class="tt-who">${c.avatar ? `<img src="${esc(c.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<div><b>${esc(c.nickname)}</b><span class="small muted">@${esc(c.username)} · se publica en esta cuenta de TikTok</span></div></div>` : ''}
@@ -1061,7 +1061,7 @@ function adsCard(p) {
     ${p.ads_error ? `<p class="banner err">${esc(p.ads_error)}</p>` : ''}
     <div class="ads-grid">
       ${step(1, ok, 'Conectá la cuenta publicitaria', `
-        ${state.oauth?.meta?.ads ? `<div class="row" style="margin:6px 0 10px"><button class="btn primary sm" data-act="ads-meta">${netBadge('facebook')} ${ok ? 'Cambiar con Facebook' : 'Conectar con Facebook'}</button><span class="small muted">Elegís la cuenta en Facebook y queda conectada. O cargala a mano:</span></div>` : ''}
+        ${state.oauth?.meta?.ads ? `<div class="row" style="margin:6px 0 10px"><button class="btn net-btn facebook" data-act="ads-meta"><span class="net-ico">${NETS.facebook.svg}</span> ${ok ? 'Cambiar con Facebook' : 'Conectar con Facebook'}</button><span class="small muted">Elegís la cuenta en Facebook y queda conectada. O cargala a mano:</span></div>` : ''}
         <p class="small muted">En Configuración del negocio, Cuentas publicitarias, copiá el ID (act_…). Asignala al usuario del sistema y generá un token con <code>ads_management</code> y <code>ads_read</code>.</p>
         <div class="two"><label class="field">ID de la cuenta publicitaria<input class="input" data-ads="adAccountId" value="${esc(a.adAccountId)}" placeholder="act_1234567890"></label>
         <label class="field">Token<input class="input masked" data-ads="accessToken" autocomplete="off" placeholder="${a.token ? 'Guardado · pegá uno nuevo para cambiarlo' : 'EAA…'}"></label></div>
@@ -1158,12 +1158,12 @@ function reelDetailView() {
   const rows = P.map((x) => `<tr data-id="${x.id}">
       <td><span class="row" style="gap:8px">${netBadge(x.network)}<span><b>${esc((() => { const a = state.accounts.find((y) => y.id === x.account_id); return a ? accName(a) : x.handle ? '@' + x.handle : NETS[x.network].name; })())}</b><br><span class="small muted">${NETS[x.network].name}</span></span></span></td>
       <td><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span>${x.error ? `<p class="small err-t">${esc(x.error)}</p>` : ''}</td>
-      <td class="small">${x.published_at ? `Salió el ${fmtDay(x.published_at)} a las ${fmtTime(x.published_at)}` : `${fmtDay(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</td>
-      <td class="right">${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">Ver ↗</a>` : `<button class="btn sm ghost" data-act="open-post" data-pid="${x.id}">Abrir</button>`}</td>
+      <td class="small nowrap">${x.published_at ? `${fmtDay(x.published_at)} · ${fmtTime(x.published_at)}` : `${fmtDay(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</td>
+      <td class="r nowrap">${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">${icon('ext', 15)} Ver en ${NETS[x.network].name}</a>` : `<button class="btn sm" data-act="open-post" data-pid="${x.id}">Ver publicación</button>`}</td>
     </tr>`).join('');
   return `<div class="rd">
     <aside class="card rd-side">
-      <a class="small" href="#/p/${p.id}/reels">← Todos los reels</a>
+      <a class="btn sm rd-back" href="#/p/${p.id}/reels">${icon('left', 16)} Todos los reels</a>
       ${r.archived_at ? `<div class="gone tall">Video borrado del almacenamiento<span>Quedan el texto y las publicaciones. Para volver a usarlo, subilo de nuevo.</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>`}
       <h2 class="h2">${esc(r.title)}</h2>
       <p class="small muted">${r.kind === 'crudo' ? 'Crudo' : r.status === 'aprobado' ? 'Aprobado' : 'Borrador'} · ${mb(r.size)} · subido el ${fmtDate(r.created_at)}</p>
@@ -1173,7 +1173,7 @@ function reelDetailView() {
       ${reelForm(r)}
       ${r.kind === 'crudo' ? crudoInfo(r) : `<div class="rd-stats card"><div><b>${P.length}</b><span>cuentas</span></div><div><b>${n('publicado')}</b><span>publicadas</span></div><div><b>${n('programado') + n('publicando')}</b><span>programadas</span></div><div><b>${n('fallido')}</b><span>con error</span></div></div>
       <section class="card"><div class="card-head"><h2 class="h2">Dónde está este reel</h2></div>
-        ${P.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Cuenta</th><th>Estado</th><th>Cuándo</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no está en ninguna cuenta. Tocá <b>Repartir</b>.</p>'}
+        ${P.length ? `<div class="table-wrap"><table class="list rd-table"><thead><tr><th>Cuenta</th><th>Estado</th><th>Cuándo</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no está en ninguna cuenta. Tocá <b>Repartir</b>.</p>'}
       </section>
       ${libres.length ? `<section class="card"><h2 class="h2">Donde todavía puede salir</h2><p class="small muted">Una cuenta por red. Las redes donde ya está quedan cerradas para este video.</p><div class="rd-free">${libres.map((a) => `<span class="chip nodot">${netBadge(a.network)} ${esc(accName(a))}</span>`).join('')}</div></section>` : ''}`}
     </div>
@@ -1781,10 +1781,10 @@ function connectPanel(acc) {
   const ready = () => isMeta ? !!state.oauth?.meta?.pages : !!state.oauth?.[a.network];
   const quick = () => !ONE[a.network] || !ready() ? '' : isMeta ? `<div class="cp-quick">
     <div><b>${a.status === 'conectada' ? 'Volver a conectar' : 'La forma rápida'}</b><p class="small muted">Se abre Facebook, elegís la página${a.network === 'instagram' ? ' que tiene vinculado el Instagram' : ''} y queda conectada. No hace falta copiar nada.</p></div>
-    <button class="btn primary" data-cp="meta" ${busy ? 'disabled' : ''}>${netBadge('facebook')} ${busy === 'meta' ? 'Conectando…' : ONE[a.network]}</button></div>
+    <button class="btn net-btn facebook" data-cp="meta" ${busy ? 'disabled' : ''}><span class="net-ico">${NETS.facebook.svg}</span> ${busy === 'meta' ? 'Conectando…' : ONE[a.network]}</button></div>
     <p class="small muted cp-or">o seguí los pasos para conectarla a mano</p>` : `<div class="cp-quick">
     <div><b>${a.status === 'conectada' ? 'Volver a conectar' : 'La forma rápida'}</b><p class="small muted">Te lleva a ${a.network === 'tiktok' ? 'TikTok' : 'Google'}, autorizás con la cuenta${a.network === 'youtube' ? ' dueña del canal' : ''} y volvés acá conectado. No hace falta copiar nada.</p></div>
-    <button class="btn primary" data-cp="oauth" ${busy ? 'disabled' : ''}>${netBadge(a.network)} ${ONE[a.network]}</button></div>
+    <button class="btn net-btn ${a.network}" data-cp="oauth" ${busy ? 'disabled' : ''}><span class="net-ico">${NETS[a.network].svg}</span> ${busy === 'oauth' ? 'Abriendo…' : ONE[a.network]}</button></div>
     <p class="small muted cp-or">o seguí los pasos para conectarla a mano</p>`;
   if (state.oauth === undefined) api('/api/oauth').then((o) => { state.oauth = o; draw(); }).catch(() => { state.oauth = null; });
 
@@ -2118,7 +2118,16 @@ document.addEventListener('click', async (e) => {
       case 'pause-account': { const a = state.accounts.find((x) => x.id === id); await api(`/api/accounts/${id}`, { method: 'PUT', body: { status: a.status === 'pausada' ? 'activa' : 'pausada' } }); toast(a.status === 'pausada' ? 'Cuenta reanudada' : 'Cuenta pausada: no recibe publicaciones nuevas'); render(); break; }
       case 'del-account': if (await confirmBox('Borrar cuenta', 'Se quitan también sus publicaciones programadas.')) { await api(`/api/accounts/${id}`, { method: 'DELETE' }); render(); } break;
       case 'del-reel': if (await confirmBox('Borrar reel', 'Se borra el video y sus publicaciones programadas.')) { await api(`/api/reels/${id}`, { method: 'DELETE' }); render(); } break;
-      case 'reel-approve': { const r = state.reels.find((x) => x.id === id); await api(`/api/reels/${id}`, { method: 'PUT', body: { status: r.status === 'aprobado' ? 'borrador' : 'aprobado' } }); render(); break; }
+      case 'reel-approve': {
+        // solo cambia esta tarjeta: volver a dibujar todo recarga todos los videos
+        const r = state.reels.find((x) => x.id === id), st = r.status === 'aprobado' ? 'borrador' : 'aprobado';
+        el.disabled = true;
+        try { await api(`/api/reels/${id}`, { method: 'PUT', body: { status: st } }); r.status = st; } finally { el.disabled = false; }
+        const card = el.closest('.reel'), chip = card?.querySelector('.meta .chip');
+        if (chip) { chip.className = `chip s-${st}`; chip.textContent = st === 'aprobado' ? 'Aprobado' : 'Borrador'; }
+        el.textContent = st === 'aprobado' ? 'A borrador' : 'Aprobar';
+        if (!card) render();
+        break; }
       case 'ap-ok': case 'ap-no': case 'ap-no-all': {
         const box = el.closest('.ap-clip'), clip = box.dataset.clip, note = $('.ap-note', box).value.trim();
         const marked = $$('input[data-rid]:checked', box).map((i) => Number(i.dataset.rid));
