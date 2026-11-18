@@ -138,6 +138,8 @@ table.list tr:last-child td { border-bottom: 0; }
 table.list td.r, table.list th.r { text-align: right; }
 .handle { display: flex; align-items: center; gap: 10px; font-weight: 600; }
 .handle small { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.handle-btn { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.handle-btn:hover > div { text-decoration: underline; }
 .table-wrap { overflow-x: auto; margin: 0 -22px; padding: 0 22px; }
 
 /* proyectos */

@@ -534,7 +534,9 @@ function cuentasView() {
   </aside>`;
   const table = A.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Cuenta</th>${state.project.publicos?.length ? '<th>Público</th>' : ''}<th class="r">Seguidores</th><th>Conexión</th><th>Última prueba</th><th></th></tr></thead><tbody>
   ${A.map((a) => `<tr data-id="${a.id}">
-    <td><div class="handle">${netBadge(a.network)}<div class="${a.connected_as ? '' : 'muted'}">${esc(accName(a))}<small>${NETS[a.network].name}</small></div></div></td>
+    <td>${a.network === 'tiktok' && a.status === 'conectada'
+      ? `<button class="handle handle-btn" data-act="tt-videos" title="Ver los videos de la cuenta">${netBadge(a.network)}<div>${esc(accName(a))}<small>${NETS[a.network].name} · ver videos</small></div></button>`
+      : `<div class="handle">${netBadge(a.network)}<div class="${a.connected_as ? '' : 'muted'}">${esc(accName(a))}<small>${NETS[a.network].name}</small></div></div>`}</td>
     ${state.project.publicos?.length ? `<td><select class="input sm" data-act="acc-pub" aria-label="Público de la cuenta"><option value="">Cualquiera</option>${state.project.publicos.map((x) => `<option value="${esc(x.clave)}" ${a.publico === x.clave ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></td>` : ''}
     <td class="r num">${a.connected_as ? fmt(a.followers) : '—'}</td>
     <td><span class="chip s-${a.status}" ${a.status === 'error' ? `title="${esc(a.last_error)}"` : ''}>${ACC_STATUS[a.status] || esc(a.status)}</span></td>
@@ -1464,6 +1466,19 @@ function projectForm(p = {}) {
 }
 
 // ---------- diálogos ----------
+// Videos de una cuenta de TikTok conectada, con vistas, likes y comentarios (Display API, permiso video.list)
+async function ttVideosDialog(a) {
+  const d = openDialog(`Videos de ${esc(accName(a))}`, '<p class="muted"><span class="spin"></span> Trayendo los videos de TikTok…</p>');
+  const db = d.querySelector('.db');
+  try {
+    const vids = await api(`/api/accounts/${a.id}/tiktok/videos`);
+    db.innerHTML = vids.length ? `<ul class="cp-vlist">${vids.map((v) => `<li>${v.cover ? `<img src="${esc(v.cover)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<div><a href="${esc(v.url)}" target="_blank" rel="noopener noreferrer">${esc(v.title || 'Sin título')}</a><span class="small muted">${v.at ? fmtDay(v.at) + ' · ' : ''}${v.views == null ? '—' : fmt(v.views)} vistas · ${v.likes == null ? '—' : fmt(v.likes)} likes · ${v.comments == null ? '—' : fmt(v.comments)} comentarios</span></div></li>`).join('')}</ul>`
+      : '<p class="muted">La cuenta todavía no tiene videos.</p>';
+  } catch (e) {
+    const scope = /scope|autoriz/i.test(e.message);
+    db.innerHTML = `<p class="banner err" style="margin:0">${esc(scope ? 'La cuenta no le dio a ACM permiso para ver sus videos: volvé a conectarla con TikTok (Ver conexión → Conectar con TikTok) y aceptá todos los permisos.' : e.message)}</p>`;
+  }
+}
 function openDialog(title, body, foot = '') {
   const d = document.createElement('dialog');
   d.innerHTML = `<div class="dh"><h2 class="h2">${title}</h2><button class="icon-btn" data-close aria-label="Cerrar">${icon('x')}</button></div><div class="db">${body}</div>${foot ? `<div class="df">${foot}</div>` : ''}`;
@@ -1748,15 +1763,6 @@ function connectPanel(acc) {
     <button class="btn primary" data-cp="oauth" ${busy ? 'disabled' : ''}>${netBadge(a.network)} ${ONE[a.network]}</button></div>
     <p class="small muted cp-or">o seguí los pasos para conectarla a mano</p>`;
   if (state.oauth === undefined) api('/api/oauth').then((o) => { state.oauth = o; draw(); }).catch(() => { state.oauth = null; });
-  // TikTok conectada: los últimos videos de la cuenta con sus números (video.list)
-  let vids = null, vidsErr = '';
-  const loadVids = () => { if (a.network !== 'tiktok' || a.status !== 'conectada') return; vids = undefined; api(`/api/accounts/${a.id}/tiktok/videos`).then((v) => { vids = v; draw(); }).catch((e) => { vids = []; vidsErr = e.message; draw(); }); };
-  const videosBlock = () => a.network !== 'tiktok' || a.status !== 'conectada' ? '' : `<section class="cp-vids">
-    <div class="row" style="justify-content:space-between"><b>Videos de la cuenta</b><button class="btn sm" data-cp="vids">${vids === undefined ? 'Cargando…' : vids ? 'Actualizar' : 'Ver videos'}</button></div>
-    ${vidsErr ? `<p class="banner err" style="margin:6px 0 0">${esc(vidsErr)}</p>` : ''}
-    ${vids && vids.length ? `<ul class="cp-vlist">${vids.map((v) => `<li>${v.cover ? `<img src="${esc(v.cover)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<div><a href="${esc(v.url)}" target="_blank" rel="noopener noreferrer">${esc(v.title || 'Sin título')}</a><span class="small muted">${v.at ? fmtDay(v.at) + ' · ' : ''}${v.views == null ? '—' : fmt(v.views)} vistas · ${v.likes == null ? '—' : fmt(v.likes)} likes · ${v.comments == null ? '—' : fmt(v.comments)} comentarios</span></div></li>`).join('')}</ul>`
-      : vids && !vidsErr ? '<p class="small muted" style="margin:6px 0 0">La cuenta todavía no tiene videos.</p>' : ''}
-  </section>`;
 
   const draw = () => {
     const s = steps[active];
@@ -1766,7 +1772,6 @@ function connectPanel(acc) {
       <header class="cp-h">${netBadge(a.network)}<div class="t"><h2 class="h2">${a.connected_as ? esc(a.connected_as) : 'Conectar cuenta de ' + NETS[a.network].name}</h2><p class="small muted">${NETS[a.network].name}</p></div><button class="btn sm ghost" data-cp="close">Cerrar</button></header>
       <div class="cp-body">${banner}
         ${quick()}
-        ${videosBlock()}
         <div class="cp-cols">
           <ol class="cp-steps">${steps.map((st, i) => `<li class="${i === active ? 'on' : ''} ${stepDone(i) && i !== active ? 'done' : ''}"><button data-cp="go" data-i="${i}"><span class="dot">${stepDone(i) && i !== active ? icon('check', 14) : i + 1}</span><span class="st">${esc(st.title)}</span></button></li>`).join('')}</ol>
           <section class="cp-detail">
@@ -1803,7 +1808,6 @@ function connectPanel(acc) {
     const act = b.dataset.cp;
     if (act === 'close') return close();
     if (act === 'go') { active = Math.max(0, Math.min(steps.length - 1, Number(b.dataset.i))); return draw(); }
-    if (act === 'vids') { loadVids(); return draw(); }
     if (act === 'show') { const k = b.dataset.k; shown.has(k) ? shown.delete(k) : shown.add(k); return draw(); }
     try {
       if (act === 'oauth') { busy = 'oauth'; draw(); const r = await api(`/api/accounts/${a.id}/oauth`, { method: 'POST' }); location.href = r.url; return; }
@@ -2086,6 +2090,7 @@ document.addEventListener('click', async (e) => {
       case 'open-day': postDialog(state.posts.filter((x) => ymd(pdate(x.scheduled_at)) === el.dataset.day).map((x) => x.id)); break;
       case 'del-padron': if (await confirmBox('Quitar padrón', `Se borran las huellas de teléfonos y mails. El número de ${gente()} queda.`, 'Quitar')) { await api(`/api/projects/${state.project.id}/padron`, { method: 'DELETE' }); toast('Padrón quitado'); render(); } break;
       case 'connect-account': connectPanel(state.accounts.find((a) => a.id === id)); break;
+      case 'tt-videos': ttVideosDialog(state.accounts.find((a) => a.id === id)); break;
       case 'pause-account': { const a = state.accounts.find((x) => x.id === id); await api(`/api/accounts/${id}`, { method: 'PUT', body: { status: a.status === 'pausada' ? 'activa' : 'pausada' } }); toast(a.status === 'pausada' ? 'Cuenta reanudada' : 'Cuenta pausada: no recibe publicaciones nuevas'); render(); break; }
       case 'del-account': if (await confirmBox('Borrar cuenta', 'Se quitan también sus publicaciones programadas.')) { await api(`/api/accounts/${id}`, { method: 'DELETE' }); render(); } break;
       case 'del-reel': if (await confirmBox('Borrar reel', 'Se borra el video y sus publicaciones programadas.')) { await api(`/api/reels/${id}`, { method: 'DELETE' }); render(); } break;
