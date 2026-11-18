@@ -3,8 +3,9 @@ FROM node:24-slim
 WORKDIR /app
 ENV NODE_ENV=production ACM_DATA=/data PORT=3000 ACM_MODELS=/app/models
 COPY package.json package-lock.json ./
-# solo lo de Linux x64 y sin GPU: de ~700 MB a ~60 MB
-RUN npm ci --omit=dev && npm cache clean --force \
+# solo lo de Linux x64 y sin GPU: de ~700 MB a ~60 MB. Sin bajar los binarios de CUDA (no se usan y su descarga
+# desde GitHub falla a veces: rompió el despliegue del 18/11)
+RUN ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci --omit=dev && npm cache clean --force \
  && cd node_modules/onnxruntime-node/bin/napi-v3 && rm -rf darwin win32 linux/arm64 linux/x64/libonnxruntime_providers_cuda.so linux/x64/libonnxruntime_providers_tensorrt.so \
  && rm -rf /app/node_modules/onnxruntime-web
 COPY tools/bajar-modelo.mjs tools/
