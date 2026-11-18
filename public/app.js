@@ -781,13 +781,27 @@ function grillaView() {
           <div class="ph-bar"><span class="ph-net">${netBadge(acc.network)}</span><b>${esc(name)}</b><span></span></div>
           <div class="ph-prof">
             <span class="ph-av" style="background:${esc(state.project.color)}">${state.project.photo ? `<img src="/media/${esc(state.project.photo)}" alt="">` : esc(initials(state.project.name))}</span>
-            <div class="ph-stats"><div><b>${L.filter((x) => x.status === 'publicado').length}</b><span>publicados</span></div><div><b>${L.filter((x) => x.status === 'programado').length}</b><span>programados</span></div><div><b>${fmtK(acc.followers || 0)}</b><span>seguidores</span></div></div>
+            <div class="ph-stats"><div><b>${L.filter((x) => x.status === 'publicado').length}</b><span>publicados</span></div><div><b>${L.filter((x) => x.status === 'programado').length}</b><span>por salir</span></div><div><b>${fmtK(acc.followers || 0)}</b><span>seguidores</span></div></div>
           </div>
           <div class="ph-name"><b>${esc(state.project.name)}</b>${state.project.role ? `<span>${esc(state.project.role)}</span>` : ''}</div>
           <div class="ph-tabs"><span class="on">${icon('grid', 16)}</span><span>${icon('play', 16)}</span><span>${icon('users', 16)}</span></div>
           <div class="gr-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px;text-align:center">Sin publicaciones en esta cuenta.</p>'}</div>
           <div class="ph-home"></div>
         </div>
+      </div>
+      <div class="laptop" aria-label="Cómo se ve el perfil en la computadora">
+        <div class="lp-screen">
+          <div class="lp-bar"><span class="lp-dots"><i></i><i></i><i></i></span><span class="lp-url">${netBadge(acc.network)} ${esc(name)}</span></div>
+          <div class="lp-page">
+            <div class="lp-prof">
+              <span class="ph-av lp-av" style="background:${esc(state.project.color)}">${state.project.photo ? `<img src="/media/${esc(state.project.photo)}" alt="">` : esc(initials(state.project.name))}</span>
+              <div class="lp-info"><b>${esc(name)}</b><span class="small muted">${esc(state.project.name)}${state.project.role ? ' · ' + esc(state.project.role) : ''}</span>
+                <div class="lp-stats"><span><b>${L.filter((x) => x.status === 'publicado').length}</b> publicados</span><span><b>${L.filter((x) => x.status === 'programado').length}</b> programados</span><span><b>${fmtK(acc.followers || 0)}</b> seguidores</span></div></div>
+            </div>
+            <div class="lp-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px;text-align:center">Sin publicaciones en esta cuenta.</p>'}</div>
+          </div>
+        </div>
+        <div class="lp-base"></div>
       </div>
     </div></section>`;
 }
