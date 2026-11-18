@@ -943,6 +943,7 @@ function postDialog(ids) {
         </div>
       </div>
     </div>`).join(''));
+  d.classList.add('roomy');
   d.classList.add('wide');
   d.addEventListener('close', () => render());
   // TikTok: antes de publicar se muestra la cuenta y se eligen privacidad e interacciones (reglas de TikTok)
@@ -1875,6 +1876,7 @@ function distributeDialog(reel) {
     <label class="field">Separación entre cuentas<select class="select" name="gap"><option value="20">20 minutos</option><option value="45" selected>45 minutos</option><option value="90">1 h 30</option><option value="180">3 horas</option><option value="1440">1 día</option></select></label></div>
     <div class="row"><span class="spacer"></span><button class="btn" type="button" data-close>Cancelar</button><button class="btn accent" type="submit">Programar</button></div>
   </form>`);
+  d.classList.add('roomy');
   const f = d.querySelector('form');
   const ttBox = d.querySelector('.tt-dist');
   const ttIds = new Set(A.filter((a) => a.network === 'tiktok').map((a) => a.id));

@@ -392,6 +392,9 @@ dialog .df { display: flex; justify-content: flex-end; gap: 10px; padding: 0 22p
 .lgd.prog { background: #fff1d6; box-shadow: inset 0 0 0 1px #e8c98a; } .lgd.pub { background: #d6f8e8; box-shadow: inset 0 0 0 1px #8fd9b6; } .lgd.fail { background: #fde3e6; box-shadow: inset 0 0 0 1px #f3b6bd; }
 .lgd.veda { background: repeating-linear-gradient(135deg, #faf9f7 0 3px, #e4e1da 3px 6px); }
 dialog.wide { width: min(640px, calc(100vw - 32px)); }
+dialog.roomy { width: min(720px, calc(100vw - 32px)); }
+dialog.roomy .db { padding-left: 28px; padding-right: 28px; }
+dialog.roomy .form { gap: 18px; }
 dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
 .ttv-sum { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
 .ttv-sum > div { background: var(--surface-2, #f4f3f0); border-radius: 10px; padding: 10px 12px; display: grid; }
@@ -725,7 +728,7 @@ dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
 .cp-vlist img { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; flex: none; background: var(--line); }
 .cp-vlist li > div { display: grid; min-width: 0; }
 .cp-vlist a { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tt-mode { display: grid; gap: 8px; margin-bottom: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.tt-mode { display: grid; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 .tt-opt { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .tt-opt input { margin-top: 3px; }
 .tt-opt span { display: grid; gap: 1px; }
@@ -750,14 +753,17 @@ dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
 @media (max-width: 560px) { .cp-quick { flex-direction: column; align-items: stretch; } }
 
 /* TikTok: cuenta y opciones antes de publicar */
-.tt-box { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--surface); }
+.tt-box { display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; background: var(--surface); }
+.tt-direct { display: grid; gap: 16px; }
+.tt-direct .field { margin: 0; }
 .tt-who { display: flex; align-items: center; gap: 10px; }
 .tt-who img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex: none; }
 .tt-who div { display: flex; flex-direction: column; }
-.tt-row { display: flex; flex-wrap: wrap; gap: 6px 16px; }
-.tt-chk { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.tt-row { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+.tt-chk { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.35; }
+.tt-chk input { margin-top: 2px; flex: none; }
 .tt-chk.off { color: var(--muted); }
-.tt-brand { display: flex; flex-direction: column; gap: 6px; padding-left: 24px; }
+.tt-brand { display: flex; flex-direction: column; gap: 10px; padding-left: 26px; }
 .tt-decl { margin: 0; }
 .tt-decl a { color: var(--blue); }
 .tt-dist { display: flex; flex-direction: column; gap: 8px; }
