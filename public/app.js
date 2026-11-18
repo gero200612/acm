@@ -1492,12 +1492,12 @@ async function ttVideosDialog(a) {
             <p class="small muted">${v.at ? fmtDay(v.at) : ''}${post ? ' · <span class="chip s-conectada">salió de ACM</span>' : ''}</p>
             <div class="ttv-stats"><span title="Vistas">${icon('eye', 14)} ${n(v.views)}</span><span title="Likes">${icon('heart', 14)} ${n(v.likes)}</span><span title="Comentarios">${icon('chat', 14)} ${n(v.comments)}</span><span title="Compartidos">${icon('share', 14)} ${n(v.shares)}</span></div>
             <div class="ttv-act">
-              <a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer" title="TikTok no deja editar ni borrar desde otras apps: se hace en el video, con los tres puntos">${icon('ext', 14)} Editar o borrar en TikTok</a>
+              <a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer" title="Abre el video en TikTok: ahí, con los tres puntos, se borra o se le cambia la privacidad">${icon('ext', 14)} Abrir en TikTok</a>
               ${post ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${post.reel_id}" data-close>Ver en ACM</a>` : ''}
             </div>
           </div></article>`;
       }).join('')}</div>
-      <p class="small muted ttv-note">TikTok no permite borrar ni cambiar videos publicados desde otras apps. «Editar o borrar en TikTok» abre el video: con los tres puntos lo borrás o le cambiás la privacidad. Para cambiar el video en sí, editá el reel en ACM y publicalo de nuevo.</p>`;
+      <p class="small muted ttv-note">TikTok no permite borrar ni cambiar videos publicados desde otras apps. «Abrir en TikTok» te lleva al video: ahí, con los tres puntos, lo borrás o le cambiás la privacidad. Para cambiar el video en sí, editá el reel en ACM y publicalo de nuevo.</p>`;
   } catch (e) {
     const scope = /scope|autoriz/i.test(e.message);
     db.innerHTML = `<p class="banner err" style="margin:0">${esc(scope ? 'La cuenta no le dio a ACM permiso para ver sus videos: volvé a conectarla con TikTok (Ver conexión → Conectar con TikTok) y aceptá todos los permisos.' : e.message)}</p>`;
