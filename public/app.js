@@ -610,7 +610,7 @@ function reelsView() {
   const sinRepartir = ALL.filter((r) => r.kind !== 'crudo' && !r.posts).length;
   const kind = state.upKind || 'listo';
   const side = `<aside class="rl-side">
-    <div class="seg" role="radiogroup" aria-label="Qué estás subiendo">
+    <div class="seg seg-cards" role="radiogroup" aria-label="Qué estás subiendo">
       <button type="button" data-act="up-kind" data-k="listo" aria-pressed="${kind === 'listo'}"><b>Listo</b><span>editado, para publicar</span></button>
       <button type="button" data-act="up-kind" data-k="crudo" aria-pressed="${kind === 'crudo'}"><b>Crudo</b><span>sin editar, para editar</span></button>
     </div>
@@ -649,7 +649,7 @@ const viewKey = () => location.hash.split('?')[0] + '|' + (state.calMode || '');
 const pins = () => { try { return JSON.parse(localStorage.getItem('acm.pins') || '[]'); } catch { return []; } };
 const isPinned = (id) => pins().includes(id);
 const pinnedFirst = (L) => { const P = pins(); return [...L].sort((a, b) => (P.includes(b.id) - P.includes(a.id)) || (P.indexOf(a.id) - P.indexOf(b.id))); };
-const calModes = () => `<div class="seg" role="group" aria-label="Vista">${[['mes', 'Mes'], ['semana', 'Semana'], ['lista', 'Lista'], ['grilla', 'Grilla']].map(([k, l]) => `<button aria-pressed="${state.calMode === k}" data-act="cal-mode" data-k="${k}">${l}</button>`).join('')}</div>`;
+const calModes = () => `<div class="seg cal-seg" role="group" aria-label="Vista">${[['mes', 'Mes'], ['semana', 'Semana'], ['lista', 'Lista'], ['grilla', 'Grilla']].map(([k, l]) => `<button aria-pressed="${state.calMode === k}" data-act="cal-mode" data-k="${k}">${l}</button>`).join('')}</div>`;
 function calendarioView() {
   if (state.calMode === 'grilla') return grillaView();
   if (state.calMode === 'lista') return listaView();
@@ -669,17 +669,20 @@ function calendarioView() {
   const title = week
     ? `${days[0].getDate()} ${days[0].getMonth() !== days[6].getMonth() ? days[0].toLocaleDateString('es-AR', { month: 'short' }) + ' ' : ''}– ${days[6].getDate()} ${days[6].toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}`
     : cap(m.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }));
-  const ev = (x) => `<button class="cal-ev s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-drag="1"' : ''} title="${esc(x.reel_title)} · ${esc(x.handle ? '@' + x.handle : NETS[x.network].name)}${movable(x) ? ' · arrastrá para cambiar el día' : ''}">${x.reel_cover ? `<span class="th"><img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false"><i class="nd ${x.network}"></i></span>` : `<i class="nd ${x.network}"></i>`}<span class="t">${fmtTime(x.scheduled_at)}</span><span class="r">${esc(x.reel_title)}</span></button>`;
+  const who = (x) => x.connected_as || (x.handle ? '@' + x.handle : NETS[x.network].name);
+  const ev = (x) => week
+    ? `<button class="cal-ev wk s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-drag="1"' : ''} title="${esc(x.reel_title)} · ${esc(who(x))}${movable(x) ? ' · arrastrá para cambiar el día' : ''}">
+        <span class="wk-th">${x.reel_cover ? `<img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false">` : `<video src="/media/${esc(x.reel_file)}#t=0.5" preload="metadata" muted playsinline></video>`}</span>
+        <span class="wk-tx"><span class="wk-top"><span class="t">${fmtTime(x.scheduled_at)}</span>${netBadge(x.network)}</span><span class="r">${esc(x.reel_title)}</span><span class="wk-who">${esc(who(x))}</span></span></button>`
+    : `<button class="cal-ev s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-drag="1"' : ''} title="${esc(x.reel_title)} · ${esc(who(x))}${movable(x) ? ' · arrastrá para cambiar el día' : ''}">${netBadge(x.network)}<span class="t">${fmtTime(x.scheduled_at)}</span><span class="r">${esc(x.reel_title)}</span></button>`;
   return `<section class="card cal ${week ? 'week' : ''}">
     <div class="cal-head">
       <h2 class="h2">${title}</h2>
       <span class="small muted">${shown.length} ${shown.length === 1 ? 'publicación' : 'publicaciones'} ${week ? 'esta semana' : 'este mes'}</span>
       <span class="spacer"></span>
+      <span class="cal-nav" role="group" aria-label="Moverse en el calendario"><button class="cal-tb" data-act="cal-prev" aria-label="${week ? 'Semana anterior' : 'Mes anterior'}">${icon('left', 16)}</button><button class="cal-tb" data-act="cal-today">Hoy</button><button class="cal-tb" data-act="cal-next" aria-label="${week ? 'Semana siguiente' : 'Mes siguiente'}">${icon('right', 16)}</button></span>
       ${calModes()}
-      <button class="btn sm" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>
-      <span class="cal-nav"><button class="btn sm" data-act="cal-today">Hoy</button>
-      <button class="icon-btn" data-act="cal-prev" aria-label="${week ? 'Semana anterior' : 'Mes anterior'}">${icon('left')}</button>
-      <button class="icon-btn" data-act="cal-next" aria-label="${week ? 'Semana siguiente' : 'Mes siguiente'}">${icon('right')}</button></span>
+      <button class="btn cal-sync" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>
     </div>
     <p class="cal-hint small muted">${icon('move', 14)} Arrastrá una publicación a otro día para moverla: mantiene la hora. Las que ya salieron o salen en menos de 15 minutos quedan fijas.</p>
     <div class="cal-grid">
@@ -692,7 +695,7 @@ function calendarioView() {
         const drop = d >= todayD && !after;
         const max = week ? 99 : 3;
         return `<div class="cal-day ${cls}" data-day="${ymd(d)}" ${drop ? 'data-drop="1"' : ''}>
-          <div class="cal-dn">${week ? '' : `<span>${d.getDate()}</span>`}${isE ? '<em class="tag e">Elección</em>' : isL ? '<em class="tag l">Fin de propaganda</em>' : ''}${L.filter(movable).length > 1 ? `<button class="cal-mvday" data-act="move-day" data-day="${ymd(d)}" title="Mover todo el día a otra fecha" aria-label="Mover todo el día">${icon('move', 13)}</button>` : ''}</div>
+          <div class="cal-dn ${week && !isE && !isL && !(L.filter(movable).length > 1) ? 'empty' : ''}">${week ? '' : `<span>${d.getDate()}</span>`}${isE ? '<em class="tag e">Elección</em>' : isL ? '<em class="tag l">Fin de propaganda</em>' : ''}${L.filter(movable).length > 1 ? `<button class="cal-mvday" data-act="move-day" data-day="${ymd(d)}" title="Mover todo el día a otra fecha" aria-label="Mover todo el día">${icon('move', 13)}</button>` : ''}</div>
           ${L.slice(0, max).map(ev).join('')}
           ${L.length > max ? `<button class="cal-more" data-act="open-day" data-day="${ymd(d)}">+${L.length - max} más</button>` : ''}
         </div>`; }).join('')}
@@ -727,7 +730,7 @@ function listaView() {
       <input class="input" id="lq-q" type="search" placeholder="Buscar por reel o cuenta" value="${esc(LQ.q)}" aria-label="Buscar">
       <select class="input" id="lq-st" aria-label="Estado"><option value="">Todos los estados</option>${Object.entries(POST_ST).map(([k, l]) => `<option value="${k}" ${LQ.st === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <select class="input" id="lq-net" aria-label="Red"><option value="">Todas las redes</option>${nets.map((n) => `<option value="${n}" ${LQ.net === n ? 'selected' : ''}>${NETS[n].name}</option>`).join('')}</select>
-      <button class="btn sm" id="lq-sort">${LQ.asc ? 'Más viejas primero' : 'Más nuevas primero'}</button>
+      <select class="input" id="lq-sort" aria-label="Orden"><option value="asc" ${LQ.asc ? 'selected' : ''}>Más viejas primero</option><option value="desc" ${LQ.asc ? '' : 'selected'}>Más nuevas primero</option></select>
     </div>
     <div class="lq-wrap"><table class="lq"><thead><tr><th>Cuándo</th><th>Reel</th><th>Cuenta</th><th>Estado</th></tr></thead><tbody id="lq-body"></tbody></table></div>
   </section>`;
@@ -740,7 +743,7 @@ function drawLista() {
     .sort((a, b) => (LQ.asc ? 1 : -1) * a.scheduled_at.localeCompare(b.scheduled_at));
   $('#lq-n').textContent = `${L.length} de ${state.posts.length}`;
   body.innerHTML = L.slice(0, 400).map((x) => `<tr data-act="open-post" data-pid="${x.id}" tabindex="0"><td><b>${fmtDay(x.scheduled_at)}</b> ${fmtTime(x.scheduled_at)}</td><td>${esc(x.reel_title)}</td>
-    <td>${netBadge(x.network)} ${esc(x.connected_as || (x.handle ? '@' + x.handle : NETS[x.network].name))}</td><td><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span></td></tr>`).join('')
+    <td><span class="lq-acc">${netBadge(x.network)}${esc(x.connected_as || (x.handle ? '@' + x.handle : NETS[x.network].name))}</span></td><td><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span></td></tr>`).join('')
     || '<tr><td colspan="4" class="muted">Nada con esos filtros.</td></tr>';
 }
 function wireLista() {
@@ -749,7 +752,7 @@ function wireLista() {
   $('#lq-q').addEventListener('input', (e) => { LQ.q = e.target.value; drawLista(); });
   $('#lq-st').addEventListener('change', (e) => { LQ.st = e.target.value; drawLista(); });
   $('#lq-net').addEventListener('change', (e) => { LQ.net = e.target.value; drawLista(); });
-  $('#lq-sort').addEventListener('click', (e) => { LQ.asc = !LQ.asc; e.target.textContent = LQ.asc ? 'Más viejas primero' : 'Más nuevas primero'; drawLista(); });
+  $('#lq-sort').addEventListener('change', (e) => { LQ.asc = e.target.value === 'asc'; drawLista(); });
   $('#lq-body').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset.pid) postDialog([Number(e.target.dataset.pid)]); });
 }
 
@@ -769,7 +772,7 @@ function grillaView() {
       <span class="gr-title">${esc(x.reel_title)}</span></button>`;
   return `<section class="card cal">${head}
     <div class="gr-wrap">
-      <div class="gr-accs">${accs.map((a) => `<button class="gr-acc ${a.id === acc.id ? 'on' : ''}" data-act="grid-acc" data-id="${a.id}">${netBadge(a.network)}<span>${esc(a.connected_as || (a.handle ? '@' + a.handle : NETS[a.network].name))}</span><b>${S.filter((x) => x.account_id === a.id && x.status === 'programado').length}</b></button>`).join('')}
+      <div class="gr-accs">${accs.map((a) => `<button class="gr-acc ${a.id === acc.id ? 'on' : ''}" data-act="grid-acc" data-id="${a.id}">${netBadge(a.network)}<span>${esc(a.connected_as || (a.handle ? '@' + a.handle : NETS[a.network].name))}</span><b>${S.filter((x) => x.account_id === a.id && x.status === 'programado').length} prog.</b></button>`).join('')}
         <p class="small muted" style="margin-top:10px">${icon('move', 14)} Arrastrá un reel programado sobre otro para intercambiarlos: las horas quedan, cambian los reels. Los publicados quedan fijos.</p></div>
       <div class="phone"><div class="ph-top"><span class="ph-av" style="background:${esc(state.project.color)}">${esc(initials(state.project.name))}</span><div><b>${esc(name)}</b><span class="small muted">${L.filter((x) => x.status === 'publicado').length} publicados · ${L.filter((x) => x.status === 'programado').length} programados</span></div></div>
         <div class="gr-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px">Sin publicaciones en esta cuenta.</p>'}</div></div>
