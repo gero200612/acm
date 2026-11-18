@@ -427,6 +427,8 @@ dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
 .pd video { width: 100%; height: auto; aspect-ratio: 9/16; object-fit: contain; border-radius: 12px; background: var(--line-2); flex: none; align-self: flex-start; }
 .pd-info { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .pd-info b { font-size: 16px; }
+.pd-info .tt-who { margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--line-2); }
+.pd-info .tt-decl { margin-top: 2px; }
 @media (max-width: 760px) {
   .cal-day { min-height: 64px; } .cal-ev .r, .cal-ev .t { display: none; } .cal-ev { width: auto; padding: 4px; } .cal-day { flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
   .cal-dn { width: 100%; } .tag { display: none; }

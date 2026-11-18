@@ -955,7 +955,13 @@ function postDialog(ids) {
   $$('.tt-opts', d).forEach(async (box) => {
     const x = state.posts.find((p) => p.id === Number(box.closest('.pd').dataset.id));
     let o = {}; try { o = x.options ? JSON.parse(x.options) : {}; } catch {}
-    try { const c = await api(`/api/accounts/${box.dataset.acc}/tiktok`); box.innerHTML = ttForm(c, o); ttWire(box); }
+    try {
+      const c = await api(`/api/accounts/${box.dataset.acc}/tiktok`); box.innerHTML = ttForm(c, o);
+      // la cuenta y el aviso de música van arriba, al lado del video: así no hace falta bajar
+      const info = box.closest('.pd')?.querySelector('.pd-info');
+      if (info) { const who = $('.tt-who', box), decl = $('.tt-decl', box); if (who) info.append(who); if (decl) info.append(decl); }
+      ttWire(box);
+    }
     catch (e) { box.innerHTML = `<p class="banner err" style="margin:0">${esc(e.message)}</p>`; }
   });
 }
@@ -989,7 +995,7 @@ function ttForm(c, o = {}) {
 function ttWire(box) {
   const decl = () => {
     const bc = $('[data-tt=brandContent]', box)?.checked;
-    $('.tt-decl', box).innerHTML = `Al publicar, aceptás ${bc ? 'la <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener noreferrer">Política de contenido de marca</a> y ' : ''}la <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener noreferrer">Confirmación de uso de música</a> de TikTok.`;
+    $('.tt-decl', box.closest('.pd') || box).innerHTML = `Al publicar, aceptás ${bc ? 'la <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener noreferrer">Política de contenido de marca</a> y ' : ''}la <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener noreferrer">Confirmación de uso de música</a> de TikTok.`;
     $('.tt-brand', box).hidden = !$('[data-tt=commercial]', box).checked;
     const d = $('[data-tt=mode][value=borrador]', box)?.checked; $('.tt-direct', box).hidden = !!d;
     $('[data-tt=privacy]', box).required = !d; // en borrador la privacidad se elige en la app de TikTok
