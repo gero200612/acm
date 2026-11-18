@@ -27,6 +27,7 @@ const ICON = {
   edit: 'M4 20h4L19 9l-4-4L4 16v4ZM13.5 6.5l4 4',
   pause: 'M9 5v14M15 5v14',
   play: 'M7 5v14l11-7Z',
+  grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
   left: 'm15 6-6 6 6 6',
   right: 'm9 6 6 6-6 6',
   refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
@@ -680,9 +681,9 @@ function calendarioView() {
       <h2 class="h2">${title}</h2>
       <span class="small muted">${shown.length} ${shown.length === 1 ? 'publicación' : 'publicaciones'} ${week ? 'esta semana' : 'este mes'}</span>
       <span class="spacer"></span>
+      <button class="btn cal-sync" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>
       <span class="cal-nav" role="group" aria-label="Moverse en el calendario"><button class="cal-tb" data-act="cal-prev" aria-label="${week ? 'Semana anterior' : 'Mes anterior'}">${icon('left', 16)}</button><button class="cal-tb" data-act="cal-today">Hoy</button><button class="cal-tb" data-act="cal-next" aria-label="${week ? 'Semana siguiente' : 'Mes siguiente'}">${icon('right', 16)}</button></span>
       ${calModes()}
-      <button class="btn cal-sync" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>
     </div>
     <p class="cal-hint small muted">${icon('move', 14)} Arrastrá una publicación a otro día para moverla: mantiene la hora. Las que ya salieron o salen en menos de 15 minutos quedan fijas.</p>
     <div class="cal-grid">
@@ -774,8 +775,20 @@ function grillaView() {
     <div class="gr-wrap">
       <div class="gr-accs">${accs.map((a) => `<button class="gr-acc ${a.id === acc.id ? 'on' : ''}" data-act="grid-acc" data-id="${a.id}">${netBadge(a.network)}<span>${esc(a.connected_as || (a.handle ? '@' + a.handle : NETS[a.network].name))}</span><b>${S.filter((x) => x.account_id === a.id && x.status === 'programado').length} prog.</b></button>`).join('')}
         <p class="small muted" style="margin-top:10px">${icon('move', 14)} Arrastrá un reel programado sobre otro para intercambiarlos: las horas quedan, cambian los reels. Los publicados quedan fijos.</p></div>
-      <div class="phone"><div class="ph-top"><span class="ph-av" style="background:${esc(state.project.color)}">${esc(initials(state.project.name))}</span><div><b>${esc(name)}</b><span class="small muted">${L.filter((x) => x.status === 'publicado').length} publicados · ${L.filter((x) => x.status === 'programado').length} programados</span></div></div>
-        <div class="gr-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px">Sin publicaciones en esta cuenta.</p>'}</div></div>
+      <div class="phone">
+        <div class="ph-screen">
+          <div class="ph-status"><span>9:41</span><span class="ph-island"></span><span class="ph-sig"><i></i><i></i><i></i><b></b></span></div>
+          <div class="ph-bar"><span class="ph-net">${netBadge(acc.network)}</span><b>${esc(name)}</b><span></span></div>
+          <div class="ph-prof">
+            <span class="ph-av" style="background:${esc(state.project.color)}">${state.project.photo ? `<img src="/media/${esc(state.project.photo)}" alt="">` : esc(initials(state.project.name))}</span>
+            <div class="ph-stats"><div><b>${L.filter((x) => x.status === 'publicado').length}</b><span>publicados</span></div><div><b>${L.filter((x) => x.status === 'programado').length}</b><span>programados</span></div><div><b>${fmtK(acc.followers || 0)}</b><span>seguidores</span></div></div>
+          </div>
+          <div class="ph-name"><b>${esc(state.project.name)}</b>${state.project.role ? `<span>${esc(state.project.role)}</span>` : ''}</div>
+          <div class="ph-tabs"><span class="on">${icon('grid', 16)}</span><span>${icon('play', 16)}</span><span>${icon('users', 16)}</span></div>
+          <div class="gr-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px;text-align:center">Sin publicaciones en esta cuenta.</p>'}</div>
+          <div class="ph-home"></div>
+        </div>
+      </div>
     </div></section>`;
 }
 function wireGridDrag() {
