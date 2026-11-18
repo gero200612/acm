@@ -37,6 +37,11 @@ const ICON = {
   file: 'M7 3h7l5 5v13H7zM14 3v5h5',
   flask: 'M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9',
   users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1M16 3.5a4 4 0 0 1 0 7.5M19 14a5 5 0 0 1 3 5v2',
+  eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  heart: 'M12 20s-7-4.4-9.2-8.6A5 5 0 0 1 12 6a5 5 0 0 1 9.2 5.4C19 15.6 12 20 12 20z',
+  chat: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.6A8 8 0 1 1 21 12z',
+  share: 'M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13',
+  ext: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
 };
 const icon = (k, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[k]}"/></svg>`;
 const netBadge = (n) => `<span class="net ${n}" title="${NETS[n]?.name || n}">${NETS[n]?.svg || ''}</span>`;
@@ -1466,14 +1471,33 @@ function projectForm(p = {}) {
 }
 
 // ---------- diálogos ----------
-// Videos de una cuenta de TikTok conectada, con vistas, likes y comentarios (Display API, permiso video.list)
+// Videos de una cuenta de TikTok conectada (Display API, permiso video.list). La API de TikTok no deja borrar ni editar
+// videos publicados: cada tarjeta lleva al video en TikTok para hacerlo ahí y, si salió de ACM, al reel en ACM.
 async function ttVideosDialog(a) {
   const d = openDialog(`Videos de ${esc(accName(a))}`, '<p class="muted"><span class="spin"></span> Trayendo los videos de TikTok…</p>');
+  d.classList.add('wide');
   const db = d.querySelector('.db');
+  const n = (x) => (x == null ? '—' : fmtK(x));
   try {
     const vids = await api(`/api/accounts/${a.id}/tiktok/videos`);
-    db.innerHTML = vids.length ? `<ul class="cp-vlist">${vids.map((v) => `<li>${v.cover ? `<img src="${esc(v.cover)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<div><a href="${esc(v.url)}" target="_blank" rel="noopener noreferrer">${esc(v.title || 'Sin título')}</a><span class="small muted">${v.at ? fmtDay(v.at) + ' · ' : ''}${v.views == null ? '—' : fmt(v.views)} vistas · ${v.likes == null ? '—' : fmt(v.likes)} likes · ${v.comments == null ? '—' : fmt(v.comments)} comentarios</span></div></li>`).join('')}</ul>`
-      : '<p class="muted">La cuenta todavía no tiene videos.</p>';
+    const tot = (k) => vids.reduce((t, v) => t + (v[k] || 0), 0);
+    db.innerHTML = !vids.length ? '<p class="muted">La cuenta todavía no tiene videos.</p>' : `
+      <div class="ttv-sum"><div><b>${vids.length}</b><span>videos</span></div><div><b>${fmtK(tot('views'))}</b><span>vistas</span></div><div><b>${fmtK(tot('likes'))}</b><span>likes</span></div><div><b>${fmtK(tot('comments'))}</b><span>comentarios</span></div></div>
+      <div class="ttv-grid">${vids.map((v) => {
+        const post = state.posts.find((p) => p.account_id === a.id && p.network_video_id === v.id);
+        return `<article class="ttv">
+          <a class="ttv-cover" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer">${v.cover ? `<img src="${esc(v.cover)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}${v.duration ? `<span class="ttv-dur">${Math.round(v.duration)} s</span>` : ''}</a>
+          <div class="ttv-body">
+            <p class="ttv-title">${esc(v.title || 'Sin título')}</p>
+            <p class="small muted">${v.at ? fmtDay(v.at) : ''}${post ? ' · <span class="chip s-conectada">salió de ACM</span>' : ''}</p>
+            <div class="ttv-stats"><span title="Vistas">${icon('eye', 14)} ${n(v.views)}</span><span title="Likes">${icon('heart', 14)} ${n(v.likes)}</span><span title="Comentarios">${icon('chat', 14)} ${n(v.comments)}</span><span title="Compartidos">${icon('share', 14)} ${n(v.shares)}</span></div>
+            <div class="ttv-act">
+              <a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer" title="TikTok no deja editar ni borrar desde otras apps: se hace en el video, con los tres puntos">${icon('ext', 14)} Editar o borrar en TikTok</a>
+              ${post ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${post.reel_id}" data-close>Ver en ACM</a>` : ''}
+            </div>
+          </div></article>`;
+      }).join('')}</div>
+      <p class="small muted ttv-note">TikTok no permite borrar ni cambiar videos publicados desde otras apps. «Editar o borrar en TikTok» abre el video: con los tres puntos lo borrás o le cambiás la privacidad. Para cambiar el video en sí, editá el reel en ACM y publicalo de nuevo.</p>`;
   } catch (e) {
     const scope = /scope|autoriz/i.test(e.message);
     db.innerHTML = `<p class="banner err" style="margin:0">${esc(scope ? 'La cuenta no le dio a ACM permiso para ver sus videos: volvé a conectarla con TikTok (Ver conexión → Conectar con TikTok) y aceptá todos los permisos.' : e.message)}</p>`;

@@ -392,6 +392,25 @@ dialog .df { display: flex; justify-content: flex-end; gap: 10px; padding: 0 22p
 .lgd.prog { background: #fff1d6; box-shadow: inset 0 0 0 1px #e8c98a; } .lgd.pub { background: #d6f8e8; box-shadow: inset 0 0 0 1px #8fd9b6; } .lgd.fail { background: #fde3e6; box-shadow: inset 0 0 0 1px #f3b6bd; }
 .lgd.veda { background: repeating-linear-gradient(135deg, #faf9f7 0 3px, #e4e1da 3px 6px); }
 dialog.wide { width: min(640px, calc(100vw - 32px)); }
+dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
+.ttv-sum { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.ttv-sum > div { background: var(--surface-2, #f4f3f0); border-radius: 10px; padding: 10px 12px; display: grid; }
+.ttv-sum b { font-size: 20px; }
+.ttv-sum span { color: var(--muted); font-size: 12.5px; }
+.ttv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; max-height: 58vh; overflow: auto; padding-right: 2px; }
+.ttv { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; background: var(--surface); }
+.ttv-cover { position: relative; display: block; aspect-ratio: 9 / 16; max-height: 240px; background: #111; }
+.ttv-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ttv-dur { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.65); color: #fff; font-size: 11.5px; padding: 1px 6px; border-radius: 6px; }
+.ttv-body { padding: 10px; display: grid; gap: 6px; }
+.ttv-title { margin: 0; font-weight: 600; font-size: 13.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ttv-body p.small { margin: 0; }
+.ttv-stats { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--ink); }
+.ttv-stats span { display: inline-flex; align-items: center; gap: 3px; }
+.ttv-act { display: flex; flex-wrap: wrap; gap: 6px; }
+.ttv-act .btn { gap: 5px; width: 100%; justify-content: center; white-space: normal; text-align: center; }
+.ttv-note { margin: 12px 0 0; }
+@media (max-width: 560px) { .ttv-sum { grid-template-columns: repeat(2, 1fr); } }
 .pd { display: flex; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line-2); }
 .pd:last-child { border-bottom: 0; }
 .pd video { width: 120px; aspect-ratio: 9/16; object-fit: cover; border-radius: 10px; background: #0d0d0f; flex: none; }
