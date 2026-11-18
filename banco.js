@@ -8,6 +8,7 @@ import { publicUrl } from './oauth.js';
 import { testConnection } from './connections.js';
 import { authorizePage, authorizeAds, MetaChoice, metaPublic } from './meta-connect.js';
 import { publish, tiktokVideos, tiktokOptions } from './publisher.js';
+import { review as reviewVideo } from './mp4probe.js';
 import { uploadAudience, createCampaign, testAds } from './ads.js';
 import ExcelJS from 'exceljs';
 import { readPadron, normPhone } from './padron.js';
@@ -358,6 +359,12 @@ function cases(video, sim) {
       const r = await publish('tiktok', { accessToken: 'TT_OK' }, video, 'Prueba', 'Prueba', () => {}, () => {}, { mode: 'borrador' });
       eq(r.id, 'PD1', 'borrador'); yes(/borradores/.test(r.note), 'no avisó que quedó en borradores: ' + r.note);
       eq(tiktokOptions({ mode: 'cualquiera' }).mode, 'directo', 'un modo desconocido publica directo');
+    }],
+    ['Publicación', 'TikTok: un video de 15 cuadros por segundo se marca antes de subirlo (TikTok pide 23 a 60)', async () => {
+      const r = reviewVideo({ duration: 20, width: 1080, height: 1920, size: 1e6, fps: 15 });
+      yes(!r.tiktok.ok && /cuadros por segundo/.test(r.tiktok.why.join(' ')), 'TikTok: ' + JSON.stringify(r.tiktok));
+      yes(r.instagram.ok, 'a Instagram no le importa');
+      eq(reviewVideo({ duration: 20, width: 1080, height: 1920, size: 1e6, fps: 30 }).tiktok.ok, true, '30 cuadros por segundo está bien');
     }],
     ['Conexiones', 'TikTok: «Videos de la cuenta» trae los últimos videos con vistas y likes (video.list)', async () => {
       const v = await tiktokVideos({ accessToken: 'TT_OK' });

@@ -1,5 +1,6 @@
 // Publicación automática: sube cada reel a su red por la API oficial cuando llega su hora.
 import fs from 'node:fs';
+import { probe } from './mp4probe.js';
 import { getTikTokToken, getGoogleToken, bases } from './connections.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -119,6 +120,9 @@ async function tiktokDraft(auth, file, log) {
 }
 
 async function tiktok(c, file, caption, log, _title, save, opts = {}) {
+  // TikTok rechaza los videos de menos de 23 o más de 60 cuadros por segundo (frame_rate_check_failed): se avisa antes de subirlo
+  const fps = probe(file)?.fps;
+  if (fps && (fps < 23 || fps > 60)) throw new Error(`El video tiene ${fps} cuadros por segundo y TikTok pide entre 23 y 60: exportalo de nuevo a 30 cuadros por segundo y subilo otra vez.`);
   const auth = await tiktokAuth(c, save);
   const o = tiktokOptions(opts);
   if (o.mode === 'borrador') return tiktokDraft(auth, file, log);

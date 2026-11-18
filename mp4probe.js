@@ -44,7 +44,7 @@ export function probe(file) {
       const du = v === 1 ? Number(moov.readBigUInt64BE(mvhd.start + 24)) : moov.readUInt32BE(mvhd.start + 16);
       duration = ts ? du / ts : 0;
     }
-    let width = 0, height = 0;
+    let width = 0, height = 0, fps = 0;
     for (const t of top.filter((b) => b.type === 'trak')) {
       const tb = boxes(moov, t.start, t.end);
       const mdia = find(moov, tb, 'mdia');
@@ -52,6 +52,18 @@ export function probe(file) {
       if (!hdlr || moov.toString('latin1', hdlr.start + 8, hdlr.start + 12) !== 'vide') continue;
       const tkhd = find(moov, tb, 'tkhd');
       if (!tkhd) continue;
+      // cuadros por segundo: cantidad de cuadros (stts) sobre la duración de la pista (mdhd)
+      try {
+        const md = boxes(moov, mdia.start, mdia.end), mdhd = find(moov, md, 'mdhd'), minf = find(moov, md, 'minf');
+        const stbl = minf && find(moov, boxes(moov, minf.start, minf.end), 'stbl'), stts = stbl && find(moov, boxes(moov, stbl.start, stbl.end), 'stts');
+        if (mdhd && stts) {
+          const v1 = moov[mdhd.start] === 1;
+          const scale = moov.readUInt32BE(mdhd.start + (v1 ? 20 : 12)), dur = v1 ? Number(moov.readBigUInt64BE(mdhd.start + 24)) : moov.readUInt32BE(mdhd.start + 16);
+          let frames = 0; const n = moov.readUInt32BE(stts.start + 4);
+          for (let k = 0; k < n; k++) frames += moov.readUInt32BE(stts.start + 8 + k * 8);
+          if (scale && dur) fps = Math.round(frames / (dur / scale) * 10) / 10;
+        }
+      } catch {}
       width = moov.readUInt32BE(tkhd.end - 8) / 65536;
       height = moov.readUInt32BE(tkhd.end - 4) / 65536;
       // matriz de rotación: los videos de celular grabados parados vienen girados 90°
@@ -60,7 +72,7 @@ export function probe(file) {
       if (a === 0 && Math.abs(b) === 65536) [width, height] = [height, width];
       break;
     }
-    return { duration: Math.round(duration * 10) / 10, width: Math.round(width), height: Math.round(height), size: total };
+    return { duration: Math.round(duration * 10) / 10, width: Math.round(width), height: Math.round(height), size: total, fps };
   } catch { return null; }
   finally { fs.closeSync(fd); }
 }
@@ -69,7 +81,7 @@ export function probe(file) {
 export const RULES = {
   instagram: { name: 'Instagram Reels', min: 3, max: 900, maxMB: 1024, ratio: [0.5, 0.8], minW: 540 },
   facebook: { name: 'Facebook Reels', min: 3, max: 90, maxMB: 1024, ratio: [0.5, 0.6], minW: 540 },
-  tiktok: { name: 'TikTok', min: 3, max: 600, maxMB: 4096, ratio: [0.5, 1], minW: 360 },
+  tiktok: { name: 'TikTok', min: 3, max: 600, maxMB: 4096, ratio: [0.5, 1], minW: 360, fps: [23, 60] },
   youtube: { name: 'YouTube Shorts', min: 1, max: 180, maxMB: 4096, ratio: [0.5, 1], minW: 360 },
 };
 
@@ -84,6 +96,7 @@ export function review(meta) {
     const ratio = meta.height ? meta.width / meta.height : 0;
     if (ratio && (ratio < r.ratio[0] - 0.02 || ratio > r.ratio[1] + 0.02)) why.push(ratio > 1 ? 'es horizontal; tiene que ser vertical' : `proporción ${meta.width}×${meta.height}; lo ideal es 9:16`);
     if (meta.width && meta.width < r.minW) why.push(`ancho ${meta.width} px; mínimo ${r.minW} px`);
+    if (r.fps && meta.fps && (meta.fps < r.fps[0] || meta.fps > r.fps[1])) why.push(`tiene ${meta.fps} cuadros por segundo; ${r.name} pide entre ${r.fps[0]} y ${r.fps[1]}`);
     out[net] = { ok: !why.length, why };
   }
   return out;
