@@ -424,7 +424,7 @@ dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
 @media (max-width: 560px) { .ttv-sum { grid-template-columns: repeat(2, 1fr); } }
 .pd { display: grid; grid-template-columns: 140px 1fr; gap: 16px 20px; padding: 10px 0 16px; border-bottom: 1px solid var(--line-2); align-items: start; }
 .pd-actions { grid-column: 1 / -1; display: grid; gap: 14px; }
-.pd-actions:empty { display: none; }
+.pd-actions:empty, .pd-actions[hidden] { display: none; }
 .pd-btns { display: flex; justify-content: flex-end; gap: 10px; }
 @media (max-width: 560px) { .pd { grid-template-columns: 120px 1fr; } }
 .pd:last-child { border-bottom: 0; }

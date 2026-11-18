@@ -89,7 +89,7 @@ const ADMIN_GLOBAL = [['GET', /^\/api\/(projects|overview|storage|clock|oauth|ag
 const SOMBRA = [
   ['GET', /^\/api\/(projects|storage|me|session)$/],
   ['GET', /^\/api\/projects\/\d+$/],
-  ['GET', /^\/api\/projects\/\d+\/(reels|review)$/],
+  ['GET', /^\/api\/projects\/\d+\/(reels|review|posts|accounts)$/], // el calendario: solo mirar, sin números
   ['POST', /^\/api\/projects\/\d+\/reels(\/uploads|\/complete)?$/],
   ['POST', /^\/api\/clips\/[^/]+\/review$/],
   ['GET', /^\/api\/reels\/\d+\/comments$/],

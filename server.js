@@ -592,7 +592,11 @@ app.delete('/api/projects/:id/padron', (req, res) => {
 });
 
 // cuentas
-app.get('/api/projects/:id/accounts', (req, res) => res.json(all('SELECT * FROM accounts WHERE project_id = ? ORDER BY network, created_at', req.params.id).map(accountOut)));
+app.get('/api/projects/:id/accounts', (req, res) => {
+  const L = all('SELECT * FROM accounts WHERE project_id = ? ORDER BY network, created_at', req.params.id).map(accountOut);
+  // la sombra (equipo de contenido) ve el calendario: de cada cuenta solo la red y el nombre, sin seguidores ni datos de conexión
+  res.json(req.user?.role === 'sombra' ? L.map((a) => ({ id: a.id, project_id: a.project_id, network: a.network, handle: a.handle, connected_as: a.connected_as, status: a.status, followers: 0 })) : L);
+});
 app.post('/api/projects/:id/accounts', (req, res) => {
   const b = pick(req.body || {}, A_FIELDS);
   if (!NETWORKS.includes(b.network)) return res.status(400).json({ error: 'Falta la red' });

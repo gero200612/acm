@@ -171,13 +171,18 @@ export function recorridoCases(sb) {
       const gen = (await api('GET', '/api/users')).j.find((x) => x.email === 'g1@x.com');
       eq((await u('DELETE', `/api/users/${gen.id}`)).status, 404, 'borrar un general');
     }],
-    [G('roles'), 'Sombra: sube crudos (aunque pida «listo») y ve Para aprobar; no ve números, cuentas ni otro proyecto', async () => {
+    [G('roles'), 'Sombra: sube crudos (aunque pida «listo»), ve Para aprobar y el calendario; no ve números, conexiones ni otro proyecto', async () => {
       const u = await sb.box.client('som@x.com', 'clave-segura-1');
       const ps = (await u('GET', '/api/projects')).j;
       eq(ps.map((p) => p.id), [c.p], 've solo su proyecto');
       eq(['padron', 'pauta', 'accounts', 'published', 'scheduled'].filter((k) => k in ps[0]), [], 'sin números en el proyecto');
-      for (const url of [`/api/projects/${c.p}/performance`, `/api/projects/${c.p}/accounts`, `/api/projects/${c.p}/posts`, `/api/projects/${c.p}/campaigns`, `/api/projects/${c.p}/memory`, '/api/overview', '/api/users', '/api/search?q=re', `/api/projects/${c.p}/knowledge`])
+      for (const url of [`/api/projects/${c.p}/performance`, `/api/projects/${c.p}/campaigns`, `/api/projects/${c.p}/memory`, '/api/overview', '/api/users', '/api/search?q=re', `/api/projects/${c.p}/knowledge`])
         eq((await u('GET', url)).status, 403, url);
+      // el calendario lo ve (solo mirar): cuentas sin seguidores ni datos de conexión, y las publicaciones
+      const ac = await u('GET', `/api/projects/${c.p}/accounts`);
+      eq([ac.status, (ac.j || []).every((a) => a.followers === 0 && !('fields' in a) && !('last_error' in a))], [200, true], 'cuentas sin números ni conexión');
+      eq((await u('GET', `/api/projects/${c.p}/posts`)).status, 200, 've el calendario');
+      eq((await u('PUT', `/api/posts/0`, { scheduled_at: '2030-01-01 10:00' })).status, 403, 'no mueve publicaciones');
       eq((await u('PUT', `/api/projects/${c.p}`, { name: 'x' })).status, 403, 'editar el proyecto');
       eq((await u('GET', `/api/projects/${c.otro}/review`)).status, 404, 'Para aprobar de otro');
       eq((await u('GET', `/api/projects/${c.p}/review`)).status, 200, 'su Para aprobar');

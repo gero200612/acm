@@ -102,7 +102,7 @@ try { state.calMode = localStorage.getItem('acm.calMode') || 'mes'; } catch { st
 
 async function loadProjects() { state.projects = await api('/api/projects'); }
 async function loadProject(id) {
-  if (isSombra()) { const [p, r] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/reels`)]); state.project = p; state.reels = r; state.accounts = []; state.posts = []; return; }
+  if (isSombra()) { const [p, r, a, s] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/reels`), api(`/api/projects/${id}/accounts`), api(`/api/projects/${id}/posts`)]); state.project = p; state.reels = r; state.accounts = a; state.posts = s; return; }
   const [p, a, r, s] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/accounts`), api(`/api/projects/${id}/reels`), api(`/api/projects/${id}/posts`)]);
   state.project = p; state.accounts = a; state.reels = r; state.posts = s;
   // qué redes se conectan con un clic (el botón de Facebook también está en Meta Ads)
@@ -125,11 +125,11 @@ async function render() {
   // un administrador de dirigente o una sombra van directo a su proyecto; la sombra, a Para aprobar
   if (!isGeneral() && (r.view === 'home' || r.view === 'lab' || (r.view === 'project' && r.id !== state.me?.project_id))) { location.replace(`#/p/${state.me.project_id}${isSombra() ? '/aprobar' : ''}`); return; }
   if (r.view === 'users' && !canUsers()) { location.replace('#'); return; }
-  if (isSombra() && r.view === 'project' && !['crudos', 'aprobar'].includes(r.tab)) { location.replace(`#/p/${r.id}/aprobar`); return; }
+  if (isSombra() && r.view === 'project' && !['crudos', 'aprobar', 'calendario'].includes(r.tab)) { location.replace(`#/p/${r.id}/aprobar`); return; }
   try {
     await loadProjects();
     if (state.storage == null) state.storage = await api('/api/storage').catch(() => ({ r2: false }));
-    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario') state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if ((r.tab || 'resumen') === 'resumen' && !r.sub && !isSombra()) state.perf = await api(`/api/projects/${r.id}/performance?days=${state.perfDays || 30}`).catch(() => null); if (r.tab === 'comentarios') state.inbox = await api(`/api/projects/${r.id}/inbox`); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion') state.agent = (await api('/api/agent')).ready; }
+    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario' && !isSombra()) state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if ((r.tab || 'resumen') === 'resumen' && !r.sub && !isSombra()) state.perf = await api(`/api/projects/${r.id}/performance?days=${state.perfDays || 30}`).catch(() => null); if (r.tab === 'comentarios') state.inbox = await api(`/api/projects/${r.id}/inbox`); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion') state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
     else if (r.view === 'users') state.users = await api('/api/users');
     else state.overview = await api('/api/overview');
@@ -323,7 +323,7 @@ function projectView(tab) {
   const p = state.project;
   const counts = { cuentas: state.accounts.length, reels: state.reels.length, aprobar: p.review_pending, calendario: state.posts.filter((x) => x.status === 'programado').length };
   const on = tab === 'reel' ? 'reels' : tab;
-  const T = isSombra() ? [['crudos', 'Subir crudos'], ['aprobar', 'Para aprobar']] : TABS;
+  const T = isSombra() ? [['crudos', 'Subir crudos'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario']] : TABS;
   if (isSombra()) counts.crudos = state.reels.length;
   const tabs = `<nav class="tabs">${T.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
   const views = { crudos: crudosView, resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, memoria: memoriaView, reel: reelDetailView, investigacion: investigacionView, comentarios: comentariosView, ajustes: ajustesView };
@@ -646,7 +646,7 @@ function reelsView() {
 
 // Una publicación se puede mover (arrastrar a otro día) si todavía no salió y faltan más de 15 minutos.
 const LOCK_MS = 15 * 60 * 1000;
-const movable = (x) => (x.status === 'programado' || x.status === 'fallido') && pdate(x.scheduled_at) - Date.now() > LOCK_MS;
+const movable = (x) => !isSombra() && (x.status === 'programado' || x.status === 'fallido') && pdate(x.scheduled_at) - Date.now() > LOCK_MS;
 const viewKey = () => location.hash.split('?')[0] + '|' + (state.calMode || '');
 // Proyectos fijados arriba (preferencia de quien usa este navegador).
 const pins = () => { try { return JSON.parse(localStorage.getItem('acm.pins') || '[]'); } catch { return []; } };
@@ -683,11 +683,11 @@ function calendarioView() {
       <h2 class="h2">${title}</h2>
       <span class="small muted">${shown.length} ${shown.length === 1 ? 'publicación' : 'publicaciones'} ${week ? 'esta semana' : 'este mes'}</span>
       <span class="spacer"></span>
-      <button class="btn cal-sync" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>
+      ${isSombra() ? '' : `<button class="btn cal-sync" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>`}
       <span class="cal-nav" role="group" aria-label="Moverse en el calendario"><button class="cal-tb" data-act="cal-prev" aria-label="${week ? 'Semana anterior' : 'Mes anterior'}">${icon('left', 16)}</button><button class="cal-tb" data-act="cal-today">Hoy</button><button class="cal-tb" data-act="cal-next" aria-label="${week ? 'Semana siguiente' : 'Mes siguiente'}">${icon('right', 16)}</button></span>
       ${calModes()}
     </div>
-    <p class="cal-hint small muted">${icon('move', 14)} Arrastrá una publicación a otro día para moverla: mantiene la hora. Las que ya salieron o salen en menos de 15 minutos quedan fijas.</p>
+    ${isSombra() ? '' : `<p class="cal-hint small muted">${icon('move', 14)} Arrastrá una publicación a otro día para moverla: mantiene la hora. Las que ya salieron o salen en menos de 15 minutos quedan fijas.</p>`}
     <div class="cal-grid">
       ${days.slice(0, 7).map((d) => `<div class="cal-wd ${week && sameDay(d, todayD) ? 'today' : ''}">${d.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}${week ? ` <b>${d.getDate()}</b>` : ''}</div>`).join('')}
       ${days.map((d) => {
@@ -783,7 +783,7 @@ function grillaView() {
           <div class="ph-bar"><span class="ph-net">${netBadge(acc.network)}</span><b>${esc(name)}</b><span></span></div>
           <div class="ph-prof">
             <span class="ph-av" style="background:${esc(state.project.color)}">${state.project.photo ? `<img src="/media/${esc(state.project.photo)}" alt="">` : esc(initials(state.project.name))}</span>
-            <div class="ph-stats"><div><b>${L.filter((x) => x.status === 'publicado').length}</b><span>publicados</span></div><div><b>${L.filter((x) => x.status === 'programado').length}</b><span>por salir</span></div><div><b>${fmtK(acc.followers || 0)}</b><span>seguidores</span></div></div>
+            <div class="ph-stats"><div><b>${L.filter((x) => x.status === 'publicado').length}</b><span>publicados</span></div><div><b>${L.filter((x) => x.status === 'programado').length}</b><span>por salir</span></div>${isSombra() ? '' : `<div><b>${fmtK(acc.followers || 0)}</b><span>seguidores</span></div>`}</div>
           </div>
           <div class="ph-name"><b>${esc(state.project.name)}</b>${state.project.role ? `<span>${esc(state.project.role)}</span>` : ''}</div>
           <div class="ph-tabs"><span class="on">${icon('grid', 16)}</span><span>${icon('play', 16)}</span><span>${icon('users', 16)}</span></div>
@@ -798,7 +798,7 @@ function grillaView() {
             <div class="lp-prof">
               <span class="ph-av lp-av" style="background:${esc(state.project.color)}">${state.project.photo ? `<img src="/media/${esc(state.project.photo)}" alt="">` : esc(initials(state.project.name))}</span>
               <div class="lp-info"><b>${esc(name)}</b><span class="small muted">${esc(state.project.name)}${state.project.role ? ' · ' + esc(state.project.role) : ''}</span>
-                <div class="lp-stats"><span><b>${L.filter((x) => x.status === 'publicado').length}</b> publicados</span><span><b>${L.filter((x) => x.status === 'programado').length}</b> programados</span><span><b>${fmtK(acc.followers || 0)}</b> seguidores</span></div></div>
+                <div class="lp-stats"><span><b>${L.filter((x) => x.status === 'publicado').length}</b> publicados</span><span><b>${L.filter((x) => x.status === 'programado').length}</b> programados</span>${isSombra() ? '' : `<span><b>${fmtK(acc.followers || 0)}</b> seguidores</span>`}</div></div>
             </div>
             <div class="lp-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px;text-align:center">Sin publicaciones en esta cuenta.</p>'}</div>
           </div>
@@ -921,8 +921,8 @@ function postDialog(ids) {
         ${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}
         ${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">Ver en ${NETS[x.network].name} ↗</a>` : ''}
       </div>
-      <div class="pd-actions">
-        ${x.network === 'tiktok' && (x.status === 'programado' || x.status === 'fallido') ? `<div class="tt-opts" data-acc="${x.account_id}"><p class="small muted">Cargando la cuenta de TikTok…</p></div>` : ''}
+      <div class="pd-actions" ${isSombra() ? 'hidden' : ''}>
+        ${!isSombra() && x.network === 'tiktok' && (x.status === 'programado' || x.status === 'fallido') ? `<div class="tt-opts" data-acc="${x.account_id}"><p class="small muted">Cargando la cuenta de TikTok…</p></div>` : ''}
         ${x.status !== 'publicando' && x.status !== 'publicado' ? `<div class="pd-btns">
           <button class="btn danger" data-act="del-post">Quitar</button>
           ${x.status === 'programado' ? `<button class="btn accent" data-act="post-now">Publicar ahora</button>` : ''}
