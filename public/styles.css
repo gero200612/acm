@@ -165,7 +165,8 @@ table.list td.r, table.list th.r { text-align: right; }
 .reel { position: relative; }
 .reel video { width: 100%; aspect-ratio: 9 / 16; object-fit: contain; background: var(--line-2); display: block; }
 .reel-del { position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,.92); border-radius: 9px; box-shadow: 0 1px 4px rgba(0,0,0,.15); z-index: 2; }
-.reel .body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.reel .body { padding: 12px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.reel .body > .row:last-child { margin-top: auto; }
 .reel .title { font-weight: 600; font-size: 14px; border: 0; padding: 4px 6px; margin: -4px -6px; border-radius: 6px; width: calc(100% + 12px); background: transparent; }
 .reel .title:hover { background: var(--line-2); }
 .reel .title:focus { background: #fff; outline: 2px solid var(--blue-2); }
@@ -417,9 +418,13 @@ dialog.wide:has(.ttv-grid) { width: min(860px, calc(100vw - 32px)); }
 .ttv-act .btn { gap: 5px; width: 100%; justify-content: center; white-space: normal; text-align: center; }
 .ttv-note { margin: 12px 0 0; }
 @media (max-width: 560px) { .ttv-sum { grid-template-columns: repeat(2, 1fr); } }
-.pd { display: flex; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line-2); }
+.pd { display: grid; grid-template-columns: 140px 1fr; gap: 16px 20px; padding: 10px 0 16px; border-bottom: 1px solid var(--line-2); align-items: start; }
+.pd-actions { grid-column: 1 / -1; display: grid; gap: 14px; }
+.pd-actions:empty { display: none; }
+.pd-btns { display: flex; justify-content: flex-end; gap: 10px; }
+@media (max-width: 560px) { .pd { grid-template-columns: 120px 1fr; } }
 .pd:last-child { border-bottom: 0; }
-.pd video { width: 170px; height: auto; aspect-ratio: 9/16; object-fit: contain; border-radius: 12px; background: var(--line-2); flex: none; align-self: flex-start; }
+.pd video { width: 100%; height: auto; aspect-ratio: 9/16; object-fit: contain; border-radius: 12px; background: var(--line-2); flex: none; align-self: flex-start; }
 .pd-info { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .pd-info b { font-size: 16px; }
 @media (max-width: 760px) {

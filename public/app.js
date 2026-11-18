@@ -938,12 +938,14 @@ function postDialog(ids) {
         ${x.error ? `<p class="banner err" style="margin:0">${esc(x.error)}</p>` : ''}
         ${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}
         ${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">Ver en ${NETS[x.network].name} ↗</a>` : ''}
+      </div>
+      <div class="pd-actions">
         ${x.network === 'tiktok' && (x.status === 'programado' || x.status === 'fallido') ? `<div class="tt-opts" data-acc="${x.account_id}"><p class="small muted">Cargando la cuenta de TikTok…</p></div>` : ''}
-        <div class="row">
-          ${x.status === 'programado' ? `<button class="btn sm accent" data-act="post-now">Publicar ahora</button>` : ''}
-          ${x.status === 'fallido' ? `<button class="btn sm accent" data-act="post-now">Reintentar</button>` : ''}
-          ${x.status !== 'publicando' && x.status !== 'publicado' ? `<button class="btn sm danger" data-act="del-post">Quitar</button>` : ''}
-        </div>
+        ${x.status !== 'publicando' && x.status !== 'publicado' ? `<div class="pd-btns">
+          <button class="btn danger" data-act="del-post">Quitar</button>
+          ${x.status === 'programado' ? `<button class="btn accent" data-act="post-now">Publicar ahora</button>` : ''}
+          ${x.status === 'fallido' ? `<button class="btn accent" data-act="post-now">Reintentar</button>` : ''}
+        </div>` : ''}
       </div>
     </div>`).join(''));
   d.classList.add('roomy');
