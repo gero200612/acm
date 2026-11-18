@@ -1494,15 +1494,32 @@ async function ttVideosDialog(a) {
   try {
     const vids = await api(`/api/accounts/${a.id}/tiktok/videos`);
     const tot = (k) => vids.reduce((t, v) => t + (v[k] || 0), 0);
-    db.innerHTML = !vids.length ? '<p class="muted">La cuenta todavía no tiene videos.</p>' : `
-      <div class="ttv-sum"><div><b>${vids.length}</b><span>videos</span></div><div><b>${fmtK(tot('views'))}</b><span>vistas</span></div><div><b>${fmtK(tot('likes'))}</b><span>likes</span></div><div><b>${fmtK(tot('comments'))}</b><span>comentarios</span></div></div>
-      <div class="ttv-grid">${vids.map((v) => {
+    // TikTok solo lista los videos públicos: los que ACM publicó en privado (o que todavía procesa) se suman desde ACM
+    const listed = new Set(vids.map((v) => v.id));
+    const mine = state.posts.filter((p) => p.account_id === a.id && p.status === 'publicado' && !listed.has(p.network_video_id || '-'))
+      .sort((x, y) => String(y.published_at).localeCompare(String(x.published_at)));
+    const profile = `https://www.tiktok.com/@${encodeURIComponent(String(a.connected_as || a.handle || '').replace(/^@/, ''))}`;
+    const day = (iso) => { const d = new Date(iso); return d.getFullYear() === new Date().getFullYear() ? fmtDay(iso) : d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }); };
+    const mineCards = mine.map((p) => `<article class="ttv">
+          <div class="ttv-cover"><video src="/media/${esc(p.reel_file)}#t=0.5" preload="metadata" muted playsinline></video></div>
+          <div class="ttv-body">
+            <p class="ttv-title">${esc(p.reel_title || 'Sin título')}</p>
+            <p class="small muted ttv-meta">${p.published_at ? `<span>${day(p.published_at)}</span>` : ''}<span class="chip s-pendiente">Privado · salió de ACM</span></p>
+            <p class="small muted ttv-priv">TikTok no da los números de los videos privados.</p>
+            <div class="ttv-act">
+              <a class="btn sm" href="${esc(profile)}" target="_blank" rel="noopener noreferrer">${icon('ext', 14)} Abrir en TikTok</a>
+              <a class="btn sm" href="#/p/${state.project.id}/reel/${p.reel_id}" data-close>Ver en ACM</a>
+            </div>
+          </div></article>`).join('');
+    db.innerHTML = !vids.length && !mine.length ? '<p class="muted">La cuenta todavía no tiene videos.</p>' : `
+      <div class="ttv-sum"><div><b>${vids.length + mine.length}</b><span>videos</span></div><div><b>${fmtK(tot('views'))}</b><span>vistas</span></div><div><b>${fmtK(tot('likes'))}</b><span>likes</span></div><div><b>${fmtK(tot('comments'))}</b><span>comentarios</span></div></div>
+      <div class="ttv-grid">${mineCards}${vids.map((v) => {
         const post = state.posts.find((p) => p.account_id === a.id && p.network_video_id === v.id);
         return `<article class="ttv">
           <a class="ttv-cover" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer">${v.cover ? `<img src="${esc(v.cover)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}${v.duration ? `<span class="ttv-dur">${Math.round(v.duration)} s</span>` : ''}</a>
           <div class="ttv-body">
             <p class="ttv-title">${esc(v.title || 'Sin título')}</p>
-            <p class="small muted">${v.at ? fmtDay(v.at) : ''}${post ? ' · <span class="chip s-conectada">salió de ACM</span>' : ''}</p>
+            <p class="small muted ttv-meta">${v.at ? `<span>${day(v.at)}</span>` : ''}${post ? '<span class="chip s-conectada">salió de ACM</span>' : ''}</p>
             <div class="ttv-stats"><span title="Vistas">${icon('eye', 14)} ${n(v.views)}</span><span title="Likes">${icon('heart', 14)} ${n(v.likes)}</span><span title="Comentarios">${icon('chat', 14)} ${n(v.comments)}</span><span title="Compartidos">${icon('share', 14)} ${n(v.shares)}</span></div>
             <div class="ttv-act">
               <a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer" title="Abre el video en TikTok: ahí, con los tres puntos, se borra o se le cambia la privacidad">${icon('ext', 14)} Abrir en TikTok</a>
