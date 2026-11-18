@@ -767,14 +767,14 @@ function grillaView() {
   if (!acc) return `<section class="card cal">${head}<p class="muted" style="padding:20px">Cuando haya publicaciones programadas, acá ves cómo queda el perfil de cada cuenta.</p></section>`;
   const L = S.filter((x) => x.account_id === acc.id && x.status !== 'bloqueado').sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
   const name = acc.connected_as || (acc.handle ? '@' + acc.handle : NETS[acc.network].name);
-  const tile = (x) => `<button class="gr-tile s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-gdrag="1"' : ''} title="${esc(x.reel_title)}">
+  const tile = (x) => `<button class="gr-tile s-${x.status}" data-act="open-post" data-pid="${x.id}" title="${esc(x.reel_title)}">
       ${x.reel_cover ? `<img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false">` : `<video src="/media/${esc(x.reel_file)}#t=0.8" preload="metadata" muted playsinline></video>`}
       <span class="gr-badge">${x.status === 'publicado' ? icon('check', 12) : x.status === 'fallido' ? '!' : `${fmtDay(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</span>
       <span class="gr-title">${esc(x.reel_title)}</span></button>`;
   return `<section class="card cal">${head}
     <div class="gr-wrap">
       <div class="gr-accs">${accs.map((a) => `<button class="gr-acc ${a.id === acc.id ? 'on' : ''}" data-act="grid-acc" data-id="${a.id}">${netBadge(a.network)}<span>${esc(a.connected_as || (a.handle ? '@' + a.handle : NETS[a.network].name))}</span><b>${S.filter((x) => x.account_id === a.id && x.status === 'programado').length} prog.</b></button>`).join('')}
-        <p class="small muted" style="margin-top:10px">${icon('move', 14)} Arrastrá un reel programado sobre otro para intercambiarlos: las horas quedan, cambian los reels. Los publicados quedan fijos.</p></div>
+        <p class="small muted" style="margin-top:10px">Así va a quedar el perfil de cada cuenta, en el celu y en la compu. Tocá un reel para ver su publicación; para cambiarle la fecha, usá Mes o Semana.</p></div>
       <div class="phone">
         <div class="ph-screen">
           <div class="ph-status"><span>9:41</span><span class="ph-island"></span><span class="ph-sig"><i></i><i></i><i></i><b></b></span></div>
@@ -785,7 +785,7 @@ function grillaView() {
           </div>
           <div class="ph-name"><b>${esc(state.project.name)}</b>${state.project.role ? `<span>${esc(state.project.role)}</span>` : ''}</div>
           <div class="ph-tabs"><span class="on">${icon('grid', 16)}</span><span>${icon('play', 16)}</span><span>${icon('users', 16)}</span></div>
-          <div class="gr-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px;text-align:center">Sin publicaciones en esta cuenta.</p>'}</div>
+          <div class="ph-scroll"><div class="gr-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px;text-align:center">Sin publicaciones en esta cuenta.</p>'}</div></div>
           <div class="ph-home"></div>
         </div>
       </div>
@@ -805,55 +805,6 @@ function grillaView() {
       </div>
     </div></section>`;
 }
-function wireGridDrag() {
-  const grid = $('.gr-grid');
-  if (!grid) return;
-  grid.addEventListener('pointerdown', (e) => {
-    const tile = e.target.closest('[data-gdrag]');
-    if (!tile || e.button > 0) return;
-    const a = state.posts.find((x) => x.id === Number(tile.dataset.pid));
-    const sx = e.clientX, sy = e.clientY, touch = e.pointerType === 'touch';
-    let drag = null, over = null, timer = null;
-    const begin = () => {
-      const r = tile.getBoundingClientRect(), clone = tile.cloneNode(true);
-      clone.classList.add('cal-fly', 'gr-fly'); Object.assign(clone.style, { width: r.width + 'px', height: r.height + 'px', left: r.left + 'px', top: r.top + 'px' });
-      document.body.append(clone); tile.classList.add('ghost'); document.body.classList.add('cal-dragging');
-      drag = { clone, dx: sx - r.left, dy: sy - r.top };
-    };
-    const stop = () => { clearTimeout(timer); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); };
-    const move = (ev) => {
-      if (!drag) { if (touch) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 10) stop(); return; } if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return; begin(); }
-      ev.preventDefault();
-      drag.clone.style.left = ev.clientX - drag.dx + 'px'; drag.clone.style.top = ev.clientY - drag.dy + 'px';
-      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.gr-tile');
-      if (el !== over) { over?.classList.remove('drop-over', 'drop-no'); over = el && el !== tile ? el : null; over?.classList.add(over.dataset.gdrag ? 'drop-over' : 'drop-no'); }
-    };
-    const end = async (ev) => {
-      stop();
-      if (!drag) return;
-      ev.preventDefault();
-      tile.addEventListener('click', (c) => { c.stopPropagation(); c.preventDefault(); }, { capture: true, once: true });
-      over?.classList.remove('drop-over', 'drop-no');
-      const target = over?.dataset.gdrag ? over : null;
-      if (!target) return settle(drag, tile, tile, over ? 'Ese ya salió o sale en menos de 15 minutos: queda fijo.' : null);
-      const b = state.posts.find((x) => x.id === Number(target.dataset.pid));
-      const rt = target.getBoundingClientRect();
-      drag.clone.classList.add('landing'); drag.clone.style.left = rt.left + 'px'; drag.clone.style.top = rt.top + 'px';
-      await new Promise((ok) => setTimeout(ok, 220));
-      try {
-        await api('/api/posts/swap', { method: 'POST', body: { a: a.id, b: b.id } });
-        [a.scheduled_at, b.scheduled_at] = [b.scheduled_at, a.scheduled_at];
-        finish(drag, tile); render();
-        toast('Intercambiados: cada reel tomó la hora del otro', false, { label: 'Deshacer', fn: async () => {
-          try { await api('/api/posts/swap', { method: 'POST', body: { a: a.id, b: b.id } }); [a.scheduled_at, b.scheduled_at] = [b.scheduled_at, a.scheduled_at]; render(); toast('Volvieron a su lugar'); } catch (err) { fail(err); }
-        } });
-      } catch (err) { await settle(drag, tile, tile, err.message); }
-    };
-    if (touch) timer = setTimeout(begin, 320);
-    window.addEventListener('pointermove', move, { passive: false }); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
-  });
-}
-
 // ---------- arrastrar publicaciones entre días ----------
 // Con el mouse arranca al mover 5 px; en pantallas táctiles, con una pulsación larga (así el dedo sigue pudiendo hacer scroll).
 function wireCalDrag() {
@@ -2036,7 +1987,6 @@ function afterRender(r) {
   $('main.page.enter')?.querySelectorAll(':scope > *, :scope > * > .card, :scope > * > section').forEach((el, i) => el.style.setProperty('--i', Math.min(i, 8)));
   wireCalDrag();
   wireLista();
-  wireGridDrag();
   const drop = $('#drop');
   if (drop) {
     $('#reel-input').addEventListener('change', (e) => uploadReels(e.target.files));

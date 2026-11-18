@@ -974,7 +974,9 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 .ph-tabs span { display: grid; place-items: center; height: 38px; color: var(--faint); border-bottom: 2px solid transparent; }
 .ph-tabs span.on { color: var(--ink); border-bottom-color: var(--ink); }
 .ph-home { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); width: 120px; height: 5px; border-radius: 5px; background: rgba(0,0,0,.75); }
-.phone .gr-grid { flex: 1; max-height: none; min-height: 0; overflow: auto; align-content: start; padding-bottom: 20px; }
+.ph-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: 22px; scrollbar-width: none; }
+.ph-scroll::-webkit-scrollbar { display: none; }
+.phone .gr-grid { max-height: none; overflow: visible; }
 .gr-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; max-height: 640px; overflow: auto; }
 .gr-tile { position: relative; aspect-ratio: 3 / 4; border: 0; padding: 0; background: #111; overflow: hidden; display: block; transition: transform .15s ease, box-shadow .15s ease, opacity .15s; }
 .gr-tile img, .gr-tile video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
