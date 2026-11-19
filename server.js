@@ -844,10 +844,15 @@ app.get('/api/projects/:id/plan', (req, res) => {
     FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
     WHERE p.project_id = ? AND r.kind = 'listo' AND r.clip_id IS NOT NULL AND substr(p.scheduled_at, 1, 10) = ? ORDER BY p.scheduled_at, p.id`, req.params.id, day));
 });
-app.get('/api/projects/:id/posts', (req, res) => res.json(all(`
+// la sombra (equipo de contenido) ve solo lo que pinta el calendario: sin errores de la red, opciones, intentos ni IDs externos
+const SOMBRA_POST = ['id', 'project_id', 'reel_id', 'account_id', 'scheduled_at', 'published_at', 'status', 'reel_title', 'reel_file', 'reel_cover', 'network', 'handle', 'connected_as', 'external_url', 'network_video_id'];
+app.get('/api/projects/:id/posts', (req, res) => {
+  const L = all(`
   SELECT p.*, r.title AS reel_title, r.file AS reel_file, r.cover AS reel_cover, a.network, a.handle, a.connected_as
   FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
-  WHERE p.project_id = ? ORDER BY p.scheduled_at`, req.params.id)));
+  WHERE p.project_id = ? ORDER BY p.scheduled_at`, req.params.id);
+  res.json(req.user?.role === 'sombra' ? L.map((x) => Object.fromEntries(SOMBRA_POST.map((k) => [k, x[k]]))) : L);
+});
 app.post('/api/projects/:id/posts', (req, res) => {
   const items = Array.isArray(req.body) ? req.body : [req.body];
   const ins = db.prepare('INSERT INTO posts (project_id, reel_id, account_id, scheduled_at, options) VALUES (?, ?, ?, ?, ?)');

@@ -181,7 +181,8 @@ export function recorridoCases(sb) {
       // el calendario lo ve (solo mirar): cuentas sin seguidores ni datos de conexión, y las publicaciones
       const ac = await u('GET', `/api/projects/${c.p}/accounts`);
       eq([ac.status, (ac.j || []).every((a) => a.followers === 0 && !('fields' in a) && !('last_error' in a))], [200, true], 'cuentas sin números ni conexión');
-      eq((await u('GET', `/api/projects/${c.p}/posts`)).status, 200, 've el calendario');
+      const ps2 = await u('GET', `/api/projects/${c.p}/posts`);
+      eq([ps2.status, (ps2.j || []).some((x) => 'error' in x || 'options' in x || 'external_id' in x || 'note' in x)], [200, false], 've el calendario, sin datos internos');
       eq((await u('PUT', `/api/posts/0`, { scheduled_at: '2030-01-01 10:00' })).status, 403, 'no mueve publicaciones');
       eq((await u('PUT', `/api/projects/${c.p}`, { name: 'x' })).status, 403, 'editar el proyecto');
       eq((await u('GET', `/api/projects/${c.otro}/review`)).status, 404, 'Para aprobar de otro');
