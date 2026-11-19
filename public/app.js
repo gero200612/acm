@@ -120,7 +120,13 @@ function route() {
 // ---------- render ----------
 async function render() {
   const app = $('#app');
-  if (!state.authed) { app.innerHTML = loginView(); $('#em')?.focus(); return; }
+  if (!state.authed) {
+    // sin sesión: en la raíz, el home público; con un link adentro (o «Entrar»), el ingreso
+    const h = location.hash.replace(/^#\/?/, '');
+    // home oculto por ahora: se vuelve a mostrar poniendo HOME_PUBLICO en true
+    if (!h && HOME_PUBLICO) { app.innerHTML = landingView(); window.scrollTo(0, 0); wireLanding(); return; }
+    app.innerHTML = loginView(); wireReels(app); $('#em')?.focus(); return;
+  }
   let r = route();
   // un administrador de dirigente o una sombra van directo a su proyecto; la sombra, a Para aprobar
   if (!isGeneral() && (r.view === 'home' || r.view === 'lab' || (r.view === 'project' && r.id !== state.me?.project_id))) { location.replace(`#/p/${state.me.project_id}${isSombra() ? '/aprobar' : ''}`); return; }
@@ -166,14 +172,138 @@ function sideNav(r) {
   <div class="side-foot"><span class="live" title="${esc(ROLE_NAME[state.me?.role] || '')}"><i></i>${esc(state.me?.name || 'En línea')}</span><button data-act="logout">Salir</button></div>`;
 }
 
+// ---------- home público (antes de entrar) ----------
+// Capturas reales de ACM (proyecto de demostración ficticio) y fotos libres de Unsplash (public/landing/CREDITOS.txt).
+const HOME_PUBLICO = false;
+const LD = (n) => `/landing/${n}`;
+// reel vertical de ejemplo (videos libres de Mixkit): arranca solo cuando está en pantalla, ver wireReels
+const REEL = (i) => `<video class="reel" src="/landing/r${i}.mp4" poster="/landing/r${i}.jpg" muted loop playsinline preload="none" aria-hidden="true"></video>`;
+function landingView() {
+  const words = ['Instagram', 'Facebook', 'TikTok', 'YouTube', 'Edición automática', 'Aprobación del equipo', 'Calendario', 'Grilla del perfil', 'Comentarios por segundo', 'Roles y permisos'];
+  const band = [...words, ...words].map((w) => `<span>${w}</span><i></i>`).join('');
+  // pared de videos verticales: tres columnas que se deslizan en sentidos opuestos
+  const col = (ids, dir, dur) => `<div class="hm-col ${dir}" style="--t:${dur}s"><div class="hm-col-in">${[...ids, ...ids].map((i) => `<figure>${REEL(i)}</figure>`).join('')}</div></div>`;
+  const NET = ['instagram', 'facebook', 'tiktok', 'youtube'];
+  return `<div class="hm">
+    <header class="hm-nav"><a class="lg-mark" href="#">${LOGO()}<div><b>ACM</b><span>Agentic Campaign Manager</span></div></a>
+      <nav><a href="#" data-act="ld-go" data-to="hm-flujo">Cómo funciona</a><a href="#" data-act="ld-go" data-to="hm-bento">Qué incluye</a><a href="#" data-act="ld-go" data-to="hm-redes">Redes</a><a href="#" data-act="ld-go" data-to="hm-equipo">Equipo</a><a href="/acerca">Sobre ACM</a></nav>
+      <a class="btn primary" href="#/entrar">Entrar</a></header>
+
+    <section class="hm-hero">
+      <div class="hm-glow g1"></div><div class="hm-glow g2"></div>
+      <div class="hm-hero-copy">
+        <span class="hm-pill"><b>Nuevo</b> Edición automática a partir del video crudo</span>
+        <h1>Tus campañas en redes, <span class="hm-grad">de punta a punta.</span></h1>
+        <p>Del video que graba el equipo a la publicación en Instagram, Facebook, TikTok y YouTube. Versiones editadas, aprobación con comentarios y el calendario de todas las cuentas en un solo lugar.</p>
+        <div class="hm-cta"><a class="btn primary" href="#/entrar">Entrar a ACM</a><a class="btn" href="#" data-act="ld-go" data-to="hm-flujo">Ver cómo funciona ${icon('right', 16)}</a></div>
+        <div class="hm-nets">${NET.map(netBadge).join('')}<span>Con la conexión oficial de cada red</span></div>
+      </div>
+      <div class="hm-wall" aria-hidden="true">${col([1, 2, 3, 4], 'up', 38)}${col([5, 6, 7, 8, 13], 'down', 44)}${col([9, 10, 11, 12, 14], 'up', 41)}</div>
+    </section>
+
+    <div class="hm-band"><div class="hm-track">${band}</div></div>
+
+    <section class="hm-sec" id="hm-flujo">
+      <div class="hm-head hm-rev"><span class="hm-kick">Cómo funciona</span><h2>Del video crudo al reel publicado</h2><p>El equipo sube lo que grabó. ACM encuentra los mejores momentos, arma varias versiones y las deja listas para aprobar.</p></div>
+      <div class="hm-flow">
+        <div class="hm-raw hm-rev"><div class="hm-raw-strip">${[5, 9, 4, 12, 7, 1, 6, 11].map((i) => `<img src="${LD(`r${i}.jpg`)}" alt="" loading="lazy">`).join('')}</div><div class="hm-raw-cap"><span class="hm-dot-rec"></span>Crudo · 1 h 12 min</div></div>
+        <div class="hm-arrow hm-rev">${icon('right', 22)}</div>
+        <div class="hm-vers">${[[2, 'Gancho con pregunta'], [6, 'Frase del vecino'], [11, 'Directo al punto']].map(([i, t], k) => `<figure class="hm-ver hm-rev" style="--d:${k * 0.15}s">${REEL(i)}<figcaption><b>Versión ${k + 1}</b>${t}</figcaption></figure>`).join('')}</div>
+      </div>
+      <ol class="hm-line">${[['Subís el material', 'Los videos tal como se grabaron, desde la compu o el celu.'], ['Salen versiones', 'Con el estilo de cada cuenta: textos, subtítulos, música y ritmo.'], ['El equipo aprueba', 'Comenta en el segundo exacto y aprueba o pide un cambio.'], ['Se publica y se mide', 'Cada pieza sale a su hora en cada red y se sigue cómo rinde.']].map(([t, d], i) => `<li class="hm-rev" style="--d:${i * 0.12}s"><span class="hm-big">0${i + 1}</span><h3>${t}</h3><p>${d}</p></li>`).join('')}</ol>
+    </section>
+
+    <section class="hm-sec" id="hm-bento">
+      <div class="hm-head hm-rev"><span class="hm-kick">Qué incluye</span><h2>Todo el circuito en una sola herramienta</h2><p>Pantallas reales de ACM, con un proyecto de ejemplo.</p></div>
+      <div class="hm-bento">
+        <article class="hm-tile t-ver hm-rev"><div class="hm-tile-tx"><h3>Las versiones, lado a lado</h3><p>Cada momento con sus versiones para mirar, comparar y aprobar ahí mismo.</p></div><div class="hm-tile-img"><img src="${LD('b-versiones.jpg')}" alt="Pantalla Para aprobar" loading="lazy"></div></article>
+        <article class="hm-tile t-com dark hm-rev" style="--d:.1s"><div class="hm-tile-tx"><h3>Comentarios en el segundo exacto</h3><p>Se pausa, se escribe y queda marcado en la línea del video.</p></div><div class="hm-tile-img"><img src="${LD('b-comentarios.jpg')}" alt="Una versión con dos comentarios marcados en la línea del video" loading="lazy"></div></article>
+        <article class="hm-tile t-sem hm-rev" style="--d:.15s"><div class="hm-tile-tx"><h3>La semana de todas las cuentas</h3><p>Cada publicación con su foto, su hora y su red. Arrastrás una y cambia de día.</p></div><div class="hm-tile-img"><img src="${LD('b-semana.jpg')}" alt="Calendario semanal" loading="lazy"></div></article>
+        <article class="hm-tile t-mes hm-rev" style="--d:.2s"><div class="hm-tile-tx"><h3>El mes de un vistazo</h3><p>Mes, semana, lista y la grilla de cada perfil.</p></div><div class="hm-tile-img"><img src="${LD('app-mes.jpg')}" alt="Calendario mensual" loading="lazy"></div></article>
+      </div>
+    </section>
+
+    <section class="hm-sec hm-redes" id="hm-redes">
+      <div class="hm-redes-l hm-rev"><span class="hm-kick">Redes</span><h2>Una publicación, cuatro redes</h2><p>Cada cuenta se conecta con el inicio de sesión oficial de la red y el permiso de quien la administra. ACM publica solo lo que el equipo aprobó, a la hora que se programó.</p>
+        <div class="hm-redes-reel">${REEL(7)}</div></div>
+      <ul class="hm-redes-list">${[['instagram', 'Instagram', 'Reels en la cuenta profesional, con su texto y su portada.', 'Reels'], ['facebook', 'Facebook', 'Reels en las páginas que administra el equipo.', 'Reels'], ['tiktok', 'TikTok', 'Sale directo o queda como borrador para terminarlo en la app.', 'Directo o borrador'], ['youtube', 'YouTube', 'Los videos verticales suben al canal como Shorts.', 'Shorts']].map(([n, t, d, f], i) => `<li class="hm-rev" style="--d:${i * 0.1}s">${netBadge(n)}<div><h3>${t}</h3><p>${d}</p></div><span class="hm-redes-tag">${f}</span></li>`).join('')}</ul>
+    </section>
+
+    <section class="hm-sec" id="hm-equipo">
+      <div class="hm-head hm-rev"><span class="hm-kick">Para todo el equipo</span><h2>Cada persona ve lo que necesita</h2></div>
+      <div class="hm-roles">${[['Quien maneja la campaña', 'Arma el plan, conecta las cuentas, ve el calendario completo y cómo rinde cada publicación.'], ['Equipo de contenido', 'Sube los crudos, comenta cada versión, aprueba y ve el calendario.'], ['Aprobar desde un link', 'Para quien no tiene usuario: aprueba o pide cambios desde el celu, con un link que vence.']].map(([t, d], i) => `<div class="hm-role hm-rev" style="--d:${i * 0.12}s"><h3>${t}</h3><p>${d}</p></div>`).join('')}</div>
+    </section>
+
+    <section class="hm-final hm-rev">
+      <div class="hm-final-strip" aria-hidden="true"><div class="hm-final-in">${[...Array(2)].map(() => [1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 4, 8, 12].map(REEL).join('')).join('')}</div></div>
+      <div class="hm-final-tx"><h2>¿Ya tenés usuario?</h2><p>Entrá con el mail y la contraseña que te dio tu equipo.</p><a class="btn primary" href="#/entrar">Entrar a ACM</a></div>
+    </section>
+
+    <footer class="hm-foot">
+      <div class="hm-foot-top">
+        <div class="hm-foot-brand"><a class="lg-mark" href="#">${LOGO()}<div><b>ACM</b><span>Agentic Campaign Manager</span></div></a><p>Contenido para redes, del video crudo a la publicación, con el equipo aprobando cada pieza.</p></div>
+        <div class="hm-foot-col"><b>Producto</b><a href="#" data-act="ld-go" data-to="hm-flujo">Cómo funciona</a><a href="#" data-act="ld-go" data-to="hm-bento">Qué incluye</a><a href="#" data-act="ld-go" data-to="hm-redes">Redes</a><a href="#" data-act="ld-go" data-to="hm-equipo">Equipo</a><a href="#/entrar">Entrar</a></div>
+        <div class="hm-foot-col"><b>Legal</b><a href="/acerca">Sobre ACM</a><a href="/privacidad">Privacidad</a><a href="/terminos">Términos</a></div>
+        <div class="hm-foot-col"><b>Contacto</b><a href="mailto:sincro.support@gmail.com">sincro.support@gmail.com</a></div>
+      </div>
+      <div class="hm-foot-bot"><span>© ${new Date().getFullYear()} ACM</span><span>Instagram · Facebook · TikTok · YouTube</span></div>
+    </footer>
+  </div>`;
+}
+// animaciones del home: aparecer al entrar en pantalla y la inclinación del navegador del inicio
+function wireLanding() {
+  const root = $('.hm'); if (!root) return;
+  const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: 0.15 });
+  root.querySelectorAll('.hm-rev').forEach((el) => io.observe(el));
+  const onScroll = () => { if (!document.body.contains(root)) { window.removeEventListener('scroll', onScroll); return; } root.classList.toggle('scrolled', window.scrollY > 10); };
+  window.addEventListener('scroll', onScroll, { passive: true }); onScroll();
+  wireReels(root);
+}
+// los reels de ejemplo se reproducen solo mientras se ven (son muchos: no gastar datos ni batería en los de afuera)
+function wireReels(root) {
+  const vids = root.querySelectorAll('video.reel'); if (!vids.length) return;
+  const quieto = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const io = new IntersectionObserver((es) => es.forEach((e) => {
+    const v = e.target;
+    if (!document.body.contains(v)) { io.unobserve(v); return; }
+    if (e.isIntersecting && !quieto) v.play().catch(() => {}); else v.pause();
+  }), { rootMargin: '120px' });
+  vids.forEach((v) => io.observe(v));
+}
+
 function loginView() {
-  return `<div class="login"><form id="login-form">
-    <div><div class="mark">${LOGO()}ACM</div><p class="muted small">Agentic Campaign Manager</p></div>
-    <label class="field">Mail<input class="input" id="em" type="email" autocomplete="username"></label>
-    <label class="field">Contraseña<input class="input" id="pw" type="password" autocomplete="current-password" required></label>
-    <div class="err" id="login-err"></div>
-    <button class="btn primary" type="submit">Entrar</button>
-  </form></div>`;
+  const NET = ['instagram', 'tiktok', 'facebook', 'youtube'];
+  // reels de ejemplo (videos libres, nada de reels de clientes: la pantalla es pública)
+  const col = (ids, dir, dur) => `<div class="hm-col ${dir}" style="--t:${dur}s"><div class="hm-col-in">${[...ids, ...ids].map((i) => `<figure>${REEL(i)}</figure>`).join('')}</div></div>`;
+  return `<div class="login2">
+    <section class="lg-brand">
+      <div class="lg-mark">${LOGO()}<div><b>ACM</b><span>Agentic Campaign Manager</span></div></div>
+      <div class="lg-copy">
+        <h1>Tus campañas en redes, de punta a punta.</h1>
+        <ul class="lg-points">
+          <li><span>1</span><div><b>Del crudo al reel</b>Subís el video tal como se grabó y salen versiones editadas listas para publicar.</div></li>
+          <li><span>2</span><div><b>El equipo aprueba</b>Cada versión se revisa, se comenta en el segundo exacto y se aprueba.</div></li>
+          <li><span>3</span><div><b>Publica y mide</b>Instagram, Facebook, TikTok y YouTube, con su calendario y sus números.</div></li>
+        </ul>
+      </div>
+      <div class="lg-art hm-wall" aria-hidden="true">${col([3, 8, 12, 1], 'up', 40)}${col([13, 6, 2, 10], 'down', 46)}${col([7, 14, 4, 9], 'up', 43)}</div>
+      <div class="lg-nets" aria-hidden="true">${NET.map(netBadge).join('')}<span>Publica en las cuatro redes con su API oficial</span></div>
+    </section>
+    <section class="lg-side">
+      <div class="lg-top">${HOME_PUBLICO ? `<a class="lg-back small" href="#">${icon('left', 14)} Volver al inicio</a>` : '<span></span>'}<span class="small muted">¿Primera vez? Tu usuario te lo da quien administra el proyecto.</span></div>
+      <form id="login-form" class="lg-form">
+        <div class="lg-mark sm">${LOGO()}<b>ACM</b></div>
+        <div><h2>Entrá a tu cuenta</h2><p class="muted">Con el mail y la contraseña que te dio tu equipo.</p></div>
+        <label class="field">Mail<input class="input" id="em" type="email" autocomplete="username" placeholder="nombre@equipo.com"></label>
+        <label class="field">Contraseña<span class="lg-pw"><input class="input" id="pw" type="password" autocomplete="current-password" required><button type="button" class="lg-eye" data-act="pw-toggle" aria-label="Mostrar la contraseña">Ver</button></span></label>
+        <div class="err" id="login-err"></div>
+        <button class="btn primary lg-go" type="submit">Entrar</button>
+        <div class="lg-sep"><span>¿No podés entrar?</span></div>
+        <p class="lg-help small muted">Pedile a quien administra tu proyecto que te genere una contraseña nueva.</p>
+      </form>
+      <footer class="lg-foot small muted"><span>© ${new Date().getFullYear()} ACM</span><nav><a href="/acerca">Sobre ACM</a><a href="/privacidad">Privacidad</a><a href="/terminos">Términos</a></nav></footer>
+    </section>
+  </div>`;
 }
 
 // ---------- inicio ----------
@@ -2032,10 +2162,18 @@ function afterRender(r) {
   }
 }
 
+document.addEventListener('click', (e) => {
+  const g = e.target.closest('[data-act=ld-go]'); if (!g || state.authed) return;
+  e.preventDefault(); document.getElementById(g.dataset.to)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act=pw-toggle]'); if (!b) return;
+  const i = $('#pw'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; b.textContent = show ? 'Ocultar' : 'Ver';
+});
 document.addEventListener('submit', async (e) => {
   if (e.target.id !== 'login-form') return;
   e.preventDefault();
-  try { await api('/api/login', { method: 'POST', body: { email: $('#em').value, password: $('#pw').value } }); const s = await api('/api/session'); state.authed = s.ok; state.me = s.user; render(); }
+  try { await api('/api/login', { method: 'POST', body: { email: $('#em').value, password: $('#pw').value } }); const s = await api('/api/session'); state.authed = s.ok; state.me = s.user; if (location.hash === '#/entrar') history.replaceState(null, '', location.pathname); render(); }
   catch (err) { $('#login-err').textContent = err.message; }
 });
 

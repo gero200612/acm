@@ -1,19 +1,95 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Qué es ACM · ACM</title>
-<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><style>
-:root{--bg:#f5f4f1;--ink:#121316;--muted:#66645f;--line:#e7e5e0;--accent:#ff5a1f}
-@media (prefers-color-scheme:dark){:root{--bg:#121316;--ink:#f1efea;--muted:#a3a19c;--line:#2a2b30}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}
-main{max-width:760px;margin:0 auto;padding:40px 16px 64px}h1{font-size:30px;margin:0 0 4px}h2{font-size:19px;margin:32px 0 6px}
-.muted{color:var(--muted)}nav{display:flex;gap:16px;flex-wrap:wrap;margin:0 0 28px;font-size:14px}a{color:var(--accent)}
-.en{border-top:1px solid var(--line);margin-top:44px;padding-top:12px}li{margin:4px 0}</style></head><body><main>
-<nav><a href="/acerca">Qué es ACM</a><a href="/privacidad">Privacidad</a><a href="/terminos">Términos</a><a href="/">Entrar</a></nav>
-<h1>ACM — Agentic Campaign Manager</h1><p class="muted">Un producto de Sincro (punchi.dev)</p>
-<p>ACM es un panel privado que usa un solo equipo de trabajo para administrar la comunicación de campañas institucionales (por ejemplo, elecciones de clubes): organiza los videos cortos ya editados, los programa en un calendario y los publica en las cuentas de Instagram, Facebook, TikTok y YouTube que el propio equipo administra y conectó con su autorización.</p>
-<h2>Qué hace con cada red</h2>
-<ul><li><b>TikTok:</b> con el permiso de la persona dueña de la cuenta, lee el nombre de usuario y la cantidad de seguidores para mostrar a qué cuenta se conectó, y publica o sube como borrador los videos que el equipo programó.</li>
-<li><b>YouTube:</b> con el permiso del dueño del canal, lee el nombre del canal y la cantidad de suscriptores, y sube los videos programados como Shorts.</li>
-<li><b>Instagram y Facebook:</b> publica Reels en las páginas que el equipo administra.</li></ul>
-<p>ACM no publica nada que el equipo no haya cargado y programado, no lee mensajes privados, no sigue cuentas ni interactúa con otras personas.</p>
-<div class="en"><h2>In English</h2>
-<p>ACM is a private dashboard used by a single team to manage institutional campaign communication. It stores short videos the team has already edited, schedules them on a calendar and publishes them to the Instagram, Facebook, TikTok and YouTube accounts that the team itself manages and has connected with the owner's authorization. With TikTok it reads the username and follower count (to show which account is connected) and publishes or uploads as drafts the videos the team scheduled. With YouTube it reads the channel name and subscriber count and uploads scheduled videos as Shorts. ACM never posts content the team did not upload and schedule, does not read private messages and does not interact with other users.</p>
-<p>Contact: sincro.support@gmail.com</p></div><p class="muted" style="margin-top:40px">Última actualización: 7 de noviembre de 2026 · Last updated: November 7, 2026</p></main></body></html>
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sobre ACM</title>
+<meta name="description" content="ACM (Agentic Campaign Manager) es el panel donde un equipo arma, aprueba y publica su contenido en Instagram, Facebook, TikTok y YouTube.">
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<style>
+.ab-hero { max-width: 1320px; margin: 0 auto; padding: 72px clamp(16px, 5vw, 64px) 24px; display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: clamp(32px, 6vw, 80px); align-items: center; }
+.ab-hero h1 { font-size: clamp(36px, 5vw, 62px); line-height: 1.04; letter-spacing: -.045em; margin: 16px 0 20px; }
+.ab-hero p { font-size: 18px; line-height: 1.6; color: var(--muted); max-width: 600px; }
+.ab-by { display: flex; gap: 10px; align-items: center; margin-top: 26px; font-size: 14px; color: var(--muted); }
+.ab-by b { color: var(--ink); }
+.ab-reels { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ab-reels video { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 20px; display: block; background: #2a2b30; box-shadow: 0 24px 50px rgba(18,19,22,.16); }
+.ab-reels video:last-child { margin-top: 56px; }
+.ab-cols { list-style: none; margin: 40px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); }
+.ab-cols li { padding: 28px 28px 0 0; } .ab-cols li + li { padding-left: 28px; border-left: 1px solid var(--line); }
+.ab-cols h3 { font-size: 20px; letter-spacing: -.02em; margin: 14px 0 8px; } .ab-cols p { color: var(--muted); font-size: 15.5px; line-height: 1.6; margin: 0; }
+.ab-cols .hm-big { font-size: 14px; font-weight: 800; letter-spacing: .04em; color: var(--blue); -webkit-text-fill-color: var(--blue); background: none; -webkit-text-stroke: 0; }
+.ab-perm li { grid-template-columns: auto 1fr; }
+.ab-perm p + p { margin-top: 6px; }
+.ab-no { list-style: none; margin: 34px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.ab-no li { background: #16171b; color: #fff; border-radius: 22px; padding: 28px; font-size: 17px; line-height: 1.45; font-weight: 600; letter-spacing: -.01em; }
+.ab-no li span { display: block; color: #ff7440; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; margin-bottom: 10px; }
+.ab-who { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: start; border-top: 1px solid var(--line); padding-top: 34px; margin-top: 40px; }
+.ab-who h3 { font-size: 22px; letter-spacing: -.02em; margin: 0 0 10px; } .ab-who p { color: var(--muted); line-height: 1.65; margin: 0 0 10px; }
+.ab-en { background: #fff; border: 1px solid var(--line); border-radius: 22px; padding: 28px; }
+.ab-en h3 { font-size: 15px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.ab-en p { color: var(--ink); font-size: 15px; }
+.ab-upd { color: var(--muted); font-size: 13px; margin-top: 30px; }
+@media (max-width: 900px) { .ab-hero, .ab-who { grid-template-columns: 1fr; } .ab-reels { max-width: 420px; } .ab-no { grid-template-columns: 1fr; } .ab-cols { grid-template-columns: 1fr; } .ab-cols li, .ab-cols li + li { padding: 22px 0; border-left: 0; border-bottom: 1px solid var(--line); } }
+@media (max-width: 640px) { .ab-hero { padding-top: 40px; } }
+</style></head><body>
+<div class="hm scrolled">
+  <header class="hm-nav"><a class="lg-mark" href="/"><img class="logo" src="/logo.png" alt="" aria-hidden="true"><div><b>ACM</b><span>Agentic Campaign Manager</span></div></a>
+    <nav><a href="/">Inicio</a><a href="/acerca" aria-current="page">Sobre ACM</a><a href="/privacidad">Privacidad</a><a href="/terminos">Términos</a></nav>
+    <a class="btn primary" href="/#/entrar">Entrar</a></header>
+
+  <section class="ab-hero">
+    <div>
+      <span class="hm-kick">Sobre ACM</span>
+      <h1>Donde un equipo arma, aprueba y publica su contenido.</h1>
+      <p>ACM (Agentic Campaign Manager) es un panel privado para equipos que manejan la comunicación de una campaña: un club en elecciones, una institución, una marca. Reúne los videos que graba el equipo, arma versiones editadas, las pasa por aprobación y las publica en las cuentas de Instagram, Facebook, TikTok y YouTube que ese mismo equipo administra.</p>
+      <div class="ab-by">Un producto de <b>Sincro</b> · punchi.dev</div>
+    </div>
+    <div class="ab-reels" aria-hidden="true">
+      <video src="/landing/r3.mp4" poster="/landing/r3.jpg" muted loop playsinline autoplay preload="metadata"></video>
+      <video src="/landing/r11.mp4" poster="/landing/r11.jpg" muted loop playsinline autoplay preload="metadata"></video>
+    </div>
+  </section>
+
+  <section class="hm-sec" style="padding-top:64px">
+    <div class="hm-head"><span class="hm-kick">Qué hace</span><h2>Tres trabajos, en un solo lugar</h2></div>
+    <ul class="ab-cols">
+      <li><span class="hm-big">01</span><h3>Ordena el material</h3><p>Los videos que se grabaron quedan en el proyecto, con sus títulos, textos y el estilo de cada cuenta.</p></li>
+      <li><span class="hm-big">02</span><h3>Lo hace aprobar</h3><p>Cada versión se mira, se comenta en el segundo exacto y se aprueba antes de salir. Nada sale sin el visto bueno del equipo.</p></li>
+      <li><span class="hm-big">03</span><h3>Lo programa y publica</h3><p>Lo aprobado entra al calendario y se publica a su hora en cada red, con el seguimiento de cómo le fue.</p></li>
+    </ul>
+  </section>
+
+  <section class="hm-sec hm-redes">
+    <div class="hm-redes-l"><span class="hm-kick">Cada red</span><h2>Qué hace ACM con cada cuenta</h2><p>Las cuentas se conectan con el inicio de sesión oficial de cada red, con el permiso de la persona que la administra. Ese permiso se puede quitar en cualquier momento desde la configuración de la propia red.</p></div>
+    <ul class="hm-redes-list ab-perm">
+      <li><span class="net tiktok" title="TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#25F4EE" transform="translate(-.6 -.6)" d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/><path fill="#FE2C55" transform="translate(.6 .6)" d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/><path fill="#fff" d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg></span><div><h3>TikTok</h3><p>Lee el nombre de usuario y la cantidad de seguidores, para mostrar qué cuenta quedó conectada.</p><p>Publica, o sube como borrador, los videos que el equipo programó.</p></div></li>
+      <li><span class="net youtube" title="YouTube"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M8.5 7.5h8v9h-8z"/><path fill="#FF0000" d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg></span><div><h3>YouTube</h3><p>Lee el nombre del canal y la cantidad de suscriptores.</p><p>Sube los videos programados como Shorts.</p></div></li>
+      <li><span class="net instagram" title="Instagram"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M7.0301.084c-1.2768.0602-2.1487.264-2.911.5634-.7888.3075-1.4575.72-2.1228 1.3877-.6652.6677-1.075 1.3368-1.3802 2.127-.2954.7638-.4956 1.6365-.552 2.914-.0564 1.2775-.0689 1.6882-.0626 4.947.0062 3.2586.0206 3.6671.0825 4.9473.061 1.2765.264 2.1482.5635 2.9107.308.7889.72 1.4573 1.388 2.1228.6679.6655 1.3365 1.0743 2.1285 1.38.7632.295 1.6361.4961 2.9134.552 1.2773.056 1.6884.069 4.9462.0627 3.2578-.0062 3.668-.0207 4.9478-.0814 1.28-.0607 2.147-.2652 2.9098-.5633.7889-.3086 1.4578-.72 2.1228-1.3881.665-.6682 1.0745-1.3378 1.3795-2.1284.2957-.7632.4966-1.636.552-2.9124.056-1.2809.0692-1.6898.063-4.948-.0063-3.2583-.021-3.6668-.0817-4.9465-.0607-1.2797-.264-2.1487-.5633-2.9117-.3084-.7889-.72-1.4568-1.3876-2.1228C21.2982 1.33 20.628.9208 19.8378.6165 19.074.321 18.2017.1197 16.9244.0645 15.6471.0093 15.236-.005 11.977.0014 8.718.0076 8.31.0215 7.0301.0839m.1402 21.6932c-1.17-.0509-1.8053-.2453-2.2287-.408-.5606-.216-.96-.4771-1.3819-.895-.422-.4178-.6811-.8186-.9-1.378-.1644-.4234-.3624-1.058-.4171-2.228-.0595-1.2645-.072-1.6442-.079-4.848-.007-3.2037.0053-3.583.0607-4.848.05-1.169.2456-1.805.408-2.2282.216-.5613.4762-.96.895-1.3816.4188-.4217.8184-.6814 1.3783-.9003.423-.1651 1.0575-.3614 2.227-.4171 1.2655-.06 1.6447-.072 4.848-.079 3.2033-.007 3.5835.005 4.8495.0608 1.169.0508 1.8053.2445 2.228.408.5608.216.96.4754 1.3816.895.4217.4194.6816.8176.9005 1.3787.1653.4217.3617 1.056.4169 2.2263.0602 1.2655.0739 1.645.0796 4.848.0058 3.203-.0055 3.5834-.061 4.848-.051 1.17-.245 1.8055-.408 2.2294-.216.5604-.4763.96-.8954 1.3814-.419.4215-.8181.6811-1.3783.9-.4224.1649-1.0577.3617-2.2262.4174-1.2656.0595-1.6448.072-4.8493.079-3.2045.007-3.5825-.006-4.848-.0608M16.953 5.5864A1.44 1.44 0 1 0 18.39 4.144a1.44 1.44 0 0 0-1.437 1.4424M5.8385 12.012c.0067 3.4032 2.7706 6.1557 6.173 6.1493 3.4026-.0065 6.157-2.7701 6.1506-6.1733-.0065-3.4032-2.771-6.1565-6.174-6.1498-3.403.0067-6.156 2.771-6.1496 6.1738M8 12.0077a4 4 0 1 1 4.008 3.9921A3.9996 3.9996 0 0 1 8 12.0077"/></svg></span><div><h3>Instagram</h3><p>Publica Reels en la cuenta profesional que el equipo administra.</p></div></li>
+      <li><span class="net facebook" title="Facebook"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="#fff"/><path fill="#0866FF" d="M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647Z"/></svg></span><div><h3>Facebook</h3><p>Publica Reels en las páginas que el equipo administra.</p></div></li>
+    </ul>
+  </section>
+
+  <section class="hm-sec">
+    <div class="hm-head"><span class="hm-kick">Límites</span><h2>Lo que ACM no hace</h2></div>
+    <ul class="ab-no">
+      <li><span>Nunca</span>Publicar algo que el equipo no haya cargado y programado.</li>
+      <li><span>Nunca</span>Leer mensajes privados.</li>
+      <li><span>Nunca</span>Seguir cuentas ni interactuar con otras personas.</li>
+    </ul>
+    <div class="ab-who">
+      <div><h3>Quién está detrás</h3><p>ACM lo hace Sincro (punchi.dev), desde Argentina.</p><p>Por consultas, pedidos de baja de datos o cualquier duda: <a href="mailto:sincro.support@gmail.com">sincro.support@gmail.com</a>. Cómo usamos los datos está en <a href="/privacidad">Privacidad</a> y las reglas de uso en <a href="/terminos">Términos</a>.</p></div>
+      <div class="ab-en"><h3>In English</h3><p>ACM is a private dashboard used by a team to manage its campaign communication. It stores the videos the team recorded, prepares edited versions, sends them for approval and publishes them to the Instagram, Facebook, TikTok and YouTube accounts that the team itself manages and has connected with the owner's authorization. With TikTok it reads the username and follower count (to show which account is connected) and publishes or uploads as drafts the videos the team scheduled. With YouTube it reads the channel name and subscriber count and uploads scheduled videos as Shorts. ACM never posts content the team did not upload and schedule, does not read private messages and does not interact with other users. Contact: sincro.support@gmail.com</p></div>
+    </div>
+    <p class="ab-upd">Última actualización: 18 de noviembre de 2026 · Last updated: November 18, 2026</p>
+  </section>
+
+  <footer class="hm-foot">
+    <div class="hm-foot-top">
+      <div class="hm-foot-brand"><a class="lg-mark" href="/"><img class="logo" src="/logo.png" alt="" aria-hidden="true"><div><b>ACM</b><span>Agentic Campaign Manager</span></div></a><p>Contenido para redes, del video crudo a la publicación, con el equipo aprobando cada pieza.</p></div>
+      <div class="hm-foot-col"><b>Producto</b><a href="/">Inicio</a><a href="/#/entrar">Entrar</a></div>
+      <div class="hm-foot-col"><b>Legal</b><a href="/acerca">Sobre ACM</a><a href="/privacidad">Privacidad</a><a href="/terminos">Términos</a></div>
+      <div class="hm-foot-col"><b>Contacto</b><a href="mailto:sincro.support@gmail.com">sincro.support@gmail.com</a></div>
+    </div>
+    <div class="hm-foot-bot"><span>© 2026 ACM</span><span>Instagram · Facebook · TikTok · YouTube</span></div>
+  </footer>
+</div>
+</body></html>
