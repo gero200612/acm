@@ -14,7 +14,9 @@ const NETS = {
   youtube: { name: 'YouTube', svg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M8.5 7.5h8v9h-8z"/><path fill="#FF0000" d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>' },
 };
 // nombre de una cuenta: el que trajo la conexión, o la red mientras no está conectada
-const accName = (a) => a.connected_as || a.handle ? (a.connected_as || '@' + a.handle) : `${NETS[a.network]?.name || a.network} sin conectar`;
+// «@usuario» sin repetir la arroba (los de YouTube ya vienen con @)
+const at = (h) => '@' + String(h || '').replace(/^@+/, '');
+const accName = (a) => a.connected_as || a.handle ? (a.connected_as || at(a.handle)) : `${NETS[a.network]?.name || a.network} sin conectar`;
 const ACC_STATUS = { pendiente: 'Sin conectar', conectada: 'Conectada', error: 'Con error', pausada: 'Pausada' };
 const ICON = {
   home: 'M3 11.5 12 4l9 7.5M5 10v10h14V10',
@@ -340,9 +342,9 @@ function homeView() {
       <span class="ha-bar">${P.map((p) => { const n = L.filter((x) => x.project_id === p.id).length; return n ? `<i style="height:${n / maxD * 100}%;background:${esc(p.color)}"></i>` : ''; }).join('')}</span>
       <b>${L.length || ''}</b><span>${d.toLocaleDateString('es-AR', { weekday: 'narrow' })} ${d.getDate()}</span></div>`; }).join('')}</div>
     <div class="ha-leg">${P.map((p) => `<span><i style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join('')}</div></section>`;
-  const agenda = O.upcoming.length ? O.upcoming.slice(0, 9).map((x) => `<a class="ag" href="#/p/${x.project_id}/calendario"><span class="ag-t"><b>${fmtTime(x.scheduled_at)}</b>${fmtDay(x.scheduled_at)}</span>${netBadge(x.network)}<span class="ag-w"><b>${esc(x.reel_title)}</b><span><i class="dot" style="background:${esc(x.color)}"></i>${esc(x.project)} · ${esc(x.handle ? '@' + x.handle : NETS[x.network].name)}</span></span></a>`).join('')
+  const agenda = O.upcoming.length ? O.upcoming.slice(0, 9).map((x) => `<a class="ag" href="#/p/${x.project_id}/calendario"><span class="ag-t"><b>${fmtTime(x.scheduled_at)}</b>${fmtDay(x.scheduled_at)}</span>${netBadge(x.network)}<span class="ag-w"><b>${esc(x.reel_title)}</b><span><i class="dot" style="background:${esc(x.color)}"></i>${esc(x.project)} · ${esc(x.handle ? at(x.handle) : NETS[x.network].name)}</span></span></a>`).join('')
     : '<p class="muted small">No hay publicaciones programadas.</p>';
-  const netCards = Object.keys(NETS).map((n) => { const x = O.networks.find((y) => y.network === n) || { total: 0, live: 0, followers: 0 }; return `<div class="hn">${netBadge(n)}<div><b>${x.live}/${x.total}</b><span>${NETS[n].name} · ${x.followers ? fmtK(x.followers) + ' seg.' : 'conectadas'}</span></div></div>`; }).join('');
+  const netCards = Object.keys(NETS).map((n) => { const x = O.networks.find((y) => y.network === n) || { total: 0, live: 0, followers: 0 }; return `<div class="hn">${netBadge(n)}<div><b>${x.live}/${x.total}</b><span>${NETS[n].name} · ${x.followers ? fmtK(x.followers) + ' seguidores' : 'conectadas'}</span></div></div>`; }).join('');
   return `<div class="home">
     ${kpis}
     <div class="home-grid">
@@ -611,12 +613,25 @@ function perfCard(p) {
     <div class="perf-kpis">${k.map(([l, v, pv]) => `<div class="perf-k"><span class="small muted">${l}</span><b class="num" data-count="${v}">${fmt(v)}</b>${delta(v, pv)}</div>`).join('')}</div>
     ${P.totals.views ? `<svg class="perf-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Vistas por día"><defs><linearGradient id="pg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--blue)" stop-opacity=".28"/><stop offset="1" stop-color="var(--blue)" stop-opacity="0"/></linearGradient></defs>
       <path d="${line} L${W},${H} L0,${H} Z" fill="url(#pg)"/><path class="perf-line" d="${line}" fill="none" stroke="var(--blue)" stroke-width="2.2" vector-effect="non-scaling-stroke"/></svg>` : `<p class="small muted">Todavía no hay vistas medidas en estos ${P.days} días.</p>`}
-    ${P.best.length ? `<h3 class="h3 perf-h">Lo que mejor anduvo</h3><div class="perf-best">${P.best.map((x, i) => `<a class="perf-row" href="#/p/${p.id}/reel/${x.reel_id}"><span class="rk">${i + 1}</span>
+    ${P.best.length && P.best.some((x) => x.views > 0) ? `<h3 class="h3 perf-h">Lo que mejor anduvo</h3><div class="perf-best">${P.best.map((x, i) => `<a class="perf-row" href="#/p/${p.id}/reel/${x.reel_id}"><span class="rk">${i + 1}</span>
       ${x.cover ? `<img src="/media/${esc(x.cover)}" alt="" loading="lazy">` : `<video src="/media/${esc(x.file)}#t=0.8" preload="metadata" muted playsinline></video>`}
       <span class="tt"><b>${esc(x.title)}</b><span class="small muted">${netBadge(x.network)} ${esc(x.who)} · ${fmtDay(x.at)}</span></span>
       <span class="vv"><b class="num">${fmt(x.views)}</b><span class="mps"><span class="small muted">vistas</span>${x.eng ? mpill('rate', x.eng, fmt(x.eng, 1) + ' %') : ''}</span></span></a>`).join('')}</div>` : ''}
   </section>`;
 }
+// Un solo estado por reel en todas las pantallas (lo mismo que el Tablero)
+function reelState(r) {
+  if (r.kind === 'crudo') return ['s-crudo', 'Crudo'];
+  if (r.clip_id && r.review === 'pendiente') return ['s-pendiente', 'Para aprobar'];
+  if (r.clip_id && r.review === 'rechazado') return ['s-error', 'No va'];
+  const P = (state.posts || []).filter((x) => x.reel_id === r.id);
+  if (P.some((x) => x.status === 'publicado' || x.status === 'publicando')) return ['s-publicado', 'Publicado'];
+  if (P.some((x) => x.status === 'programado')) return ['s-programado', 'Programado'];
+  return ['s-aprobado', 'Listo'];
+}
+const reelChip = (r) => { const [c, t] = reelState(r); return `<span class="chip ${c}">${t}</span>`; };
+// se reparte solo lo que alguien aprobó (o un reel listo que no pasó por el editor)
+const repartible = (r) => r.kind !== 'crudo' && !r.archived_at && (!r.clip_id || r.review === 'aprobado');
 // En qué etapa está cada reel: del crudo en el editor hasta publicado (como el tablero de Sequence, pero las etapas las marca ACM solo).
 const STAGES = [['editor', 'En el editor'], ['aprobar', 'Para aprobar'], ['listo', 'Listo, sin programar'], ['programado', 'Programado'], ['publicado', 'Publicado'], ['problema', 'Con problemas']];
 function pipelineCard(p) {
@@ -624,7 +639,7 @@ function pipelineCard(p) {
   if (!B) return '';
   const card = (r, st) => `<a class="pl-card" href="#/p/${p.id}/${st === 'aprobar' ? 'aprobar' : 'reel/' + r.id}">
     ${r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : r.file ? `<video src="/media/${esc(r.file)}#t=0.8" preload="metadata" muted playsinline></video>` : `<span class="pl-ph">${icon('up', 18)}</span>`}
-    <span><b>${esc(r.title)}</b><span class="small muted">${st === 'programado' ? `${r.prog} programadas` : st === 'publicado' ? `${r.pub} publicadas` : esc(r.detail || '')}</span></span></a>`;
+    <span><b>${esc(r.title)}</b><span class="small muted">${st === 'programado' ? `${r.prog} programadas` : st === 'publicado' ? `${r.pub} publicadas${r.prog ? ` · ${r.prog} por salir` : ''}` : esc(r.detail || '')}</span></span></a>`;
   return `<section class="card pl">
     <div class="card-head"><h2 class="h2">Tablero</h2><span class="small muted">En qué etapa está cada reel</span></div>
     <div class="pl-cols">${STAGES.map(([k, l]) => `<div class="pl-col s-${k} ${B[k].length ? 'has' : ''}"><div class="pl-h"><span>${l}</span><b>${B[k].length}</b></div>
@@ -648,7 +663,7 @@ function resumenView() {
     <div class="rs-count"><span class="small">Elección</span><b>${dE === null ? '—' : dE > 0 ? dE : dE === 0 ? 'Hoy' : '✓'}</b><span>${dE === null ? 'cargá la fecha en Ajustes' : dE > 1 ? 'días' : dE === 1 ? 'día' : ''}${p.election_date ? ' · ' + fmtShort(p.election_date) : ''}</span></div>
     <div class="rs-count"><span class="small">Propaganda</span><b>${dP === null ? '—' : dP >= 0 ? dP + 1 : 0}</b><span>${dP !== null && dP >= 0 ? 'días para publicar y pautar' : 'terminó'}${p.propaganda_until ? ' · hasta ' + fmtShort(p.propaganda_until) : ''}</span></div>
     <div class="rs-next"><span class="small">Próximas publicaciones</span>
-      ${upcoming.length ? upcoming.slice(0, 3).map((x) => `<div class="rs-next-row">${netBadge(x.network)}<div><b>${esc(x.reel_title)}</b><span>${esc(x.handle ? '@' + x.handle : NETS[x.network].name)} · ${fmtDay(x.scheduled_at)} ${fmtTime(x.scheduled_at)}</span></div></div>`).join('')
+      ${upcoming.length ? upcoming.slice(0, 3).map((x) => `<div class="rs-next-row">${netBadge(x.network)}<div><b>${esc(x.reel_title)}</b><span>${esc(x.handle ? at(x.handle) : NETS[x.network].name)} · ${fmtDay(x.scheduled_at)} ${fmtTime(x.scheduled_at)}</span></div></div>`).join('')
         : `<p>Nada programado. Subí reels y repartilos.</p><a class="btn sm accent" href="#/p/${p.id}/reels">Ir a Reels</a>`}</div>
   </section>
 
@@ -674,7 +689,7 @@ function resumenView() {
 
   <div class="rs-row">
     <section class="card"><div class="card-head"><h2 class="h2">Cuentas</h2><a class="btn sm" href="#/p/${p.id}/cuentas">Ver todas</a></div>
-      ${A.length ? `<ul class="rs-acc">${A.slice(0, 6).map((a) => `<li>${netBadge(a.network)}<span class="nm ${a.connected_as ? '' : 'muted'}">${esc(accName(a))}</span><span class="fl">${a.connected_as ? fmt(a.followers) + ' seg.' : ''}</span><span class="chip s-${a.status}">${ACC_STATUS[a.status]}</span></li>`).join('')}</ul>${A.length > 6 ? `<p class="small muted" style="margin-top:8px">y ${A.length - 6} más</p>` : ''}`
+      ${A.length ? `<ul class="rs-acc">${A.slice(0, 6).map((a) => `<li>${netBadge(a.network)}<span class="nm ${a.connected_as ? '' : 'muted'}">${esc(accName(a))}</span><span class="fl">${a.connected_as ? fmt(a.followers) + ' seguidores' : ''}</span><span class="chip s-${a.status}">${ACC_STATUS[a.status]}</span></li>`).join('')}</ul>${A.length > 6 ? `<p class="small muted" style="margin-top:8px">y ${A.length - 6} más</p>` : ''}`
         : `<p class="muted small">Todavía no hay cuentas.</p><button class="btn sm primary" style="margin-top:10px" data-act="new-account">Agregar cuenta</button>`}
     </section>
     <section class="card"><div class="card-head"><h2 class="h2">Reels</h2><a class="btn sm" href="#/p/${p.id}/reels">Ver todos</a></div>
@@ -713,17 +728,42 @@ function cuentasView() {
   return `<div class="ac"><section class="card ac-main"><div class="card-head"><div><h2 class="h2">Cuentas</h2><p class="small muted">${live} de ${A.length} conectadas</p></div></div>${table}</section>${side}</div>`;
 }
 
+// el barrio o lugar del crudo: el editor lo dibuja como etiqueta en el video (con los ya usados como sugerencia)
+function barrioField() {
+  const usados = [...new Set((state.reels || []).map((r) => r.etiqueta).filter(Boolean))].slice(0, 20);
+  return `<label class="field up-barrio">Barrio o lugar <span class="hint">sale como etiqueta en el video; opcional</span><input class="input" id="up-etiqueta" maxlength="30" placeholder="Ej.: Beccar" autocomplete="off" list="barrios-dl" value="${esc(state.upEtiqueta || '')}"></label>
+    <datalist id="barrios-dl">${usados.map((b) => `<option value="${esc(b)}">`).join('')}</datalist>`;
+}
+const tactil = () => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } };
+const dropText = (que) => (tactil() ? `<p style="margin-top:8px"><b>Tocá para subir ${que === 'crudos' ? 'un video' : 'reels'}</b></p><p class="small">De la galería o la cámara · podés elegir varios</p>` : `<p style="margin-top:8px"><b>Arrastrá los ${que} acá</b></p>`);
+// «hoy 21:30», «ayer 18:05», «vie 20, 12:00»
+function cuando(s) {
+  if (!s) return ''; const d = s instanceof Date ? s : pdate(String(s).slice(0, 16)), hoy = new Date(); const dd = (a) => a.toDateString();
+  const h = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (dd(d) === dd(hoy)) return `hoy ${h}`; const ay = new Date(hoy); ay.setDate(hoy.getDate() - 1); if (dd(d) === dd(ay)) return `ayer ${h}`;
+  return `${d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}, ${h}`;
+}
+// en qué va un crudo, en palabras del equipo
+function crudoEstado(r) {
+  if (r.status === 'error') return ['s-error', 'Con error'];
+  if (r.ediciones) {
+    const p = [`${r.ediciones} ${r.ediciones === 1 ? 'edición' : 'ediciones'}`];
+    if (r.publicadas) p.push(`${r.publicadas} ${r.publicadas === 1 ? 'publicada' : 'publicadas'}`); else if (r.aprobadas) p.push(`${r.aprobadas} ${r.aprobadas === 1 ? 'aprobada' : 'aprobadas'}`); else if (r.pendientes) p.push('esperan aprobación');
+    return [r.publicadas ? 's-conectada' : 'nodot', p.join(' · ')];
+  }
+  return ['nodot', CRUDO_ESTADO[r.status] || 'En el editor'];
+}
 // ---------- Subir crudos (lo que ve una sombra): solo la subida y en qué va cada crudo, sin números ----------
 const CRUDO_ESTADO = { en_cola: 'En cola', transcribiendo: 'Transcribiendo', buscando_momentos: 'Buscando momentos', editando: 'Editando', revisando: 'Revisando', listo: 'Ediciones listas', sin_momentos: 'Sin momentos para editar', error: 'Con error' };
 function crudosView() {
   state.upKind = 'crudo';
   const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
   const list = state.reels.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Crudo</th><th>Subido</th><th>Estado</th></tr></thead><tbody>${state.reels.map((r) => `<tr>
-    <td>${esc(r.title)}${r.etiqueta ? ` <span class="chip nodot">${esc(r.etiqueta)}</span>` : ''}</td><td class="small muted">${esc(String(r.created_at || '').slice(0, 16))}</td>
-    <td><span class="chip ${r.status === 'error' ? 's-error' : r.status === 'listo' ? 's-conectada' : 'nodot'}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(CRUDO_ESTADO[r.status] || 'Subido')}</span></td></tr>`).join('')}</tbody></table></div>`
+    <td>${esc(r.title)}${r.etiqueta ? ` <span class="chip nodot">${esc(r.etiqueta)}</span>` : ''}</td><td class="small muted nowrap">${esc(cuando(new Date(String(r.created_at || '').replace(' ', 'T') + 'Z')))}</td>
+    <td>${(([c, t]) => `<span class="chip ${c}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(t)}</span>`)(crudoEstado(r))}</td></tr>`).join('')}</tbody></table></div>`
     : '<p class="muted" style="margin-top:12px">Todavía no subiste crudos.</p>';
-  return `<section class="card"><div class="card-head"><div><h2 class="h2">Subir crudos</h2><p class="small muted">Videos sin editar. El editor saca las ediciones y aparecen en «Para aprobar».</p></div></div>
-    ${up}<label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los crudos acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
+  return `<section class="card"><div class="card-head"><div><h2 class="h2">Subir crudos</h2><p class="small muted">Videos sin editar, tal como se grabaron. ${isEditor() ? 'El editor saca las ediciones y aparecen en «Para aprobar».' : 'El editor saca las ediciones; acá ves en qué va cada uno.'}</p></div></div>
+    ${barrioField()}${up}<label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}${dropText('crudos')}${tactil() ? '' : `<p class="small">o tocá para elegirlos · MP4 o MOV, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p>`}</label>
     ${list}</section>`;
 }
 
@@ -771,7 +811,7 @@ function reelsView() {
       <button type="button" data-act="up-kind" data-k="listo" aria-pressed="${kind === 'listo'}"><b>Listo</b><span>editado, para publicar</span></button>
       <button type="button" data-act="up-kind" data-k="crudo" aria-pressed="${kind === 'crudo'}"><b>Crudo</b><span>sin editar, para editar</span></button>
     </div>
-    ${kind === 'crudo' ? `` : ''}<label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los ${kind === 'crudo' ? 'crudos' : 'reels listos'} acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
+    ${kind === 'crudo' ? barrioField() : ''}<label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los ${kind === 'crudo' ? 'crudos' : 'reels listos'} acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
     ${up}
     <div class="rl-stats">
       <div><b>${ALL.filter((r) => r.kind !== 'crudo').length}</b><span>listos</span></div>
@@ -786,11 +826,10 @@ function reelsView() {
     <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está">${r.archived_at ? `<div class="gone">Video borrado<span>se publicó hace más de ${state.storage?.retentionDays ?? 7} días</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video>`}<span class="reel-ver">Ver dónde está</span></a>
     <div class="body">
       <input class="title" value="${esc(r.title)}" data-act="reel-title" aria-label="Título">
-      <div class="meta">${r.kind === 'crudo' ? '<span class="chip s-crudo">Crudo</span>' : `<span class="chip s-${r.status}">${r.status === 'aprobado' ? 'Aprobado' : 'Borrador'}</span>`}<span>${mb(r.size)}</span></div>
+      <div class="meta">${reelChip(r)}<span>${mb(r.size)}</span></div>
       ${r.kind === 'crudo' ? `<a class="reel-nets none" href="#/p/${state.project.id}/reel/${r.id}">${(() => { const n = state.reels.filter((x) => x.source_id === r.id).length; return n ? `${n} ${n === 1 ? 'edición' : 'ediciones'}` : 'Sin ediciones todavía'; })()}</a>` : reelNets(r.id)}
       <div class="row" style="gap:6px">
-        ${r.kind === 'crudo' ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${r.id}">Ver crudo</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length && !r.archived_at ? '' : 'disabled'}>Repartir</button>
-        <button class="btn sm" data-act="reel-approve">${r.status === 'aprobado' ? 'A borrador' : 'Aprobar'}</button>`}
+        ${r.kind === 'crudo' ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${r.id}">Ver crudo</a>` : r.clip_id && r.review === 'pendiente' ? `<a class="btn sm accent" href="#/p/${state.project.id}/aprobar">Ir a aprobar</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length && repartible(r) ? '' : 'disabled'} ${repartible(r) ? '' : 'title="Una versión que no va no se reparte"'}>Repartir</button>`}
       </div>
     </div>
     <button class="icon-btn danger reel-del" data-act="del-reel" title="Borrar reel" aria-label="Borrar reel">${icon('trash', 16)}</button></article>`).join('')}</div>`
@@ -826,7 +865,7 @@ function calendarioView() {
   const title = week
     ? `${days[0].getDate()} ${days[0].getMonth() !== days[6].getMonth() ? days[0].toLocaleDateString('es-AR', { month: 'short' }) + ' ' : ''}– ${days[6].getDate()} ${days[6].toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}`
     : cap(m.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }));
-  const who = (x) => x.connected_as || (x.handle ? '@' + x.handle : NETS[x.network].name);
+  const who = (x) => x.connected_as || (x.handle ? at(x.handle) : NETS[x.network].name);
   const ev = (x) => week
     ? `<button class="cal-ev wk s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-drag="1"' : ''} title="${esc(x.reel_title)} · ${esc(who(x))}${movable(x) ? ' · arrastrá para cambiar el día' : ''}">
         <span class="wk-th">${x.reel_cover ? `<img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false">` : `<video src="/media/${esc(x.reel_file)}#t=0.5" preload="metadata" muted playsinline></video>`}</span>
@@ -900,7 +939,7 @@ function drawLista() {
     .sort((a, b) => (LQ.asc ? 1 : -1) * a.scheduled_at.localeCompare(b.scheduled_at));
   $('#lq-n').textContent = `${L.length} de ${state.posts.length}`;
   body.innerHTML = L.slice(0, 400).map((x) => `<tr data-act="open-post" data-pid="${x.id}" tabindex="0"><td><b>${fmtDay(x.scheduled_at)}</b> ${fmtTime(x.scheduled_at)}</td><td>${esc(x.reel_title)}</td>
-    <td><span class="lq-acc">${netBadge(x.network)}${esc(x.connected_as || (x.handle ? '@' + x.handle : NETS[x.network].name))}</span></td><td><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span></td></tr>`).join('')
+    <td><span class="lq-acc">${netBadge(x.network)}${esc(x.connected_as || (x.handle ? at(x.handle) : NETS[x.network].name))}</span></td><td><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span></td></tr>`).join('')
     || '<tr><td colspan="4" class="muted">Nada con esos filtros.</td></tr>';
 }
 function wireLista() {
@@ -922,14 +961,14 @@ function grillaView() {
   const head = `<div class="cal-head"><h2 class="h2">Grilla del perfil</h2><span class="spacer"></span>${calModes()}</div>`;
   if (!acc) return `<section class="card cal">${head}<p class="muted" style="padding:20px">Cuando haya publicaciones programadas, acá ves cómo queda el perfil de cada cuenta.</p></section>`;
   const L = S.filter((x) => x.account_id === acc.id && x.status !== 'bloqueado').sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
-  const name = acc.connected_as || (acc.handle ? '@' + acc.handle : NETS[acc.network].name);
+  const name = acc.connected_as || (acc.handle ? at(acc.handle) : NETS[acc.network].name);
   const tile = (x) => `<button class="gr-tile s-${x.status}" data-act="open-post" data-pid="${x.id}" title="${esc(x.reel_title)}">
       ${x.reel_cover ? `<img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false">` : `<video src="/media/${esc(x.reel_file)}#t=0.8" preload="metadata" muted playsinline></video>`}
       <span class="gr-badge">${x.status === 'publicado' ? icon('check', 12) : x.status === 'fallido' ? '!' : `${fmtDay(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</span>
       <span class="gr-title">${esc(x.reel_title)}</span></button>`;
   return `<section class="card cal">${head}
     <div class="gr-wrap">
-      <div class="gr-accs">${accs.map((a) => `<button class="gr-acc ${a.id === acc.id ? 'on' : ''}" data-act="grid-acc" data-id="${a.id}">${netBadge(a.network)}<span>${esc(a.connected_as || (a.handle ? '@' + a.handle : NETS[a.network].name))}</span><b>${S.filter((x) => x.account_id === a.id && x.status === 'programado').length} prog.</b></button>`).join('')}
+      <div class="gr-accs">${accs.map((a) => `<button class="gr-acc ${a.id === acc.id ? 'on' : ''}" data-act="grid-acc" data-id="${a.id}">${netBadge(a.network)}<span>${esc(a.connected_as || (a.handle ? at(a.handle) : NETS[a.network].name))}</span><b>${S.filter((x) => x.account_id === a.id && x.status === 'programado').length} prog.</b></button>`).join('')}
         <p class="small muted" style="margin-top:10px">Así va a quedar el perfil de cada cuenta, en el celu y en la compu. Tocá un reel para ver su publicación; para cambiarle la fecha, usá Mes o Semana.</p></div>
       <div class="phone">
         <div class="ph-screen">
@@ -1069,7 +1108,7 @@ function postDialog(ids) {
     <div class="pd" data-id="${x.id}">
       <video src="/media/${esc(x.reel_file)}#t=0.5" preload="metadata" controls playsinline></video>
       <div class="pd-info"><b>${esc(x.reel_title)}</b>
-        <span class="row small pd-acc">${netBadge(x.network)}${esc(x.handle ? '@' + x.handle : NETS[x.network].name + ' sin conectar')}</span>
+        <span class="row small pd-acc">${netBadge(x.network)}${esc(x.handle ? at(x.handle) : NETS[x.network].name + ' sin conectar')}</span>
         <span class="pd-when"><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span><span class="small muted">${x.published_at ? `salió el ${fmtDay(x.published_at)} a las ${fmtTime(x.published_at)}` : `${fmtDate(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</span></span>
         ${x.error ? `<p class="banner err" style="margin:0">${esc(x.error)}</p>` : ''}
         ${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}
@@ -1259,7 +1298,7 @@ function pautaOut(p, c) {
   const y = (val) => H - padB - (val / max) * (H - padB - 14);
   const refY = y(8);
   return `<section class="pz-big">
-      <div><span class="lbl">Socios alcanzados</span><b>${fmt(c.people)}</b><span class="sub">${c.real ? 'de los contactos del padrón' : 'estimado sobre el padrón'}</span></div>
+      <div><span class="lbl">${gente(p).replace(/^./, (x) => x.toUpperCase())} alcanzados</span><b>${fmt(c.people)}</b><span class="sub">${c.real ? 'de los contactos del padrón' : 'estimado sobre el padrón'}</span></div>
       <div><span class="lbl">Veces que la ve cada uno</span><b>${has ? fmt(c.freq, c.freq < 10 ? 1 : 0) : '—'}</b><span class="sub">${has ? `${fmt(c.perWeek, 1)} por semana <span class="chip v-${v[0]}">${v[1]}</span>` : 'cargá la inversión'}</span></div>
       <div><span class="lbl">Vistas en total</span><b>${has ? fmtK(c.imps) : '—'}</b><span class="sub">en ${fmt(c.days)} días</span></div>
       <div><span class="lbl">Por día</span><b>${has ? usd(c.perDay) : '—'}</b><span class="sub">${has ? `${usd(c.perDay * 7)} por semana` : ''}</span></div>
@@ -1306,7 +1345,7 @@ function reelDetailView() {
   const libres = state.accounts.filter((a) => !redes.has(a.network));
   const n = (st) => P.filter((x) => x.status === st).length;
   const rows = P.map((x) => `<tr data-id="${x.id}">
-      <td><span class="row" style="gap:8px">${netBadge(x.network)}<span><b>${esc((() => { const a = state.accounts.find((y) => y.id === x.account_id); return a ? accName(a) : x.handle ? '@' + x.handle : NETS[x.network].name; })())}</b><br><span class="small muted">${NETS[x.network].name}</span></span></span></td>
+      <td><span class="row" style="gap:8px">${netBadge(x.network)}<span><b>${esc((() => { const a = state.accounts.find((y) => y.id === x.account_id); return a ? accName(a) : x.handle ? at(x.handle) : NETS[x.network].name; })())}</b><br><span class="small muted">${NETS[x.network].name}</span></span></span></td>
       <td><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span>${x.error ? `<p class="small err-t">${esc(x.error)}</p>` : ''}</td>
       <td class="small nowrap">${x.published_at ? `${fmtDay(x.published_at)} · ${fmtTime(x.published_at)}` : `${fmtDay(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</td>
       <td class="r nowrap">${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">${icon('ext', 15)} Ver en ${NETS[x.network].name}</a>` : `<button class="btn sm" data-act="open-post" data-pid="${x.id}">Ver publicación</button>`}</td>
@@ -1316,8 +1355,8 @@ function reelDetailView() {
       <a class="btn sm rd-back" href="#/p/${p.id}/reels">${icon('left', 16)} Todos los reels</a>
       ${r.archived_at ? `<div class="gone tall">Video borrado del almacenamiento<span>Quedan el texto y las publicaciones. Para volver a usarlo, subilo de nuevo.</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>`}
       <h2 class="h2">${esc(r.title)}</h2>
-      <p class="small muted">${r.kind === 'crudo' ? 'Crudo' : r.status === 'aprobado' ? 'Aprobado' : 'Borrador'} · ${mb(r.size)} · subido el ${fmtDate(r.created_at)}</p>
-      ${r.kind === 'crudo' || r.archived_at ? '' : `<div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length && libres.length ? '' : 'disabled'}>${libres.length ? 'Repartir en más cuentas' : 'Ya está en todas las redes'}</button></div>`}
+      <p class="small muted">${reelState(r)[1]} · ${mb(r.size)} · subido el ${fmtDate(r.created_at)}</p>
+      ${r.kind === 'crudo' || r.archived_at ? '' : `<div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length && libres.length && repartible(r) ? '' : 'disabled'}>${libres.length ? 'Repartir en más cuentas' : 'Ya está en todas las redes'}</button></div>`}
     </aside>
     <div class="stack">
       ${reelForm(r)}
@@ -1484,20 +1523,20 @@ function knDraw() {
   const total = D.kinds.reduce((s, k) => s + k.n, 0);
   $('#kn-chips').innerHTML = `<button type="button" data-act="kn-kind" data-k="" aria-pressed="${!K.kind}">Todo <b>${fmt(total)}</b></button>` +
     D.kinds.sort((a, b) => b.n - a.n).map((k) => `<button type="button" data-act="kn-kind" data-k="${esc(k.kind)}" aria-pressed="${K.kind === k.kind}">${esc(names[k.kind] || k.kind)} <b>${fmt(k.n)}</b></button>`).join('') +
-    (K.handle ? `<button type="button" data-act="kn-handle" data-h="" aria-pressed="true">@${esc(K.handle)} ✕</button>` : '');
+    (K.handle ? `<button type="button" data-act="kn-handle" data-h="" aria-pressed="true">${esc(at(K.handle))} ✕</button>` : '');
   const mode = D.mode === 'significado' ? 'ordenado por significado' : D.mode === 'palabras' ? 'por palabras (el modelo todavía no cargó)' : 'lo más reciente';
   list.innerHTML = !total ? `<div class="card empty"><h2 class="h2">Sin investigación todavía</h2><p>Importá un JSON con fichas (tipo, titulo, texto, fuente) o cuentas de Instagram.</p></div>`
     : `<p class="small muted kn-meta">${fmt(D.items.length)} resultados · ${mode}${D.pending ? ` · ${fmt(D.pending)} fichas calculando su vector` : ''}</p>` +
     (D.items.length ? D.items.map(knCard).join('') : '<div class="card muted">Nada parecido. Probá con otras palabras.</div>');
   const A = D.accounts || [];
   const O = K.outliers || [];
-  const outCard = O.length ? `<div class="card kn-out"><h2 class="h2">Lo que mejor les funcionó</h2><p class="small muted">Publicaciones con el doble o más de las interacciones normales de su cuenta${K.handle ? ` (@${esc(K.handle)})` : ''}.</p>
+  const outCard = O.length ? `<div class="card kn-out"><h2 class="h2">Lo que mejor les funcionó</h2><p class="small muted">Publicaciones con el doble o más de las interacciones normales de su cuenta${K.handle ? ` (${esc(at(K.handle))})` : ''}.</p>
     ${O.map((x) => `<a class="kn-o" ${/^https?:\/\//i.test(x.url || '') ? `href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"` : ''}><span class="kn-score">×${x.score.toLocaleString('es-AR', { maximumFractionDigits: 1 })}</span>
-      <span><b>@${esc(x.handle)}</b> <span class="small muted">· ${esc(x.type || '')} · ${esc(x.date || '')}</span><span class="kn-ot">${esc(x.text)}</span>
+      <span><b>${esc(at(x.handle))}</b> <span class="small muted">· ${esc(x.type || '')} · ${esc(x.date || '')}</span><span class="kn-ot">${esc(x.text)}</span>
       <span class="mps">${mpill('likes', x.eng, fmtK(x.eng) + ' interacciones')}<span class="small muted">lo normal: ${fmtK(x.median)}</span></span></span></a>`).join('')}</div>` : '';
   $('#kn-side').innerHTML = refsCard() + outCard + `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa. Se releen solas cada 6 horas con una cuenta de Instagram conectada del proyecto, y si una publica algo que rinde 3× o más lo normal, te aviso por Telegram.</p>
     <button class="btn sm" data-act="watch-run" style="margin:4px 0 10px">${icon('refresh', 15)} Actualizar ahora</button>
-    <div class="kn-acc">${A.map((a) => `<button data-act="kn-handle" data-h="${esc(a.handle)}" class="${K.handle === a.handle ? 'sel' : ''}"><b>@${esc(a.handle)}</b><span>${fmt(a.followers)} seg. · ${fmt(a.posts)} publ.</span><span>${fmt(a.avg_eng)} interacciones prom. · ${a.followers ? fmt(a.avg_eng / a.followers * 100, 1) : 0} %</span></button>`).join('') || '<p class="small muted">Ninguna todavía.</p>'}</div></div>
+    <div class="kn-acc">${A.map((a) => `<button data-act="kn-handle" data-h="${esc(a.handle)}" class="${K.handle === a.handle ? 'sel' : ''}"><b>${esc(at(a.handle))}</b><span>${fmt(a.followers)} seguidores · ${fmt(a.posts)} publ.</span><span>${fmt(a.avg_eng)} interacciones prom. · ${a.followers ? fmt(a.avg_eng / a.followers * 100, 1) : 0} %</span></button>`).join('') || '<p class="small muted">Ninguna todavía.</p>'}</div></div>
     <div class="card"><h2 class="h2">Importar</h2><p class="small muted">JSON con <code>items</code> (fichas) y/o <code>instagram</code> (cuentas con sus publicaciones).</p>
     <label class="btn">${icon('up')} Elegir archivo<input type="file" id="kn-file" accept=".json,application/json" hidden></label>
     <p class="small muted" style="margin-top:10px">Búsqueda: ${D.model.ready ? 'modelo listo' : D.model.present ? 'el modelo carga con la primera búsqueda' : 'sin modelo, solo por palabras'} (${esc(D.model.model)})</p></div>`;
@@ -1832,7 +1871,7 @@ function paletteOpen() {
     items = [...local,
       ...r.projects.map((x) => ({ g: 'Proyectos', t: x.name, s: [x.role, x.org].filter(Boolean).join(' · '), href: `#/p/${x.id}` })),
       ...r.reels.map((x) => ({ g: 'Reels', t: x.title, s: `${x.project}${x.kind === 'crudo' ? ' · crudo' : ''}`, href: `#/p/${x.project_id}/reel/${x.id}` })),
-      ...r.accounts.map((x) => ({ g: 'Cuentas', t: x.connected_as || '@' + x.handle, s: `${NETS[x.network]?.name || x.network} · ${x.project}`, href: `#/p/${x.project_id}/cuentas` }))];
+      ...r.accounts.map((x) => ({ g: 'Cuentas', t: x.connected_as || at(x.handle), s: `${NETS[x.network]?.name || x.network} · ${x.project}`, href: `#/p/${x.project_id}/cuentas` }))];
     sel = 0; draw();
   };
   input.addEventListener('input', search);
@@ -2200,6 +2239,7 @@ function afterRender(r) {
     const box = inp.closest('[data-swatches]'), lab = inp.closest('.sw-custom'); box.querySelector('input[type=hidden]').value = inp.value;
     box.querySelectorAll('.sw').forEach((b) => b.setAttribute('aria-pressed', String(b === lab))); lab.style.setProperty('--c', inp.value); swatchChanged(box);
   }));
+  $('#up-etiqueta')?.addEventListener('input', (e) => { state.upEtiqueta = e.target.value; });
   $('#project-form [name=photo]')?.addEventListener('change', (e) => { const f = e.target.files[0]; if (f) $('#aj-av').innerHTML = `<img src="${URL.createObjectURL(f)}" alt="">`; });
   const pf = $('#project-form');
   if (pf && r.view === 'project') wireKindDefaults(pf);
@@ -2350,16 +2390,6 @@ document.addEventListener('click', async (e) => {
       case 'pause-account': { const a = state.accounts.find((x) => x.id === id); await api(`/api/accounts/${id}`, { method: 'PUT', body: { status: a.status === 'pausada' ? 'activa' : 'pausada' } }); toast(a.status === 'pausada' ? 'Cuenta reanudada' : 'Cuenta pausada: no recibe publicaciones nuevas'); render(); break; }
       case 'del-account': if (await confirmBox('Borrar cuenta', 'Se quitan también sus publicaciones programadas.')) { await api(`/api/accounts/${id}`, { method: 'DELETE' }); render(); } break;
       case 'del-reel': if (await confirmBox('Borrar reel', 'Se borra el video y sus publicaciones programadas.')) { await api(`/api/reels/${id}`, { method: 'DELETE' }); render(); } break;
-      case 'reel-approve': {
-        // solo cambia esta tarjeta: volver a dibujar todo recarga todos los videos
-        const r = state.reels.find((x) => x.id === id), st = r.status === 'aprobado' ? 'borrador' : 'aprobado';
-        el.disabled = true;
-        try { await api(`/api/reels/${id}`, { method: 'PUT', body: { status: st } }); r.status = st; } finally { el.disabled = false; }
-        const card = el.closest('.reel'), chip = card?.querySelector('.meta .chip');
-        if (chip) { chip.className = `chip s-${st}`; chip.textContent = st === 'aprobado' ? 'Aprobado' : 'Borrador'; }
-        el.textContent = st === 'aprobado' ? 'A borrador' : 'Aprobar';
-        if (!card) render();
-        break; }
       case 'ap-dec': {
         const ed = el.closest('.ap-ed'); ed.dataset.dec = el.dataset.v;
         $$('.ap-dec button', ed).forEach((b) => b.setAttribute('aria-pressed', String(b === el)));

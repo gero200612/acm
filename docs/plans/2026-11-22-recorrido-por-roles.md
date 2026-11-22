@@ -4,11 +4,11 @@ Gero, 22/11/2026: recorrido completo como dueño, admin del dirigente, editor y 
 
 ## Errores
 - [x] «Rechazar lo marcado» aprobaba sin avisar las versiones no marcadas: decisión por versión (👍/👎) y nada se aprueba sin que lo elijan
-- [ ] Subir crudo: falta el campo del barrio (el código lee `#up-etiqueta` pero no está en ninguna pantalla)
-- [ ] Un solo estado por reel en todas las pantallas: Tablero (Publicado contaba 0 con 16 publicadas; Para aprobar contaba versiones y la pestaña recortes), chip de Reels («Borrador» en reels aprobados y publicados)
-- [ ] Reels: sin «Aprobar» paralelo (se aprueba solo en Para aprobar) y sin «Repartir» un reel que espera aprobación o fue rechazado
-- [ ] «@@VolveGustavo» (doble arroba), «7.080 seg.» → seguidores, «Socios alcanzados» en un proyecto político
-- [ ] «Lo que mejor anduvo» con todo en 0 vistas: no se muestra sin números; textos cortados en las tarjetas de Inicio
+- [x] Subir crudo: falta el campo del barrio (el código lee `#up-etiqueta` pero no está en ninguna pantalla)
+- [x] Un solo estado por reel en todas las pantallas: Tablero (Publicado contaba 0 con 16 publicadas; Para aprobar contaba versiones y la pestaña recortes), chip de Reels («Borrador» en reels aprobados y publicados)
+- [x] Reels: sin «Aprobar» paralelo (se aprueba solo en Para aprobar) y sin «Repartir» un reel que espera aprobación o fue rechazado
+- [x] «@@VolveGustavo» (doble arroba), «7.080 seg.» → seguidores, «Socios alcanzados» en un proyecto político
+- [x] «Lo que mejor anduvo» con todo en 0 vistas: no se muestra sin números; textos cortados en las tarjetas de Inicio
 
 ## Para aprobar (editor)
 - [x] Cada recorte con su título real y contexto: de qué crudo sale, barrio, público, duración

@@ -370,7 +370,7 @@ async function sendRedo(reel, pedido) {
     });
     if (!resp.ok) return fail(resp.status === 404 ? 'El editor ya no tiene esta edición: no se puede rehacer.' : `El editor respondió ${resp.status}`);
     return true;
-  } catch (e) { return fail(`No pudimos hablar con el editor: ${e.message}`); }
+  } catch (e) { console.error('editor/rehacer:', mask(e.message)); return fail('No pudimos hablar con el editor: probá de nuevo en un rato.'); }
 }
 
 app.use('/api', requireAuth);
@@ -728,7 +728,11 @@ app.delete('/api/accounts/:id', (req, res) => { run('DELETE FROM accounts WHERE 
 app.get('/api/projects/:id/reels', (req, res) => {
   const R = all(`SELECT r.*, (SELECT count(*) FROM posts WHERE reel_id = r.id) AS posts FROM reels r WHERE project_id = ? ORDER BY created_at DESC`, req.params.id);
   // la sombra ve solo los crudos que se subieron, sin publicaciones ni números
-  res.json(isContent(req.user) ? R.filter((r) => r.kind === 'crudo').map(sombraReel) : R);
+  if (!isContent(req.user)) return res.json(R);
+  // el equipo de contenido ve en qué va cada crudo: cuántas ediciones salieron, cuántas se aprobaron y cuántas ya se publicaron (sin números de redes)
+  const ed = new Map(all(`SELECT source_id AS id, count(*) AS n, sum(review = 'aprobado') AS ok, sum(review = 'pendiente') AS pend,
+    sum((SELECT count(*) FROM posts p WHERE p.reel_id = reels.id AND p.status = 'publicado') > 0) AS pub FROM reels WHERE project_id = ? AND kind = 'listo' AND source_id IS NOT NULL GROUP BY source_id`, req.params.id).map((x) => [x.id, x]));
+  res.json(R.filter((r) => r.kind === 'crudo').map((r) => { const x = ed.get(r.id) || {}; return { ...sombraReel(r), ediciones: x.n || 0, aprobadas: x.ok || 0, pendientes: x.pend || 0, publicadas: x.pub || 0 }; }));
 });
 app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe' });
@@ -1003,12 +1007,13 @@ app.get('/api/projects/:id/performance', (req, res) => {
     if (r.fail) return 'problema';
     if (r.clip_id && r.review === 'pendiente') return 'aprobar';
     if (r.clip_id && r.review === 'rechazado') return null;
+    if (r.pub) return 'publicado'; // si ya salió en alguna cuenta está publicado (lo que falta se muestra como «por salir»)
     if (r.prog) return 'programado';
-    if (r.pub) return 'publicado';
     return 'listo';
   };
   const pipeline = { editor: [], aprobar: [], listo: [], programado: [], publicado: [], problema: [] };
-  for (const r of reels) { const st = stage(r); if (st) pipeline[st].push({ id: r.id, title: r.title, kind: r.kind, detail: r.status_detail || (r.kind === 'crudo' ? r.status : ''), cover: r.cover, file: r.kind === 'listo' ? r.file : '', prog: r.prog || 0, pub: r.pub || 0 }); }
+  const vistos = new Set(); // «Para aprobar» cuenta recortes (como la pestaña), no versiones
+  for (const r of reels) { const st = stage(r); if (st === 'aprobar') { if (vistos.has(r.clip_id)) continue; vistos.add(r.clip_id); } if (st) pipeline[st].push({ id: r.id, title: r.title, kind: r.kind, detail: r.status_detail || (r.kind === 'crudo' ? r.status : ''), cover: r.cover, file: r.kind === 'listo' ? r.file : '', prog: r.prog || 0, pub: r.pub || 0 }); }
   res.json({ days, totals: tot(cur), previous: tot(prev), series, best, pipeline });
 });
 // Lo que mejor les funcionó a las cuentas investigadas: publicaciones con 2× o más las interacciones normales de su cuenta.
