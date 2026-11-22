@@ -448,7 +448,7 @@ function projectHead(p) {
   return `<div class="who">${avatar(p, true)}<div style="min-width:0"><h1 class="page-title">${esc(p.name)}</h1><p class="lead">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Proyecto')}</p></div></div>
   <div class="row">${p.demo ? '<span class="chip s-pausada" title="No publica ni pauta nada">Demo · no publica</span>' : ''}${countdown(p)}${p.padron && !isContent() ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
 }
-const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['memoria', 'Memoria'], ['investigacion', 'Investigación'], ['comentarios', 'Comentarios'], ['ajustes', 'Ajustes']];
+const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['memoria', 'Memoria'], ['investigacion', 'Investigación'], ['ajustes', 'Ajustes']]; // Comentarios: fuera por ahora (la ruta sigue)
 function projectView(tab) {
   const p = state.project;
   const counts = { cuentas: state.accounts.length, reels: state.reels.length, aprobar: p.review_pending, calendario: state.posts.filter((x) => x.status === 'programado').length };
@@ -1536,25 +1536,71 @@ function comentariosView() {
 }
 function ajustesView() {
   const p = state.project;
-  return `<div class="grid g2" style="align-items:start">
-  <section class="card"><div class="card-head"><h2 class="h2">Datos del proyecto</h2></div>${projectForm(p)}</section>
+  return `<div class="grid g2 aj" style="align-items:start">
+  ${projectSettings(p)}
   <div class="stack">
+    ${marcaCard(p)}
     ${publicosCard(p)}
-    <section class="card" id="marca-card"><div class="card-head"><div><h2 class="h2">Marca de los videos</h2><p class="small muted">El color pinta la palabra clave de los subtítulos. El largo máximo corta las ediciones.</p></div></div>
-      <div class="two"><label class="field">Color de acento<span class="row"><input type="checkbox" id="marca-con" ${p.marca?.acento ? 'checked' : ''}> <input type="color" id="marca-acento" value="${esc(p.marca?.acento || '#C6E85A')}"></span></label>
-      <label class="field">Largo máximo<select class="input" id="marca-largo">${[['', 'Sin tope (90 s)'], [30, '30 s'], [45, '45 s'], [60, '60 s']].map(([v, l]) => `<option value="${v}" ${String(p.marca?.largo_max_s ?? '') === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
-      <div class="row" style="margin-top:12px"><button type="button" class="btn sm primary" data-act="marca-save">Guardar marca</button></div>
-    </section>
-    <section class="card"><div class="card-head"><h2 class="h2">Padrón</h2>${p.padron_file ? `<button class="btn sm danger" data-act="del-padron">Quitar</button>` : ''}</div>
+    <section class="card"><div class="card-head"><div><h2 class="h2">Padrón</h2><p class="small muted">Con el padrón, la pauta le llega solo a los ${gente(p)} que votan.</p></div>${p.padron_file ? `<button class="btn sm danger" data-act="del-padron">Quitar</button>` : ''}</div>
       ${p.padron_file ? `<div class="pad-ok">${icon('file', 22)}<div><b>${esc(p.padron_file)}</b><span class="small muted">subido el ${fmtDate(p.padron_at)}</span></div></div>
         <div class="pad-nums"><div><b>${fmt(p.padron)}</b><span>${gente(p)}</span></div><div><b>${fmt(p.padron_phones)}</b><span>con teléfono</span></div><div><b>${fmt(p.padron_emails)}</b><span>con mail</span></div><div><b>${fmt(p.padron_contacts)}</b><span>contactables</span></div></div>` : ''}
       <label class="drop pad-drop" id="pad-drop"><input type="file" id="pad-input" accept=".csv,.xlsx,.txt" hidden>${icon('up', 26)}
         <p style="margin-top:6px"><b>${p.padron_file ? 'Soltá otro archivo para reemplazarlo' : 'Tirá el padrón acá'}</b> o tocá para elegirlo</p>
         <p class="small">Excel (.xlsx) o CSV. Se detectan solas las columnas de teléfono y mail.</p></label>
-      <p class="small muted" style="margin-top:12px">Del archivo no se guardan nombres ni DNI: solo cuántos ${gente(p)} hay y la huella cifrada de cada teléfono y mail, que es lo que Meta usa para mostrarle la propaganda solo a ellos. El archivo no queda en el servidor.</p>
+      <p class="small muted" style="margin-top:12px">Del archivo no se guardan nombres ni DNI: solo cuántos ${gente(p)} hay y la huella cifrada de cada teléfono y mail. El archivo no queda en el servidor.</p>
     </section>
-    ${isGeneral() ? `<section class="card"><div class="card-head"><h2 class="h2">Borrar proyecto</h2></div><p class="muted small">Se borran sus cuentas, reels, publicaciones y el padrón. No se puede deshacer.</p><button class="btn danger" style="margin-top:14px" data-act="del-project">${icon('trash')} Borrar ${esc(p.name)}</button></section>` : ''}
+    ${isGeneral() ? `<section class="card aj-danger"><div><h2 class="h2">Borrar proyecto</h2><p class="muted small">Se borran sus cuentas, reels, publicaciones y el padrón. No se puede deshacer.</p></div><button class="btn danger" data-act="del-project">${icon('trash')} Borrar ${esc(p.name)}</button></section>` : ''}
   </div></div>`;
+}
+// al cambiar un color: la vista previa de la marca y el avatar del proyecto lo muestran en el momento
+function swatchChanged(box) {
+  const v = box.querySelector('input[type=hidden]').value, n = box.querySelector('input[type=hidden]').name;
+  if (n === 'acento' && $('#marca-prev')) $('#marca-prev').style.color = v || '';
+  if (n === 'color' && $('#aj-av')) $('#aj-av').style.background = v;
+}
+// colores para elegir con un toque (y uno a mano)
+const SWATCHES = ['#ff5a1f', '#e5484d', '#f5a524', '#c6e85a', '#30a46c', '#12a594', '#0090ff', '#3e63dd', '#8e4ec6', '#d6409f', '#121316'];
+function swatchPicker(name, value, { none = '' } = {}) {
+  const v = String(value || '').toLowerCase(), custom = v && !SWATCHES.includes(v);
+  return `<div class="swatches" data-swatches><input type="hidden" name="${name}" value="${esc(v)}">
+    ${none ? `<button type="button" class="sw sw-none" data-act="swatch" data-v="" aria-pressed="${!v}" title="${esc(none)}"><span>${esc(none)}</span></button>` : ''}
+    ${SWATCHES.map((c) => `<button type="button" class="sw" data-act="swatch" data-v="${c}" style="--c:${c}" aria-pressed="${v === c}" aria-label="Color ${c}"></button>`).join('')}
+    <label class="sw sw-custom" title="Otro color" aria-pressed="${custom}" style="${custom ? `--c:${esc(v)}` : ''}"><input type="color" value="${esc(v || '#ff5a1f')}" aria-label="Otro color">${icon('plus', 14)}</label></div>`;
+}
+function projectSettings(p) {
+  const nets = p.ads_networks || { meta: true, youtube: true, tiktok: true };
+  return `<section class="card"><form class="form aj-form" id="project-form">
+    <div class="aj-who">
+      <span class="aj-av" id="aj-av" style="background:${esc(p.color)}">${p.photo ? `<img src="/media/${esc(p.photo)}" alt="">` : esc(initials(p.name))}</span>
+      <div><h2 class="h2">Datos del proyecto</h2><label class="btn sm aj-photo">Cambiar foto<input type="file" name="photo" accept="image/*" hidden></label></div>
+    </div>
+    <label class="field">Nombre del dirigente o candidato<input class="input" name="name" required value="${esc(p.name)}" placeholder="Nombre y apellido"></label>
+    <div class="two"><label class="field">Cargo o lista<input class="input" name="role" value="${esc(p.role)}" placeholder="Presidente · Lista 1"></label>
+    <label class="field">Institución<input class="input" name="org" value="${esc(p.org)}" placeholder="Club Atlético Independiente"></label></div>
+    <div class="two"><label class="field">Fecha de la elección<input class="input" type="date" name="election_date" value="${esc(p.election_date)}"></label>
+    <label class="field">Último día de propaganda<input class="input" type="date" name="propaganda_until" value="${esc(p.propaganda_until)}"><span class="hint">Después de ese día no se publica ni se pauta</span></label></div>
+    <div class="field">Color del proyecto${swatchPicker('color', p.color || '#ff5a1f')}<span class="hint">Identifica al proyecto en el panel</span></div>
+    <div class="aj-sep">Campaña</div>
+    <label class="field">Tipo de proyecto<select class="input" name="kind">${[['club', 'Club o institución'], ['politica', 'Política'], ['comercial', 'Comercial']].map(([v, t]) => `<option value="${v}" ${(p.kind || 'club') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    <div class="field">Revisión de recortes<input type="hidden" name="review_mode" value="${p.review_mode === 'auto' ? 'auto' : 'manual'}">
+      <div class="seg seg-cards" role="group">${[['manual', 'Manual', 'Cada recorte espera que alguien lo apruebe'], ['auto', 'Automática', 'Lo que el analista aprueba entra solo; lo dudoso espera']].map(([k, t, d]) => `<button type="button" data-act="aj-review" data-v="${k}" aria-pressed="${(p.review_mode === 'auto' ? 'auto' : 'manual') === k}">${t}<span>${d}</span></button>`).join('')}</div></div>
+    <div class="field">Redes con pauta<div class="aj-nets">${[['meta', 'Meta'], ['youtube', 'YouTube'], ['tiktok', 'TikTok']].map(([k, t]) => `<label class="aj-net"><input type="checkbox" name="ads_${k}" ${nets[k] ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div><span class="hint">En un proyecto político TikTok no acepta pauta</span></div>
+    <div class="aj-foot"><button class="btn primary" type="submit">Guardar cambios</button></div>
+  </form></section>`;
+}
+// Marca de los videos: el color de la palabra clave del subtítulo y el largo máximo, con una vista previa
+function marcaCard(p) {
+  const acento = p.marca?.acento || '', largo = String(p.marca?.largo_max_s ?? '');
+  return `<section class="card" id="marca-card"><div class="card-head"><div><h2 class="h2">Marca de los videos</h2><p class="small muted">Cómo salen las ediciones de este proyecto.</p></div></div>
+    <div class="aj-marca">
+      <div class="aj-prev" aria-hidden="true"><span class="aj-prev-sub">VOLVÉ <b id="marca-prev" style="${acento ? `color:${esc(acento)}` : ''}">GUSTAVO</b></span></div>
+      <div class="form">
+        <div class="field">Color de la palabra clave${swatchPicker('acento', acento, { none: 'El del editor' })}</div>
+        <div class="field">Largo máximo<input type="hidden" id="marca-largo" value="${esc(largo)}"><div class="seg" role="group">${[['', 'Sin tope'], ['30', '30 s'], ['45', '45 s'], ['60', '60 s']].map(([v, l]) => `<button type="button" data-act="aj-largo" data-v="${v}" aria-pressed="${largo === v}">${l}</button>`).join('')}</div><span class="hint">Sin tope, las ediciones llegan hasta 90 s</span></div>
+      </div>
+    </div>
+    <div class="aj-foot"><button type="button" class="btn primary" data-act="marca-save">Guardar marca</button></div>
+  </section>`;
 }
 // Públicos objetivo: cada cuenta le habla a uno y el editor etiqueta cada fragmento del crudo con el suyo.
 function publicosCard(p) {
@@ -2126,6 +2172,11 @@ function afterRender(r) {
     ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
     drop.addEventListener('drop', (e) => uploadReels(e.dataTransfer.files));
   }
+  $$('.sw-custom input').forEach((inp) => inp.addEventListener('input', () => {
+    const box = inp.closest('[data-swatches]'), lab = inp.closest('.sw-custom'); box.querySelector('input[type=hidden]').value = inp.value;
+    box.querySelectorAll('.sw').forEach((b) => b.setAttribute('aria-pressed', String(b === lab))); lab.style.setProperty('--c', inp.value); swatchChanged(box);
+  }));
+  $('#project-form [name=photo]')?.addEventListener('change', (e) => { const f = e.target.files[0]; if (f) $('#aj-av').innerHTML = `<img src="${URL.createObjectURL(f)}" alt="">`; });
   const pf = $('#project-form');
   if (pf && r.view === 'project') wireKindDefaults(pf);
   if (pf && r.view === 'project') pf.addEventListener('submit', async (e) => {
@@ -2187,8 +2238,14 @@ document.addEventListener('click', async (e) => {
       case 'logout': await api('/api/logout', { method: 'POST' }); state.authed = false; state.me = null; location.hash = ''; render(); break;
       case 'new-project': newProjectDialog(); break;
       case 'user-new': userDialog(); break;
+      case 'swatch': {
+        const box = el.closest('[data-swatches]'); box.querySelector('input[type=hidden]').value = el.dataset.v;
+        box.querySelectorAll('.sw').forEach((b) => b.setAttribute('aria-pressed', String(b === el))); swatchChanged(box); break; }
+      case 'aj-review': case 'aj-largo': {
+        const seg = el.closest('.seg'); seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
+        (act === 'aj-review' ? el.closest('.field').querySelector('[name=review_mode]') : $('#marca-largo')).value = el.dataset.v; break; }
       case 'marca-save': {
-        const marca = { ...($('#marca-con').checked ? { acento: $('#marca-acento').value } : {}), ...($('#marca-largo').value ? { largo_max_s: Number($('#marca-largo').value) } : {}) };
+        const ac = $('#marca-card [name=acento]').value, lg = $('#marca-largo').value; const marca = { ...(ac ? { acento: ac } : {}), ...(lg ? { largo_max_s: Number(lg) } : {}) };
         await api(`/api/projects/${state.project.id}`, { method: 'PUT', body: { marca } }); toast('Marca guardada'); render(); break; }
       case 'pub-add': if ($$('#pub-list .pub-row').length >= 6) { toast('Hasta 6 públicos', true); break; } $('#pub-list').insertAdjacentHTML('beforeend', pubRow()); break;
       case 'pub-del': el.closest('.pub-row').remove(); break;
