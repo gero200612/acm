@@ -22,8 +22,8 @@ Gero, 22/11/2026: recorrido completo como dueño, admin del dirigente, editor y 
 - [x] Banco: casos de rehacer (ACM y editor)
 
 ## Admin del dirigente: sin lo técnico
-- [ ] Pauta: conectar Meta Ads / TikTok Ads / Google Ads solo para el general; TikTok Ads no aparece si TikTok no tiene pauta
-- [ ] Investigación: importar JSON y el nombre del modelo solo para el general; Memoria solo para el general
+- [x] Pauta: conectar Meta Ads / TikTok Ads / Google Ads solo para el general; TikTok Ads no aparece si TikTok no tiene pauta
+- [x] Investigación: importar JSON y el nombre del modelo solo para el general; Memoria solo para el general
 
 ## Pauta
 - [ ] Detalle semana a semana plegado (las primeras semanas + «ver todas») y el eje del gráfico legible

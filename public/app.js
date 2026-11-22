@@ -133,6 +133,7 @@ async function render() {
   // un administrador de dirigente, un editor o una sombra van directo a su proyecto; el editor a Para aprobar, la sombra a Subir crudos
   if (!isGeneral() && (r.view === 'home' || r.view === 'lab' || (r.view === 'project' && r.id !== state.me?.project_id))) { location.replace(`#/p/${state.me.project_id}${isContent() ? `/${contentHome()}` : ''}`); return; }
   if (r.view === 'users' && !canUsers()) { location.replace('#'); return; }
+  if (!isGeneral() && !isContent() && r.view === 'project' && r.tab === 'memoria') { location.replace(`#/p/${r.id}`); return; }
   if (isContent() && r.view === 'project' && !(isEditor() ? ['crudos', 'aprobar', 'calendario'] : ['crudos', 'calendario']).includes(r.tab)) { location.replace(`#/p/${r.id}/${contentHome()}`); return; }
   try {
     await loadProjects();
@@ -455,7 +456,7 @@ function projectView(tab) {
   const p = state.project;
   const counts = { cuentas: state.accounts.length, reels: state.reels.length, aprobar: p.review_pending, calendario: state.posts.filter((x) => x.status === 'programado').length };
   const on = tab === 'reel' ? 'reels' : tab;
-  const T = isContent() ? [['crudos', 'Subir crudos'], ...(isEditor() ? [['aprobar', 'Para aprobar']] : []), ['calendario', 'Calendario']] : TABS;
+  const T = isContent() ? [['crudos', 'Subir crudos'], ...(isEditor() ? [['aprobar', 'Para aprobar']] : []), ['calendario', 'Calendario']] : isGeneral() ? TABS : TABS.filter(([k]) => k !== 'memoria');
   if (isContent()) counts.crudos = state.reels.length;
   const tabs = `<nav class="tabs">${T.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
   const views = { crudos: crudosView, resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, memoria: memoriaView, reel: reelDetailView, investigacion: investigacionView, comentarios: comentariosView, ajustes: ajustesView };
@@ -1209,11 +1210,16 @@ function pautaView() {
     <div class="pz-main" id="pauta-out">${pautaOut(p, c)}</div>
   </div>
   <section class="card" id="pauta-tabla">${pautaTabla(p, c)}</section>
-  ${adsCard(p)}
-  ${adsNetCards(p)}`;
+  ${isGeneral() ? adsCard(p) : ''}
+  ${isGeneral() ? adsNetCards(p) : ''}`;
 }
 // TikTok Ads y Google Ads: credenciales de pauta del proyecto, "Probar conexión" y, si una red rechazó un anuncio, «Reactivar»
 function adsNetCards(p) {
+  const html = adsNetCardsAll(p);
+  // sin pauta en una red, su tarjeta no aparece (en política TikTok no acepta)
+  return [['tiktok', 'ads-tt-card'], ['youtube', 'ads-youtube-card']].reduce((h, [n, id]) => (p.ads_networks?.[n] === false ? h.replace(new RegExp(`<section class="card ads" id="${id}">[\\s\\S]*?</section>`), '') : h), html);
+}
+function adsNetCardsAll(p) {
   const a = p.ads || {}, bl = p.ads_blocked || {};
   const inp = (net, k, label, ph = '', secret = false) => {
     const f = (a[net] || {})[k] || {};
@@ -1471,7 +1477,7 @@ function askCard() {
     <div class="card-head"><div><h2 class="h2">Preguntale a la investigación</h2><p class="small muted">Claude lee las fichas de abajo y te responde en texto, citando de qué ficha sale cada dato.</p></div></div>
     <div class="ask-log" id="ask-log"></div>
     ${state.agent ? `<form class="kn-row" id="ask-form"><input class="input" name="q" placeholder="${esc(`¿Qué temas le convienen a ${state.project.name} y cómo contarlos?`)}" autocomplete="off" maxlength="2000"><button class="btn primary" type="submit">Preguntar</button></form>`
-      : '<p class="banner">Falta la clave de Claude en el servidor (ANTHROPIC_API_KEY). Mientras tanto, podés filtrar las fichas de abajo.</p>'}
+      : (isGeneral() ? '<p class="banner">Falta la clave de Claude en el servidor (ANTHROPIC_API_KEY). Mientras tanto, podés filtrar las fichas de abajo.</p>' : '<p class="banner">Las preguntas no están disponibles por ahora. Podés filtrar las fichas de abajo.</p>')}
   </section>`;
 }
 // convierte lo poco de markdown que pueda venir en texto prolijo (ya escapado): **negrita**, títulos y viñetas
@@ -1537,10 +1543,10 @@ function knDraw() {
   $('#kn-side').innerHTML = refsCard() + outCard + `<div class="card"><h2 class="h2">Cuentas relevadas</h2><p class="small muted">Publicaciones leídas de Instagram. Tocá una para ver solo esa. Se releen solas cada 6 horas con una cuenta de Instagram conectada del proyecto, y si una publica algo que rinde 3× o más lo normal, te aviso por Telegram.</p>
     <button class="btn sm" data-act="watch-run" style="margin:4px 0 10px">${icon('refresh', 15)} Actualizar ahora</button>
     <div class="kn-acc">${A.map((a) => `<button data-act="kn-handle" data-h="${esc(a.handle)}" class="${K.handle === a.handle ? 'sel' : ''}"><b>${esc(at(a.handle))}</b><span>${fmt(a.followers)} seguidores · ${fmt(a.posts)} publ.</span><span>${fmt(a.avg_eng)} interacciones prom. · ${a.followers ? fmt(a.avg_eng / a.followers * 100, 1) : 0} %</span></button>`).join('') || '<p class="small muted">Ninguna todavía.</p>'}</div></div>
-    <div class="card"><h2 class="h2">Importar</h2><p class="small muted">JSON con <code>items</code> (fichas) y/o <code>instagram</code> (cuentas con sus publicaciones).</p>
+    ${isGeneral() ? `<div class="card"><h2 class="h2">Importar</h2><p class="small muted">JSON con <code>items</code> (fichas) y/o <code>instagram</code> (cuentas con sus publicaciones).</p>
     <label class="btn">${icon('up')} Elegir archivo<input type="file" id="kn-file" accept=".json,application/json" hidden></label>
-    <p class="small muted" style="margin-top:10px">Búsqueda: ${D.model.ready ? 'modelo listo' : D.model.present ? 'el modelo carga con la primera búsqueda' : 'sin modelo, solo por palabras'} (${esc(D.model.model)})</p></div>`;
-  $('#kn-file').addEventListener('change', knImport);
+    <p class="small muted" style="margin-top:10px">Búsqueda: ${D.model.ready ? 'modelo listo' : D.model.present ? 'el modelo carga con la primera búsqueda' : 'sin modelo, solo por palabras'} (${esc(D.model.model)})</p></div>` : ''}`;
+  $('#kn-file')?.addEventListener('change', knImport);
   $('#ref-form').addEventListener('submit', refAdd);
 }
 // Referencias para el editor: reels de otros que marcamos como inspiración, con qué tomar de cada uno.
