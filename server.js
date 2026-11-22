@@ -267,6 +267,8 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
     // la marca del proyecto y, si el editor pregunta por un crudo, su etiqueta (el barrio)
     marca: { ...marcaDe(pid), ...(() => { const e = Number(req.query.crudo) > 0 ? get("SELECT etiqueta FROM reels WHERE id = ? AND project_id = ? AND kind = 'crudo'", Number(req.query.crudo), pid)?.etiqueta : ''; return e ? { etiqueta: e } : {}; })() } });
 });
+// el admin de un dirigente no ve las credenciales de anuncios (qué está cargado y los IDs): eso lo maneja el general
+const sinAds = ({ ads, ...p }) => p;
 app.get('/api/projects/:id/memory', requireAuth, (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe el proyecto' });
   res.json(memoryOf(db, Number(req.params.id)));
@@ -561,7 +563,7 @@ function overviewOf(pid) {
 // proyectos
 app.get('/api/projects', (req, res) => {
   const sc = scopeOf(req.user), ps = all('SELECT * FROM projects ORDER BY created_at DESC').filter((p) => !sc || sc.includes(p.id)).map(projectSummary);
-  res.json(isContent(req.user) ? ps.map(sombraProject) : ps);
+  res.json(isContent(req.user) ? ps.map(sombraProject) : req.user.role === 'admin' ? ps.map(sinAds) : ps);
 });
 app.post('/api/projects', upload.single('photo'), (req, res) => {
   const b = req.body || {};
@@ -578,7 +580,7 @@ app.post('/api/projects', upload.single('photo'), (req, res) => {
 app.get('/api/projects/:id', (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe' });
-  res.json(isContent(req.user) ? sombraProject(projectSummary(p)) : projectSummary(p));
+  res.json(isContent(req.user) ? sombraProject(projectSummary(p)) : req.user.role === 'admin' ? sinAds(projectSummary(p)) : projectSummary(p));
 });
 app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);

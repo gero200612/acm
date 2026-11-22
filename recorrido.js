@@ -175,6 +175,9 @@ export function recorridoCases(sb) {
       eq((await u('POST', '/api/users', { email: 'a2@x.com', name: 'A2', role: 'admin', project_id: c.p, password: 'clave-segura-2' })).status, 403, 'otro admin');
       eq((await u('POST', '/api/users', { email: 'g9@x.com', name: 'G9', role: 'general', password: 'clave-segura-2' })).status, 403, 'un general');
       eq((await u('GET', '/api/users')).j?.every((x) => x.project_id === c.p), true, 've solo usuarios de su proyecto');
+      for (const [m, url] of [['GET', `/api/projects/${c.p}/memory`], ['PUT', `/api/projects/${c.p}/ads`], ['POST', `/api/projects/${c.p}/ads/campaign`], ['POST', `/api/projects/${c.p}/knowledge/import`]])
+        eq((await u(m, url, m === 'GET' ? undefined : {})).status, 403, `lo técnico no: ${m} ${url}`);
+      eq('ads' in (await u('GET', `/api/projects/${c.p}`)).j, false, 'sin credenciales de anuncios en el proyecto');
       const gen = (await api('GET', '/api/users')).j.find((x) => x.email === 'g1@x.com');
       eq((await u('DELETE', `/api/users/${gen.id}`)).status, 404, 'borrar un general');
     }],
