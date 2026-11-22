@@ -498,8 +498,8 @@ async function tcAdd(box) {
 const tcTime = (e) => { const i = e.target.closest?.('article')?.querySelector('.tc-in'); if (i) i.placeholder = `Comentar en ${mmss(e.target.currentTime)}`; };
 for (const ev of ['timeupdate', 'seeked']) document.addEventListener(ev, tcTime, true);
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList?.contains('tc-in')) { e.preventDefault(); tcAdd(e.target.closest('.tc')); } });
-// «Para aprobar»: cada recorte con su contexto; cada versión se decide sola (va / no va) y nada se aprueba sin elegirlo.
-// Una versión que no va lleva su comentario y, si el editor tilda la casilla, se rehace con esos cambios.
+// «Para aprobar»: cada recorte con su contexto; cada versión se decide sola (aprobar o rechazar) y nada se aprueba sin elegirlo.
+// Una versión rechazada lleva su comentario y, si el editor tilda la casilla, se rehace con esos cambios.
 const durTxt = (s) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : '');
 function clipTitle(c) { const r = c.reels.find((x) => x.review === 'pendiente') || c.reels[0]; return r?.title || c.moment?.tema || 'Recorte'; }
 function clipCtx(c) {
@@ -510,22 +510,22 @@ const coverOf = (r) => (r.cover ? `<img src="/media/${esc(r.cover)}" alt="" load
 function aprobarView() {
   const p = state.project, R = state.review || { clips: [], rehaciendo: [], pending: 0, review_mode: p.review_mode };
   const auto = R.review_mode === 'auto';
-  const head = `<div class="ap-head"><div><h2 class="h2">Para aprobar <span class="count">${R.pending}</span></h2><p class="muted small">${R.pending ? `${R.pending} ${R.pending === 1 ? 'recorte espera' : 'recortes esperan'} tu decisión. Decidí cada versión: la que va sale publicada; la que no, decí por qué.` : 'No hay recortes esperando.'}</p></div>
+  const head = `<div class="ap-head"><div><h2 class="h2">Para aprobar <span class="count">${R.pending}</span></h2><p class="muted small">${R.pending ? `${R.pending} ${R.pending === 1 ? 'recorte espera' : 'recortes esperan'} tu decisión. Aprobá o rechazá cada versión: las aprobadas se programan; en las rechazadas indicá qué cambiarías.` : 'No hay recortes esperando.'}</p></div>
     <div class="row"><span class="chip ${auto ? 's-conectada' : 'nodot'}" title="${auto ? 'Lo que el analista aprueba entra solo; lo dudoso siempre espera acá. Un rechazo tuyo la vuelve a manual.' : 'Con 19 de los últimos 20 recortes aprobados pasa a automática.'}">Revisión ${auto ? 'automática' : 'manual'}</span>
     ${isContent() ? '' : `<button class="btn sm" data-act="share-open">${icon('link', 15)} Compartir para aprobar</button>`}</div></div>`;
-  const prevs = (c) => { const L = c.reels.filter((r) => r.review === 'rechazado'); return L.length ? `<details class="ap-prev"><summary>${L.length === 1 ? 'Una versión anterior no fue' : `${L.length} versiones anteriores no fueron`}</summary>${L.map((r) => `<div class="ap-prev-row">${coverOf(r)}<div><b>${esc(r.title || 'Versión')}</b><p class="small muted">${r.review_note ? `«${esc(r.review_note)}»` : 'Sin comentario'}</p></div></div>`).join('')}</details>` : ''; };
+  const prevs = (c) => { const L = c.reels.filter((r) => r.review === 'rechazado'); return L.length ? `<details class="ap-prev"><summary>${L.length === 1 ? 'Una versión anterior rechazada' : `${L.length} versiones anteriores rechazadas`}</summary>${L.map((r) => `<div class="ap-prev-row">${coverOf(r)}<div><b>${esc(r.title || 'Versión')}</b><p class="small muted">${r.review_note ? `«${esc(r.review_note)}»` : 'Sin comentario'}</p></div></div>`).join('')}</details>` : ''; };
   const version = (r, i) => `
       <article class="ap-ed" data-id="${r.id}">
-        <video src="/media/${esc(r.file)}" ${r.cover ? `poster="/media/${esc(r.cover)}"` : ''} controls preload="none" playsinline></video>
+        <video src="/media/${esc(r.file)}${r.cover ? '' : '#t=0.5'}" ${r.cover ? `poster="/media/${esc(r.cover)}" preload="none"` : 'preload="metadata"'} controls playsinline></video>
         ${tcBlock(r)}
         <div class="ap-ed-h"><b>Versión ${i + 1}</b>${r.duration ? `<span class="small muted">${durTxt(r.duration)}</span>` : ''}</div>
         ${r.redo_pedido ? `<p class="ap-redone">${icon('refresh', 14)} Rehecha: pediste «${esc(r.redo_pedido)}»${r.redo_detail ? `<span>${esc(r.redo_detail)}</span>` : ''}</p>` : ''}
         <label class="field ap-txt">Texto de la publicación<textarea class="input ap-cap-in" rows="3" maxlength="2200" data-orig="${esc(r.caption || '')}">${esc(r.caption || '')}</textarea></label>
         <label class="field ap-txt">Hashtags<input class="input ap-tags-in" maxlength="300" value="${esc(r.hashtags || '')}" data-orig="${esc(r.hashtags || '')}"></label>
-        <div class="ap-dec" role="group" aria-label="¿Va esta versión?"><button type="button" class="ap-yes" data-act="ap-dec" data-v="aprobar">${icon('check', 16)} Va</button><button type="button" class="ap-nope" data-act="ap-dec" data-v="rechazar">${icon('x', 16)} No va</button></div>
+        <div class="ap-dec" role="group" aria-label="Decisión sobre esta versión"><button type="button" class="ap-yes" data-act="ap-dec" data-v="aprobar">${icon('check', 16)} Aprobar</button><button type="button" class="ap-nope" data-act="ap-dec" data-v="rechazar">${icon('x', 16)} Rechazar</button></div>
         <div class="ap-no-box" hidden>
           <label class="field">¿Qué cambiarías? <span class="small muted">(obligatorio)</span><textarea class="input ap-why" rows="2" maxlength="2000" placeholder="Por ejemplo: los subtítulos tapan la cara"></textarea></label>
-          <label class="ap-redo-chk"><input type="checkbox" class="ap-redo"> Rehacer con estos cambios <span class="small muted">— si no la tildás, el comentario solo sirve para aprender</span></label>
+          <label class="ap-redo-chk"><input type="checkbox" class="ap-redo"> <span>Rehacer con estos cambios<span class="small muted">Si no la tildás, el comentario queda para aprender y esta versión no se vuelve a editar.</span></span></label>
         </div>
       </article>`;
   const pendCard = (c) => { const P = c.reels.filter((r) => r.review === 'pendiente'), ok = c.reels.filter((r) => r.review === 'aprobado').length;
@@ -540,8 +540,8 @@ function aprobarView() {
       ${r.redo === 'error' ? `<p class="banner err small">No se pudo rehacer: ${esc(r.redo_detail)}</p><button class="btn sm" data-act="ap-retry" data-id="${r.id}">${icon('refresh', 14)} Reintentar</button>` : `<p class="small ap-wip"><span class="spin"></span> El editor la está rehaciendo con tus cambios; cuando esté, vuelve acá.</p>`}</div></div>`).join('')}</section>`;
   const recCard = (c) => { const ok = c.reels.filter((r) => r.review === 'aprobado'), r = ok[0] || c.reels[0];
     return `<div class="ap-prev-row ap-recent" data-clip="${esc(c.clip_id)}">${coverOf(r)}<div class="grow"><b>${esc(r.title || clipTitle(c))}</b><p class="small muted">${clipCtx(c)} · ${ok.length} ${ok.length === 1 ? 'aprobada' : 'aprobadas'}</p>
-      <details class="ap-undo"><summary>Ya no va</summary><textarea class="input ap-why" rows="2" maxlength="2000" placeholder="¿Por qué ya no va?"></textarea>
-      <label class="ap-redo-chk"><input type="checkbox" class="ap-redo"> Rehacer con estos cambios</label><button class="btn sm" data-act="ap-recent-no">Sacarla de lo que sale</button></details></div></div>`; };
+      <details class="ap-undo"><summary>Retirar</summary><textarea class="input ap-why" rows="2" maxlength="2000" placeholder="Motivo del retiro"></textarea>
+      <label class="ap-redo-chk"><input type="checkbox" class="ap-redo"> Rehacer con estos cambios</label><button class="btn sm" data-act="ap-recent-no">Retirar de la publicación</button></details></div></div>`; };
   const rehac = (R.rehaciendo || []).length ? `<h2 class="h2 ap-sec">Rehaciéndose</h2>${R.rehaciendo.map(redoCard).join('')}` : '';
   const rec = (R.recent || []).length ? `<h2 class="h2 ap-sec">Aprobados en los últimos 7 días</h2><section class="card">${R.recent.map(recCard).join('')}</section>` : '';
   if (!R.clips.length) return `<div class="ap"><section class="card">${head}<p class="muted" style="margin-top:12px">Cuando el editor entregue recortes nuevos, aparecen acá.</p></section>${rehac}${rec}</div>`;
@@ -550,7 +550,7 @@ function aprobarView() {
 // actualiza el resumen y el botón «Confirmar» de un recorte según lo elegido
 function apSync(box) {
   const eds = $$('.ap-ed', box), va = eds.filter((e) => e.dataset.dec === 'aprobar').length, no = eds.filter((e) => e.dataset.dec === 'rechazar').length, falta = eds.length - va - no;
-  $('.ap-sum', box).textContent = falta ? `Falta decidir ${falta === 1 ? '1 versión' : `${falta} versiones`}` : [va ? `${va} ${va === 1 ? 'va' : 'van'}` : '', no ? `${no} no ${no === 1 ? 'va' : 'van'}` : ''].filter(Boolean).join(' · ');
+  $('.ap-sum', box).textContent = falta ? `Falta decidir ${falta === 1 ? '1 versión' : `${falta} versiones`}` : [va ? `${va} ${va === 1 ? 'aprobada' : 'aprobadas'}` : '', no ? `${no} ${no === 1 ? 'rechazada' : 'rechazadas'}` : ''].filter(Boolean).join(' · ');
   $('[data-act=ap-confirm]', box).disabled = !!falta;
 }
 
@@ -626,7 +626,7 @@ function perfCard(p) {
 function reelState(r) {
   if (r.kind === 'crudo') return ['s-crudo', 'Crudo'];
   if (r.clip_id && r.review === 'pendiente') return ['s-pendiente', 'Para aprobar'];
-  if (r.clip_id && r.review === 'rechazado') return ['s-error', 'No va'];
+  if (r.clip_id && r.review === 'rechazado') return ['s-error', 'Rechazado'];
   const P = (state.posts || []).filter((x) => x.reel_id === r.id);
   if (P.some((x) => x.status === 'publicado' || x.status === 'publicando')) return ['s-publicado', 'Publicado'];
   if (P.some((x) => x.status === 'programado')) return ['s-programado', 'Programado'];
@@ -761,7 +761,7 @@ const CRUDO_ESTADO = { en_cola: 'En cola', transcribiendo: 'Transcribiendo', bus
 function crudosView() {
   state.upKind = 'crudo';
   const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
-  const list = state.reels.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Crudo</th><th>Subido</th><th>Estado</th></tr></thead><tbody>${state.reels.map((r) => `<tr>
+  const list = state.reels.length ? `<div class="table-wrap"><table class="list crudos-t"><thead><tr><th>Crudo</th><th>Subido</th><th>Estado</th></tr></thead><tbody>${state.reels.map((r) => `<tr>
     <td>${esc(r.title)}${r.etiqueta ? ` <span class="chip nodot">${esc(r.etiqueta)}</span>` : ''}</td><td class="small muted nowrap">${esc(cuando(new Date(String(r.created_at || '').replace(' ', 'T') + 'Z')))}</td>
     <td>${(([c, t]) => `<span class="chip ${c}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(t)}</span>`)(crudoEstado(r))}</td></tr>`).join('')}</tbody></table></div>`
     : '<p class="muted" style="margin-top:12px">Todavía no subiste crudos.</p>';
@@ -832,7 +832,7 @@ function reelsView() {
       <div class="meta">${reelChip(r)}<span>${mb(r.size)}</span></div>
       ${r.kind === 'crudo' ? `<a class="reel-nets none" href="#/p/${state.project.id}/reel/${r.id}">${(() => { const n = state.reels.filter((x) => x.source_id === r.id).length; return n ? `${n} ${n === 1 ? 'edición' : 'ediciones'}` : 'Sin ediciones todavía'; })()}</a>` : reelNets(r.id)}
       <div class="row" style="gap:6px">
-        ${r.kind === 'crudo' ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${r.id}">Ver crudo</a>` : r.clip_id && r.review === 'pendiente' ? `<a class="btn sm accent" href="#/p/${state.project.id}/aprobar">Ir a aprobar</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length && repartible(r) ? '' : 'disabled'} ${repartible(r) ? '' : 'title="Una versión que no va no se reparte"'}>Repartir</button>`}
+        ${r.kind === 'crudo' ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${r.id}">Ver crudo</a>` : r.clip_id && r.review === 'pendiente' ? `<a class="btn sm accent" href="#/p/${state.project.id}/aprobar">Ir a aprobar</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length && repartible(r) ? '' : 'disabled'} ${repartible(r) ? '' : 'title="Una versión rechazada no se reparte"'}>Repartir</button>`}
       </div>
     </div>
     <button class="icon-btn danger reel-del" data-act="del-reel" title="Borrar reel" aria-label="Borrar reel">${icon('trash', 16)}</button></article>`).join('')}</div>`
@@ -2408,7 +2408,7 @@ document.addEventListener('click', async (e) => {
       case 'ap-confirm': {
         const box = el.closest('.ap-clip'), clip = box.dataset.clip, eds = $$('.ap-ed', box);
         const falta = eds.find((e) => e.dataset.dec === 'rechazar' && !$('.ap-why', e).value.trim());
-        if (falta) { toast('Contá qué cambiarías en la versión que no va', true); $('.ap-why', falta).focus(); break; }
+        if (falta) { toast('Indicá qué cambiarías en la versión rechazada', true); $('.ap-why', falta).focus(); break; }
         el.disabled = true;
         try {
           // primero el texto corregido de las que van
@@ -2426,11 +2426,11 @@ document.addEventListener('click', async (e) => {
         render(); break; }
       case 'ap-recent-no': {
         const row = el.closest('.ap-recent'), why = $('.ap-why', row).value.trim();
-        if (!why) { toast('Contá por qué ya no va', true); $('.ap-why', row).focus(); break; }
+        if (!why) { toast('Indicá el motivo del retiro', true); $('.ap-why', row).focus(); break; }
         const c = (state.review?.recent || []).find((x) => x.clip_id === row.dataset.clip);
         const decisiones = c.reels.filter((x) => x.review === 'aprobado').map((x) => ({ id: x.id, decision: 'rechazar', comentario: why, rehacer: $('.ap-redo', row).checked }));
         el.disabled = true;
-        try { await api(`/api/clips/${encodeURIComponent(row.dataset.clip)}/review`, { method: 'POST', body: { decisiones } }); toast('Sacada: lo que estaba programado no sale'); } catch (err) { fail(err); }
+        try { await api(`/api/clips/${encodeURIComponent(row.dataset.clip)}/review`, { method: 'POST', body: { decisiones } }); toast('Retirada: lo programado no se publica'); } catch (err) { fail(err); }
         render(); break; }
       case 'ap-retry': {
         el.disabled = true;

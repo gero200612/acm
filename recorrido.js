@@ -178,6 +178,7 @@ export function recorridoCases(sb) {
       for (const [m, url] of [['GET', `/api/projects/${c.p}/memory`], ['PUT', `/api/projects/${c.p}/ads`], ['POST', `/api/projects/${c.p}/ads/campaign`], ['POST', `/api/projects/${c.p}/knowledge/import`]])
         eq((await u(m, url, m === 'GET' ? undefined : {})).status, 403, `lo técnico no: ${m} ${url}`);
       eq('ads' in (await u('GET', `/api/projects/${c.p}`)).j, false, 'sin credenciales de anuncios en el proyecto');
+      for (const url of [`/api/projects/${c.p}/memory/`, `/api/projects/${c.p}/MEMORY`]) eq((await u('GET', url)).status, 403, `tampoco con otra forma: ${url}`);
       const gen = (await api('GET', '/api/users')).j.find((x) => x.email === 'g1@x.com');
       eq((await u('DELETE', `/api/users/${gen.id}`)).status, 404, 'borrar un general');
     }],

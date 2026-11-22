@@ -130,7 +130,8 @@ export function permit(db, user, method, p, body) {
   const m = method === 'HEAD' ? 'GET' : method;
   if (user.role === 'sombra' && !hit(SOMBRA, m, p)) return { status: 403, error: 'Tu usuario solo sube crudos' };
   if (user.role === 'editor' && !hit(EDITOR, m, p)) return { status: 403, error: 'Tu usuario solo aprueba reels y sube crudos' };
-  if (user.role === 'admin' && hit(ADMIN_DENY, m, p)) return { status: 403, error: 'Eso lo hace un administrador general' };
+  // Express no distingue mayúsculas ni la barra final: lo prohibido se compara contra la ruta normalizada (si no, «/ADS/» pasaría)
+  if (user.role === 'admin' && hit(ADMIN_DENY, m, String(p).toLowerCase().replace(/\/+$/, ''))) return { status: 403, error: 'Eso lo hace un administrador general' };
   const pid = projectOf(db, p, body);
   if (pid === undefined) return (user.role === 'admin' ? hit(ADMIN_GLOBAL, m, p) : hit(CONTENT[user.role] || [], m, p)) ? null : { status: 403, error: 'Eso lo hace un administrador general' };
   if (pid === null || pid !== user.project_id) return { status: 404, error: 'No existe' };

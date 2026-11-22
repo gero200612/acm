@@ -1486,3 +1486,18 @@ kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 
   .tabs a { padding: 0 10px; font-size: 13.5px; gap: 6px; }
   .tabs a .count { padding: 1px 6px; font-size: 11px; }
 }
+.ap-ed video { max-height: 62vh; }
+.ap-redo-chk > span { display: flex; flex-direction: column; gap: 2px; }
+/* celular: crudos y lista del calendario como tarjetas (las tablas se salían de la pantalla) */
+@media (max-width: 560px) {
+  .crudos-t thead, .lq thead { display: none; }
+  .crudos-t, .crudos-t tbody, .lq, .lq tbody { display: block; width: 100%; }
+  .crudos-t tr, .lq tr { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .crudos-t td, .lq td { display: block; padding: 0 !important; border: 0 !important; }
+  .crudos-t td:first-child { grid-column: 1 / -1; }
+  .crudos-t td:last-child { justify-self: end; }
+  .crudos-t .chip { white-space: normal; }
+  .lq td:nth-child(2) { grid-column: 1 / -1; order: -1; font-weight: 600; }
+  .lq td:nth-child(3) { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) { .lq tr { padding-left: 16px; padding-right: 16px; } }

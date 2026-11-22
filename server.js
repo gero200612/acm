@@ -365,6 +365,7 @@ async function sendRedo(reel, pedido) {
   if (!reel.editor_edition_id) return fail('Esta versión no salió del editor: no se puede rehacer.');
   const crudo = reel.source_id ? get('SELECT * FROM reels WHERE id = ?', reel.source_id) : null;
   if (!crudo || !crudo.file) return fail('El crudo ya no está guardado: no se puede rehacer.');
+  if (crudo.storage !== 'r2' || !r2Ready()) return fail('El crudo no está en el almacenamiento en la nube: el editor no lo puede bajar para rehacerla.');
   try {
     const resp = await fetch(`${base}/rehacer`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.EDITOR_TOKEN || ''}` }, signal: AbortSignal.timeout(20000),

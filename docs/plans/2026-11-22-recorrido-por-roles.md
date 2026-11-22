@@ -33,4 +33,5 @@ Gero, 22/11/2026: recorrido completo como dueño, admin del dirigente, editor y 
 - [x] Sombra: texto sin «Para aprobar»; cada crudo dice en qué va (en el editor, N ediciones, aprobadas, publicadas) y la fecha legible
 
 ## Cierre
-- [ ] Banco completo, recorrido de nuevo con los cuatro roles en la copia local, push (Gero da el ok)
+- [x] Banco completo (ACM 158/161, los 3 de siempre por el modelo de vectores; editor 32/32) y recorrido de nuevo con los cuatro roles en la copia local — 22/11
+- [ ] Push (Gero da el ok)
