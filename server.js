@@ -121,6 +121,11 @@ if (!cols('reels').includes('publico')) db.exec("ALTER TABLE reels ADD COLUMN pu
 if (!cols('projects').includes('marca')) db.exec("ALTER TABLE projects ADD COLUMN marca TEXT DEFAULT '{}'");
 if (!cols('reels').includes('etiqueta')) db.exec("ALTER TABLE reels ADD COLUMN etiqueta TEXT DEFAULT ''");
 if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD COLUMN editor_edition_id TEXT');
+// rehacer a pedido: redo = '' | 'pedido' (el editor la está rehaciendo) | 'hecho' (llegó la versión nueva) | 'error'; redo_pedido = lo que pidió la persona
+if (!cols('reels').includes('redo')) db.exec("ALTER TABLE reels ADD COLUMN redo TEXT DEFAULT ''");
+if (!cols('reels').includes('redo_pedido')) db.exec("ALTER TABLE reels ADD COLUMN redo_pedido TEXT DEFAULT ''");
+if (!cols('reels').includes('redo_detail')) db.exec("ALTER TABLE reels ADD COLUMN redo_detail TEXT DEFAULT ''");
+if (!cols('reels').includes('review_note')) db.exec("ALTER TABLE reels ADD COLUMN review_note TEXT DEFAULT ''");
 db.exec('DROP INDEX IF EXISTS reels_editor_edition');
 // la clave de idempotencia es un UUID de la edición del editor, y vale dentro de su crudo
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS reels_editor_edition2 ON reels(source_id, editor_edition_id) WHERE editor_edition_id IS NOT NULL');
@@ -330,9 +335,43 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
     if (cover) fs.rm(path.join(UPLOADS, cover), { force: true }, () => {});
     return res.json(ya);
   }
+  // una versión rehecha a pedido: la rechazada deja de figurar «rehaciendo» y la nueva sabe qué se pidió y qué entendió el editor
+  if (b.rehace_de) {
+    const vieja = get('SELECT id, redo_pedido FROM reels WHERE editor_edition_id = ? AND project_id = ?', String(b.rehace_de), crudo.project_id);
+    if (vieja) {
+      run("UPDATE reels SET redo = 'hecho', redo_detail = '' WHERE id = ?", vieja.id);
+      run('UPDATE reels SET redo_pedido = ?, redo_detail = ? WHERE id = ?', vieja.redo_pedido || '', String(b.entendido || '').slice(0, 300), r.lastInsertRowid);
+    }
+  }
   if (review === 'aprobado') replanificar(crudo.project_id);
   res.json(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
 });
+// el editor no pudo rehacer una edición pedida: queda el motivo para mostrarlo (y reintentar)
+app.post('/api/editor/rehecho', requireEditor, (req, res) => {
+  const b = req.body || {};
+  const r = get("SELECT id FROM reels WHERE editor_edition_id = ? AND redo = 'pedido'", String(b.edicion_id || ''));
+  if (!r) return res.status(404).json({ error: 'No hay un rehacer pedido para esa edición' });
+  if (!b.ok) run("UPDATE reels SET redo = 'error', redo_detail = ? WHERE id = ?", String(b.detalle || 'El editor no pudo rehacerla').slice(0, 400), r.id);
+  res.json({ ok: true });
+});
+// pedirle al editor que rehaga una edición con lo que pidió la persona
+async function sendRedo(reel, pedido) {
+  const base = (process.env.EDITOR_URL || '').replace(/\/+$/, '');
+  const fail = (msg) => { run("UPDATE reels SET redo = 'error', redo_detail = ? WHERE id = ?", msg.slice(0, 400), reel.id); return false; };
+  run("UPDATE reels SET redo = 'pedido', redo_pedido = ?, redo_detail = '' WHERE id = ?", pedido, reel.id);
+  if (!base) return fail('El editor no está conectado: no se puede rehacer todavía.');
+  if (!reel.editor_edition_id) return fail('Esta versión no salió del editor: no se puede rehacer.');
+  const crudo = reel.source_id ? get('SELECT * FROM reels WHERE id = ?', reel.source_id) : null;
+  if (!crudo || !crudo.file) return fail('El crudo ya no está guardado: no se puede rehacer.');
+  try {
+    const resp = await fetch(`${base}/rehacer`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.EDITOR_TOKEN || ''}` }, signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({ edicion_id: reel.editor_edition_id, pedido, url: await getUrl(crudo.file, 6 * 86400) }),
+    });
+    if (!resp.ok) return fail(resp.status === 404 ? 'El editor ya no tiene esta edición: no se puede rehacer.' : `El editor respondió ${resp.status}`);
+    return true;
+  } catch (e) { return fail(`No pudimos hablar con el editor: ${e.message}`); }
+}
 
 app.use('/api', requireAuth);
 mountUsers(app, { db });
@@ -796,6 +835,8 @@ app.put('/api/reels/:id', (req, res) => {
   if ('etiqueta' in d) d.etiqueta = etiquetaDe(d.etiqueta);
   // portada, recorte y crudo de origen los pone el editor: un usuario que no es general no los cambia (podrían apuntar a cosas de otro proyecto)
   if (req.user.role !== 'general') for (const k of ['cover', 'clip_id', 'source_id']) delete d[k];
+  // el editor del dirigente solo corrige el texto y los hashtags de una versión
+  if (isContent(req.user)) for (const k of Object.keys(d)) if (!['caption', 'hashtags'].includes(k)) delete d[k];
   if ('review' in d && !['pendiente', 'aprobado', 'rechazado'].includes(d.review)) return res.status(400).json({ error: 'Revisión inválida: pendiente, aprobado o rechazado' });
   if ('clip_id' in d && r.clip_id && d.clip_id !== r.clip_id) return res.status(400).json({ error: 'El recorte de este reel no se puede cambiar ni quitar.' });
   for (const k of ['moment', 'recipe']) if (k in d && d[k] !== null && typeof d[k] !== 'string') d[k] = JSON.stringify(d[k]);
@@ -1337,16 +1378,31 @@ const parseJson = (v) => { try { return v ? JSON.parse(v) : null; } catch { retu
 app.get('/api/projects/:id/review', (req, res) => {
   const p = get('SELECT id, review_mode FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe el proyecto' });
-  const reels = all("SELECT id, title, caption, hashtags, file, cover, duration, clip_id, moment, recipe, review, created_at FROM reels WHERE project_id = ? AND kind = 'listo' AND clip_id IS NOT NULL ORDER BY id", p.id);
+  const reels = all(`SELECT r.id, r.title, r.caption, r.hashtags, r.file, r.cover, r.duration, r.clip_id, r.moment, r.recipe, r.review, r.review_note, r.created_at, r.publico,
+    r.redo, r.redo_pedido, r.redo_detail, c.title AS crudo_title, c.etiqueta AS crudo_etiqueta
+    FROM reels r LEFT JOIN reels c ON c.id = r.source_id WHERE r.project_id = ? AND r.kind = 'listo' AND r.clip_id IS NOT NULL ORDER BY r.id`, p.id);
   const clips = new Map();
   const notes = commentsOf(db, reels.map((r) => r.id));
   for (const r of reels) { if (!clips.has(r.clip_id)) clips.set(r.clip_id, []); clips.get(r.clip_id).push({ ...r, recipe: parseJson(r.recipe), moment: parseJson(r.moment), comments: notes[r.id] || [] }); }
+  const ctx = (rs) => ({ crudo: rs[0].crudo_title || '', barrio: rs[0].crudo_etiqueta || '' });
   const pending = [...clips.entries()].filter(([, rs]) => rs.some((r) => r.review === 'pendiente'))
-    .map(([clip_id, rs]) => ({ clip_id, moment: rs[0].moment, reels: rs }));
+    .map(([clip_id, rs]) => ({ clip_id, moment: rs[0].moment, ...ctx(rs), reels: rs }));
+  // recortes sin nada pendiente con una versión que el editor está rehaciendo (o no pudo): se muestran aparte hasta que llega la nueva
+  const rehaciendo = [...clips.entries()].filter(([, rs]) => !rs.some((r) => r.review === 'pendiente') && rs.some((r) => r.redo === 'pedido' || r.redo === 'error'))
+    .map(([clip_id, rs]) => ({ clip_id, moment: rs[0].moment, ...ctx(rs), reels: rs }));
   // aprobados en los últimos 7 días (por el analista o por Gero) y sin rechazos: Gero puede rechazarlos todavía
   const recent = [...clips.entries()].filter(([, rs]) => !rs.some((r) => r.review === 'pendiente') && rs.some((r) => r.review === 'aprobado') && rs.some((r) => new Date(String(r.created_at).replace(' ', 'T') + 'Z') > Date.now() - 7 * 864e5))
-    .map(([clip_id, rs]) => ({ clip_id, moment: rs[0].moment, reels: rs })).reverse().slice(0, 30);
-  res.json({ review_mode: p.review_mode, pending: pending.length, clips: pending, recent });
+    .map(([clip_id, rs]) => ({ clip_id, moment: rs[0].moment, ...ctx(rs), reels: rs })).reverse().slice(0, 30);
+  res.json({ review_mode: p.review_mode, pending: pending.length, clips: pending, rehaciendo, recent });
+});
+// volver a pedirle al editor una versión que no pudo rehacer
+app.post('/api/reels/:id/rehacer', async (req, res) => {
+  const r = get("SELECT * FROM reels WHERE id = ? AND kind = 'listo' AND review = 'rechazado'", req.params.id);
+  if (!r) return res.status(404).json({ error: 'No existe esa versión rechazada' });
+  const pedido = String(req.body?.pedido || r.redo_pedido || r.review_note || '').trim().slice(0, 2000);
+  if (!pedido) return res.status(400).json({ error: 'Contanos qué cambiar' });
+  const ok = await sendRedo(r, pedido);
+  res.status(ok ? 200 : 502).json(ok ? { ok: true } : { error: get('SELECT redo_detail FROM reels WHERE id = ?', r.id).redo_detail });
 });
 app.post('/api/clips/:clip_id/review', (req, res) => {
   const out = reviewClip(req.params.clip_id, req.body || {}, { reviewer: req.user.id ? `${req.user.name} <${req.user.email}>` : 'Dueño', ...(req.user.role === 'general' ? {} : { onlyProject: req.user.project_id }) });
@@ -1355,26 +1411,37 @@ app.post('/api/clips/:clip_id/review', (req, res) => {
 // Aprobar o rechazar un recorte (todas sus ediciones). La usan el panel y el link compartido (onlyProject: el recorte tiene que ser de ese proyecto).
 function reviewClip(clipId, body, { onlyProject = null, onlyPending = false, origin = 'opinion_dueno', who = '', reviewer = '' } = {}) {
   const fail = (status, error) => ({ status, body: { error } });
-  const { decision, comentario } = body, note = String(comentario || '').trim();
-  if (note.length > 2000) return fail(400, 'El comentario pasa de 2000 caracteres');
+  // formato nuevo: una decisión por versión { decisiones: [{ id, decision: 'aprobar'|'rechazar', comentario, rehacer }] }
+  // (lo que no se nombra no se toca: nada se aprueba sin que alguien lo elija)
+  const porVersion = Array.isArray(body.decisiones) ? body.decisiones : null;
+  const decision = porVersion ? (porVersion.some((d) => d?.decision === 'rechazar') ? 'rechazar' : 'aprobar') : body.decision;
+  const note = String(porVersion ? porVersion.filter((d) => d?.decision === 'rechazar').map((d) => String(d.comentario || '').trim()).filter(Boolean).join(' · ') : body.comentario || '').trim();
+  if (note.length > 2000 || (porVersion && porVersion.some((d) => String(d?.comentario || '').length > 2000))) return fail(400, 'El comentario pasa de 2000 caracteres');
   const reels = all("SELECT * FROM reels WHERE clip_id = ? AND kind = 'listo' ORDER BY id", clipId);
   if (!reels.length || (onlyProject != null && reels[0].project_id !== onlyProject)) return fail(404, 'No existe ese recorte');
   // desde un link solo se decide lo que todavía espera: lo que el dueño ya decidió no se puede cambiar desde afuera
   if (onlyPending && !reels.some((r) => r.review === 'pendiente')) return fail(409, 'Este recorte ya se decidió.');
+  if (porVersion && (!porVersion.length || porVersion.some((d) => !['aprobar', 'rechazar'].includes(d?.decision)))) return fail(400, 'Cada versión va con aprobar o rechazar');
   if (!['aprobar', 'rechazar'].includes(decision)) return fail(400, 'La decisión es aprobar o rechazar');
-  if (decision === 'rechazar' && !note) return fail(400, 'Para rechazar contanos por qué: el comentario es obligatorio');
+  if (porVersion ? porVersion.some((d) => d.decision === 'rechazar' && !String(d.comentario || '').trim()) : decision === 'rechazar' && !note) return fail(400, 'Para rechazar contanos por qué: el comentario es obligatorio');
   const projectId = reels[0].project_id;
   // desde un link solo se tocan las ediciones que siguen pendientes: lo ya decidido queda como está
   const scope = onlyPending ? reels.filter((r) => r.review === 'pendiente') : reels;
-  const ids = Array.isArray(body.rechazar_ids) ? body.rechazar_ids.map(Number) : [];
-  if (ids.some((i) => !scope.some((r) => r.id === i))) return fail(400, onlyPending ? 'Alguna edición a rechazar ya se decidió o no es de este recorte' : 'Alguna edición a rechazar no es de este recorte');
-  // rechazar sin elegir ediciones rechaza las tres; eligiendo, las demás se aprueban
-  const rejected = decision === 'rechazar' ? new Set(ids.length ? ids : scope.map((r) => r.id)) : new Set();
+  const ids = porVersion ? porVersion.map((d) => Number(d.id)) : Array.isArray(body.rechazar_ids) ? body.rechazar_ids.map(Number) : [];
+  if (ids.some((i) => !scope.some((r) => r.id === i))) return fail(400, onlyPending ? 'Alguna edición ya se decidió o no es de este recorte' : 'Alguna edición no es de este recorte');
+  // qué se rechaza y qué se aprueba: por versión, exactamente lo elegido; con el formato viejo, rechazar sin elegir rechaza todas
+  // y rechazar eligiendo rechaza SOLO esas (las demás quedan como estaban: antes se aprobaban sin avisar)
+  const rejected = new Set(porVersion ? porVersion.filter((d) => d.decision === 'rechazar').map((d) => Number(d.id)) : decision === 'rechazar' ? (ids.length ? ids : scope.map((r) => r.id)) : []);
+  const approved = new Set(porVersion ? porVersion.filter((d) => d.decision === 'aprobar').map((d) => Number(d.id)) : decision === 'aprobar' ? scope.map((r) => r.id) : []);
+  const notaDe = new Map(porVersion ? porVersion.map((d) => [Number(d.id), String(d.comentario || '').trim()]) : [...rejected].map((i) => [i, note]));
   const affected = [];
   for (const r of scope) {
-    if (rejected.has(r.id)) { if (r.review !== 'rechazado') { run("UPDATE reels SET review = 'rechazado' WHERE id = ?", r.id); affected.push({ r, wins: 0 }); } }
-    else if (r.review === 'pendiente') { run("UPDATE reels SET review = 'aprobado' WHERE id = ?", r.id); affected.push({ r, wins: 1 }); }
+    if (rejected.has(r.id)) { if (r.review !== 'rechazado') { run("UPDATE reels SET review = 'rechazado', review_note = ? WHERE id = ?", notaDe.get(r.id) || note, r.id); affected.push({ r, wins: 0 }); } }
+    else if (approved.has(r.id) && r.review !== 'aprobado') { run("UPDATE reels SET review = 'aprobado', review_note = '' WHERE id = ?", r.id); affected.push({ r, wins: 1 }); }
   }
+  // rehacer: solo las versiones rechazadas que la persona tildó, con su propio comentario
+  const redo = porVersion ? porVersion.filter((d) => d.decision === 'rechazar' && d.rehacer && rejected.has(Number(d.id))) : [];
+  for (const d of redo) { const r = reels.find((x) => x.id === Number(d.id)); if (r) sendRedo(r, String(d.comentario).trim().slice(0, 2000)).catch(() => {}); }
   const mode0 = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
   // repetir una decisión que no cambia nada no suma opiniones ni cuenta para el modo
   if (!affected.length) return { status: 200, body: { ok: true, unchanged: true, review_mode: mode0, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', clipId) } };
@@ -1388,7 +1455,14 @@ function reviewClip(clipId, body, { onlyProject = null, onlyPending = false, ori
   const mode = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
   const next = reviewMode(mode, all('SELECT decision FROM clip_reviews WHERE id IN (SELECT max(id) FROM clip_reviews WHERE project_id = ? GROUP BY clip_id) ORDER BY id DESC LIMIT 20', projectId).map((x) => x.decision));
   if (next !== mode) run('UPDATE projects SET review_mode = ? WHERE id = ?', next, projectId);
-  return { status: 200, body: { ok: true, review_mode: next, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', clipId) } };
+  return { status: 200, body: { ok: true, review_mode: next, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', clipId), rehaciendo: redo.length, programado: programadoDe([...approved]) } };
+}
+// dónde y cuándo sale lo que se acaba de aprobar (lo programa el planificador al aprobar)
+function programadoDe(ids) {
+  if (!ids.length) return { publicaciones: 0, cuentas: 0, primera: '' };
+  const q = ids.map(() => '?').join(',');
+  const x = get(`SELECT count(*) AS n, count(DISTINCT account_id) AS c, min(scheduled_at) AS p FROM posts WHERE status = 'programado' AND reel_id IN (${q})`, ...ids);
+  return { publicaciones: x.n, cuentas: x.c, primera: x.p || '' };
 }
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'No existe' }));

@@ -113,6 +113,8 @@ const EDITOR = [
   ['POST', /^\/api\/clips\/[^/]+\/review$/],
   ['GET', /^\/api\/reels\/\d+\/comments$/],
   ['POST', /^\/api\/reels\/\d+\/comments$/],
+  ['PUT', /^\/api\/reels\/\d+$/], // solo el texto y los hashtags (lo limita la ruta)
+  ['POST', /^\/api\/reels\/\d+\/rehacer$/],
 ];
 const CONTENT = { sombra: SOMBRA, editor: EDITOR };
 // Rutas de proyecto que el administrador de dirigente NO usa: las de usuarios van por su propia regla.

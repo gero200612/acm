@@ -30,7 +30,8 @@ export function fakeMp4(width, height, seconds) {
 export const EDITOR_TOKEN = 'tok-editor-prueba';
 // Editor de mentira: guarda lo que ACM le manda y sirve un video para que ACM lo baje
 export function startFakeEditor() {
-  const jobs = [];
+  const jobs = [], redos = [];
+  let redoStatus = 202;
   const video = fakeMp4(1080, 1920, 6);
   const server = http.createServer((req, res) => {
     const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
@@ -40,12 +41,16 @@ export function startFakeEditor() {
         jobs.push({ auth: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString() || '{}') });
         res.writeHead(202, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ id: 'T1' }));
       }
+      if (req.method === 'POST' && req.url === '/rehacer') {
+        redos.push({ auth: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString() || '{}') });
+        res.writeHead(redoStatus, { 'Content-Type': 'application/json' }); return res.end('{"ok":true}');
+      }
       res.writeHead(404); res.end();
     });
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
     const base = `http://127.0.0.1:${server.address().port}`;
-    resolve({ base, jobs, video, close: () => new Promise((r) => { server.closeAllConnections(); server.close(r); }) });
+    resolve({ base, jobs, redos, video, setRedoStatus: (n) => { redoStatus = n; }, close: () => new Promise((r) => { server.closeAllConnections(); server.close(r); }) });
   }));
 }
 
@@ -207,6 +212,8 @@ export function recorridoCases(sb) {
       const up = await u('POST', `/api/projects/${c.p}/reels`, form({ kind: 'listo', files: [[new Blob([Buffer.alloc(2048)], { type: 'video/mp4' }), 'crudo-e.mp4']] }), true);
       eq([up.status, up.j?.[0]?.kind], [200, 'crudo'], 'sube y queda como crudo');
       eq((await u('GET', `/api/reels/${up.j[0].id}/comments`)).status, 200, 've los comentarios');
+      const pu = await u('PUT', `/api/reels/${up.j[0].id}`, { caption: 'Texto corregido', hashtags: 'sanisidro', title: 'Otro título', review: 'aprobado' });
+      eq([pu.status, pu.j?.caption, pu.j?.hashtags, pu.j?.title === 'Otro título', pu.j?.review === 'aprobado'], [200, 'Texto corregido', '#sanisidro', false, false], 'corrige solo texto y hashtags');
       for (const url of [`/api/projects/${c.p}/performance`, `/api/projects/${c.p}/campaigns`, '/api/users', '/api/overview'])
         eq((await u('GET', url)).status, 403, url);
       eq((await u('PUT', `/api/posts/0`, { scheduled_at: '2030-01-01 10:00' })).status, 403, 'no mueve publicaciones');
@@ -688,6 +695,49 @@ export function recorridoCases(sb) {
       eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, crudo_id: 999999 })).status, 404, 'crudo inexistente');
       eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, clip_id: '' })).status, 400, 'sin clip_id');
       eq((await sb.box.editorApi('/api/editor/edicion', { ...b, edicion_id: undefined, review: 'x' })).status, 400, 'revisión inválida');
+    }],
+    [G('editor'), 'Decidir por versión: aprobar una y rechazar otra con «Rehacer» manda el pedido al editor; la versión nueva vuelve a Para aprobar con lo pedido', async () => {
+      const ed = (n, extra = {}) => sb.box.editorApi('/api/editor/edicion', { crudo_id: c.crudo, clip_id: 'clip-redo', review: 'pendiente', file_url: `${sb.editor.base}/video.mp4`, edicion_id: `0a1b2c3d-0000-4000-8000-00000000070${n}`, title: `Versión ${n}`, ...extra });
+      const v1 = (await ed(1)).j, v2 = (await ed(2)).j;
+      const g0 = (await api('GET', `/api/projects/${c.p}/review`)).j.clips.find((x) => x.clip_id === 'clip-redo');
+      eq([g0.reels.length, !!g0.crudo], [2, true], 'el recorte trae sus versiones y de qué crudo sale');
+      eq((await api('POST', '/api/clips/clip-redo/review', { decisiones: [{ id: v2.id, decision: 'rechazar', comentario: '' }] })).status, 400, 'rechazar sin comentario');
+      eq((await api('POST', '/api/clips/clip-redo/review', { decisiones: [{ id: v2.id, decision: 'quizas' }] })).status, 400, 'decisión inválida');
+      const n0 = sb.editor.redos.length;
+      const r = await api('POST', '/api/clips/clip-redo/review', { decisiones: [{ id: v1.id, decision: 'aprobar' }, { id: v2.id, decision: 'rechazar', comentario: 'Más corto y sin música', rehacer: true }] });
+      eq([r.status, r.j.reels.map((x) => x.review), r.j.rehaciendo], [200, ['aprobado', 'rechazado'], 1], 'una va, la otra se rehace');
+      yes(r.j.programado && 'publicaciones' in r.j.programado, 'dice dónde sale lo aprobado');
+      for (let i = 0; i < 50 && sb.editor.redos.length === n0; i++) await sleep(20);
+      const pedido = sb.editor.redos.at(-1);
+      eq([pedido.auth, pedido.body.edicion_id, pedido.body.pedido, /^https?:/.test(pedido.body.url)], [`Bearer ${EDITOR_TOKEN}`, v2.editor_edition_id, 'Más corto y sin música', true], 'el editor recibe qué rehacer, el pedido y el crudo');
+      const g1 = (await api('GET', `/api/projects/${c.p}/review`)).j;
+      eq([g1.clips.some((x) => x.clip_id === 'clip-redo'), g1.rehaciendo.find((x) => x.clip_id === 'clip-redo')?.reels.find((x) => x.id === v2.id)?.redo], [false, 'pedido'], 'figura «rehaciéndose»');
+      const v3 = (await ed(3, { rehace_de: v2.editor_edition_id, entendido: 'Cambio: más corto, sin música.' })).j;
+      const g2 = (await api('GET', `/api/projects/${c.p}/review`)).j;
+      const cl = g2.clips.find((x) => x.clip_id === 'clip-redo');
+      eq([cl?.reels.find((x) => x.id === v3.id)?.review, cl?.reels.find((x) => x.id === v3.id)?.redo_pedido, cl?.reels.find((x) => x.id === v3.id)?.redo_detail], ['pendiente', 'Más corto y sin música', 'Cambio: más corto, sin música.'], 'la nueva vuelve a Para aprobar con lo pedido');
+      eq([g2.rehaciendo.some((x) => x.clip_id === 'clip-redo'), cl.reels.find((x) => x.id === v2.id).redo], [false, 'hecho'], 'la rechazada ya no está rehaciéndose');
+      for (const x of [v1, v2, v3]) await api('DELETE', `/api/reels/${x.id}`);
+    }],
+    [G('editor'), 'Rechazar sin tildar «Rehacer» no llama al editor; lo no decidido queda pendiente (no se aprueba solo); si el editor falla queda el motivo y se reintenta', async () => {
+      const ed = (n) => sb.box.editorApi('/api/editor/edicion', { crudo_id: c.crudo, clip_id: 'clip-redo2', review: 'pendiente', file_url: `${sb.editor.base}/video.mp4`, edicion_id: `0a1b2c3d-0000-4000-8000-00000000080${n}` });
+      const a = (await ed(1)).j, b = (await ed(2)).j, d = (await ed(3)).j;
+      const n0 = sb.editor.redos.length;
+      const r = await api('POST', '/api/clips/clip-redo2/review', { decisiones: [{ id: a.id, decision: 'rechazar', comentario: 'La placa tapa la cara' }] });
+      eq([r.j.reels.map((x) => x.review), r.j.rehaciendo], [['rechazado', 'pendiente', 'pendiente'], 0], 'solo la elegida; las otras siguen esperando');
+      await sleep(150); eq(sb.editor.redos.length, n0, 'sin casilla no se rehace');
+      eq((await api('POST', '/api/clips/clip-redo2/review', { decision: 'rechazar', rechazar_ids: [b.id], comentario: 'x' })).j.reels.map((x) => x.review), ['rechazado', 'rechazado', 'pendiente'], 'formato viejo: rechazar marcadas ya no aprueba las demás');
+      sb.editor.setRedoStatus(404);
+      await api('POST', '/api/clips/clip-redo2/review', { decisiones: [{ id: d.id, decision: 'rechazar', comentario: 'Más corto', rehacer: true }] });
+      let g; for (let i = 0; i < 50; i++) { g = (await api('GET', `/api/projects/${c.p}/review`)).j.rehaciendo.find((x) => x.clip_id === 'clip-redo2'); if (g?.reels.find((x) => x.id === d.id)?.redo === 'error') break; await sleep(20); }
+      const x = g.reels.find((y) => y.id === d.id);
+      yes(x.redo === 'error' && /ya no tiene/.test(x.redo_detail), `queda el motivo (${x.redo}: ${x.redo_detail})`);
+      sb.editor.setRedoStatus(202);
+      eq((await api('POST', `/api/reels/${d.id}/rehacer`, {})).status, 200, 'reintentar');
+      eq(sb.box.sql('SELECT redo FROM reels WHERE id = ?', d.id)[0].redo, 'pedido', 'vuelve a estar pedido');
+      eq((await sb.box.editorApi('/api/editor/rehecho', { edicion_id: d.editor_edition_id, ok: false, detalle: 'El Estudio no anda' })).status, 200, 'el editor avisa que falló');
+      eq(sb.box.sql('SELECT redo, redo_detail FROM reels WHERE id = ?', d.id)[0], { redo: 'error', redo_detail: 'El Estudio no anda' }, 'con su motivo');
+      for (const y of [a, b, d]) await api('DELETE', `/api/reels/${y.id}`);
     }],
     [G('editor'), 'El vencimiento que manda el editor en UTC (ISO con Z) se guarda en hora local; uno ya local queda igual', async () => {
       const b = { crudo_id: c.crudo, clip_id: 'clip-utc', review: 'pendiente', file_url: `${sb.editor.base}/video.mp4` };
