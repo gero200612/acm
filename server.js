@@ -35,7 +35,7 @@ import { initWatch, watchCycle } from './watch.js';
 import { initAutoreply, mountAutoreply, inboxCycle } from './autoreply.js';
 import { initComments, mountComments, feedbackOf, commentsOf } from './comments.js';
 import { initRefs, mountRefs, referencesOf } from './refs.js';
-import { initUsers, mountUsers, makeSession, userFromSession, permit, mediaAllowed, scopeOf, sombraProject, sombraReel, checkPassword } from './users.js';
+import { initUsers, mountUsers, makeSession, userFromSession, permit, mediaAllowed, scopeOf, sombraProject, sombraReel, checkPassword, isContent } from './users.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA = path.resolve(process.env.ACM_DATA || './data');
@@ -522,7 +522,7 @@ function overviewOf(pid) {
 // proyectos
 app.get('/api/projects', (req, res) => {
   const sc = scopeOf(req.user), ps = all('SELECT * FROM projects ORDER BY created_at DESC').filter((p) => !sc || sc.includes(p.id)).map(projectSummary);
-  res.json(req.user.role === 'sombra' ? ps.map(sombraProject) : ps);
+  res.json(isContent(req.user) ? ps.map(sombraProject) : ps);
 });
 app.post('/api/projects', upload.single('photo'), (req, res) => {
   const b = req.body || {};
@@ -539,7 +539,7 @@ app.post('/api/projects', upload.single('photo'), (req, res) => {
 app.get('/api/projects/:id', (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe' });
-  res.json(req.user.role === 'sombra' ? sombraProject(projectSummary(p)) : projectSummary(p));
+  res.json(isContent(req.user) ? sombraProject(projectSummary(p)) : projectSummary(p));
 });
 app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
@@ -595,7 +595,7 @@ app.delete('/api/projects/:id/padron', (req, res) => {
 app.get('/api/projects/:id/accounts', (req, res) => {
   const L = all('SELECT * FROM accounts WHERE project_id = ? ORDER BY network, created_at', req.params.id).map(accountOut);
   // la sombra (equipo de contenido) ve el calendario: de cada cuenta solo la red y el nombre, sin seguidores ni datos de conexión
-  res.json(req.user?.role === 'sombra' ? L.map((a) => ({ id: a.id, project_id: a.project_id, network: a.network, handle: a.handle, connected_as: a.connected_as, status: a.status, followers: 0 })) : L);
+  res.json(isContent(req.user) ? L.map((a) => ({ id: a.id, project_id: a.project_id, network: a.network, handle: a.handle, connected_as: a.connected_as, status: a.status, followers: 0 })) : L);
 });
 app.post('/api/projects/:id/accounts', (req, res) => {
   const b = pick(req.body || {}, A_FIELDS);
@@ -689,7 +689,7 @@ app.delete('/api/accounts/:id', (req, res) => { run('DELETE FROM accounts WHERE 
 app.get('/api/projects/:id/reels', (req, res) => {
   const R = all(`SELECT r.*, (SELECT count(*) FROM posts WHERE reel_id = r.id) AS posts FROM reels r WHERE project_id = ? ORDER BY created_at DESC`, req.params.id);
   // la sombra ve solo los crudos que se subieron, sin publicaciones ni números
-  res.json(req.user.role === 'sombra' ? R.filter((r) => r.kind === 'crudo').map(sombraReel) : R);
+  res.json(isContent(req.user) ? R.filter((r) => r.kind === 'crudo').map(sombraReel) : R);
 });
 app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe' });
@@ -698,7 +698,7 @@ app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
   const out = files.map((f) => {
     const title = (req.body?.title && files.length === 1) ? req.body.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
     const m = probe(f.path) || {};
-    const kind = req.body?.kind === 'crudo' || req.user.role === 'sombra' ? 'crudo' : 'listo';
+    const kind = req.body?.kind === 'crudo' || isContent(req.user) ? 'crudo' : 'listo';
     const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind, etiqueta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '');
     return get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid);
@@ -731,7 +731,7 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
   const pid = Number(req.params.id);
   if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe' });
   const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 50) : [];
-  const kind = req.body?.kind === 'crudo' || req.user.role === 'sombra' ? 'crudo' : 'listo';
+  const kind = req.body?.kind === 'crudo' || isContent(req.user) ? 'crudo' : 'listo';
   const out = [];
   for (const it of items) {
     const key = String(it?.key || '');
@@ -851,7 +851,7 @@ app.get('/api/projects/:id/posts', (req, res) => {
   SELECT p.*, r.title AS reel_title, r.file AS reel_file, r.cover AS reel_cover, a.network, a.handle, a.connected_as
   FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
   WHERE p.project_id = ? ORDER BY p.scheduled_at`, req.params.id);
-  res.json(req.user?.role === 'sombra' ? L.map((x) => Object.fromEntries(SOMBRA_POST.map((k) => [k, x[k]]))) : L);
+  res.json(isContent(req.user) ? L.map((x) => Object.fromEntries(SOMBRA_POST.map((k) => [k, x[k]]))) : L);
 });
 app.post('/api/projects/:id/posts', (req, res) => {
   const items = Array.isArray(req.body) ? req.body : [req.body];

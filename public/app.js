@@ -94,15 +94,15 @@ const fail = (e) => toast(e.message || 'Algo falló', true);
 // ---------- estado ----------
 const state = { authed: false, me: null, projects: [], project: null, accounts: [], reels: [], posts: [], uploads: [] };
 // qué puede ver cada rol (el servidor igual niega lo que no corresponde)
-const isGeneral = () => state.me?.role === 'general', isSombra = () => state.me?.role === 'sombra', canUsers = () => ['general', 'admin'].includes(state.me?.role);
+const isGeneral = () => state.me?.role === 'general', isContent = () => ['sombra', 'editor'].includes(state.me?.role), isEditor = () => state.me?.role === 'editor', contentHome = () => (isEditor() ? 'aprobar' : 'crudos'), canUsers = () => ['general', 'admin'].includes(state.me?.role);
 // a quién le llega: en un club, socios; en política, vecinos
 const gente = (p = state.project, pl = true) => p?.kind === 'politica' ? (pl ? 'vecinos' : 'vecino') : (pl ? 'socios' : 'socio');
-const ROLE_NAME = { general: 'Administrador general', admin: 'Administrador del dirigente', sombra: 'Sombra del dirigente' };
+const ROLE_NAME = { general: 'Administrador general', admin: 'Administrador del dirigente', editor: 'Editor del dirigente', sombra: 'Sombra del dirigente' };
 try { state.calMode = localStorage.getItem('acm.calMode') || 'mes'; } catch { state.calMode = 'mes'; }
 
 async function loadProjects() { state.projects = await api('/api/projects'); }
 async function loadProject(id) {
-  if (isSombra()) { const [p, r, a, s] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/reels`), api(`/api/projects/${id}/accounts`), api(`/api/projects/${id}/posts`)]); state.project = p; state.reels = r; state.accounts = a; state.posts = s; return; }
+  if (isContent()) { const [p, r, a, s] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/reels`), api(`/api/projects/${id}/accounts`), api(`/api/projects/${id}/posts`)]); state.project = p; state.reels = r; state.accounts = a; state.posts = s; return; }
   const [p, a, r, s] = await Promise.all([api(`/api/projects/${id}`), api(`/api/projects/${id}/accounts`), api(`/api/projects/${id}/reels`), api(`/api/projects/${id}/posts`)]);
   state.project = p; state.accounts = a; state.reels = r; state.posts = s;
   // qué redes se conectan con un clic (el botón de Facebook también está en Meta Ads)
@@ -128,19 +128,19 @@ async function render() {
     app.innerHTML = loginView(); wireReels(app); $('#em')?.focus(); return;
   }
   let r = route();
-  // un administrador de dirigente o una sombra van directo a su proyecto; la sombra, a Para aprobar
-  if (!isGeneral() && (r.view === 'home' || r.view === 'lab' || (r.view === 'project' && r.id !== state.me?.project_id))) { location.replace(`#/p/${state.me.project_id}${isSombra() ? '/aprobar' : ''}`); return; }
+  // un administrador de dirigente, un editor o una sombra van directo a su proyecto; el editor a Para aprobar, la sombra a Subir crudos
+  if (!isGeneral() && (r.view === 'home' || r.view === 'lab' || (r.view === 'project' && r.id !== state.me?.project_id))) { location.replace(`#/p/${state.me.project_id}${isContent() ? `/${contentHome()}` : ''}`); return; }
   if (r.view === 'users' && !canUsers()) { location.replace('#'); return; }
-  if (isSombra() && r.view === 'project' && !['crudos', 'aprobar', 'calendario'].includes(r.tab)) { location.replace(`#/p/${r.id}/aprobar`); return; }
+  if (isContent() && r.view === 'project' && !(isEditor() ? ['crudos', 'aprobar', 'calendario'] : ['crudos', 'calendario']).includes(r.tab)) { location.replace(`#/p/${r.id}/${contentHome()}`); return; }
   try {
     await loadProjects();
     if (state.storage == null) state.storage = await api('/api/storage').catch(() => ({ r2: false }));
-    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario' && !isSombra()) state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if ((r.tab || 'resumen') === 'resumen' && !r.sub && !isSombra()) state.perf = await api(`/api/projects/${r.id}/performance?days=${state.perfDays || 30}`).catch(() => null); if (r.tab === 'comentarios') state.inbox = await api(`/api/projects/${r.id}/inbox`); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion') state.agent = (await api('/api/agent')).ready; }
+    if (r.view === 'project') { await loadProject(r.id); state.sub = r.sub; if (r.tab === 'campanas') state.camps = await api(`/api/projects/${r.id}/campaigns`); if (r.tab === 'aprobar') state.review = await api(`/api/projects/${r.id}/review`); if (r.tab === 'calendario' && !isContent()) state.best = await api(`/api/projects/${r.id}/best-times`).catch(() => null); if ((r.tab || 'resumen') === 'resumen' && !r.sub && !isContent()) state.perf = await api(`/api/projects/${r.id}/performance?days=${state.perfDays || 30}`).catch(() => null); if (r.tab === 'comentarios') state.inbox = await api(`/api/projects/${r.id}/inbox`); if (r.tab === 'memoria') state.memory = await api(`/api/projects/${r.id}/memory`); if (r.tab === 'investigacion') state.agent = (await api('/api/agent')).ready; }
     else if (r.view === 'lab') await loadLab(r.tab);
     else if (r.view === 'users') state.users = await api('/api/users');
     else state.overview = await api('/api/overview');
   } catch (e) { if (e.message !== 'Sin sesión') { fail(e); location.hash = ''; } return; }
-  const head = r.view === 'users' ? `<div><h1 class="page-title">Usuarios</h1><p class="lead">${isGeneral() ? 'Quién entra a ACM y qué puede hacer.' : 'Las sombras de tu dirigente: suben crudos y aprueban ediciones.'}</p></div><button class="btn primary" data-act="user-new">${icon('plus')} ${isGeneral() ? 'Nuevo usuario' : 'Nueva sombra'}</button>` : r.view === 'lab' ? `<div><h1 class="page-title">Laboratorio</h1><p class="lead">Lo que hizo ACM paso a paso, el banco de pruebas y el control técnico de los reels.</p></div>` : r.view === 'project' ? projectHead(state.project) : `<div><h1 class="page-title">Inicio</h1><p class="lead">Todas las campañas, sus cuentas y lo que sale publicado.</p></div><button class="btn primary" data-act="new-project">${icon('plus')} Nuevo proyecto</button>`;
+  const head = r.view === 'users' ? `<div><h1 class="page-title">Usuarios</h1><p class="lead">${isGeneral() ? 'Quién entra a ACM y qué puede hacer.' : 'El equipo de contenido de tu dirigente: los editores dicen qué reel va y cuál no; las sombras solo suben crudos.'}</p></div><button class="btn primary" data-act="user-new">${icon('plus')} ${isGeneral() ? 'Nuevo usuario' : 'Nueva sombra'}</button>` : r.view === 'lab' ? `<div><h1 class="page-title">Laboratorio</h1><p class="lead">Lo que hizo ACM paso a paso, el banco de pruebas y el control técnico de los reels.</p></div>` : r.view === 'project' ? projectHead(state.project) : `<div><h1 class="page-title">Inicio</h1><p class="lead">Todas las campañas, sus cuentas y lo que sale publicado.</p></div><button class="btn primary" data-act="new-project">${icon('plus')} Nuevo proyecto</button>`;
   const body = r.view === 'users' ? usersView() : r.view === 'lab' ? labView(r.tab) : r.view === 'project' ? projectView(r.tab) : homeView();
   // los videos que ya estaban cargados se reusan: volver a dibujar la página no los deja en negro mientras recargan
   // (un mismo video puede estar dos veces, como en la Grilla: celu y compu)
@@ -164,7 +164,7 @@ function sideNav(r) {
     ${isGeneral() ? `<a class="item ${r.view === 'home' ? 'active' : ''}" href="#">${icon('home', 20)}<span class="t">Inicio</span></a>
     <a class="item ${r.view === 'lab' ? 'active' : ''}" href="#/lab">${icon('flask', 20)}<span class="t">Laboratorio</span></a>` : ''}
     ${canUsers() ? `<a class="item ${r.view === 'users' ? 'active' : ''}" href="#/usuarios">${icon('users', 20)}<span class="t">Usuarios</span></a>` : ''}
-    ${isSombra() ? '' : `<button class="item pal-btn" data-act="palette">${icon('search', 20)}<span class="t">Buscar</span><kbd>⌘K</kbd></button>`}
+    ${isContent() ? '' : `<button class="item pal-btn" data-act="palette">${icon('search', 20)}<span class="t">Buscar</span><kbd>⌘K</kbd></button>`}
     <div class="nav-label">Proyectos</div>
     ${pinnedFirst(state.projects).map((p) => `<a class="item ${r.id === p.id ? 'active' : ''} ${isPinned(p.id) ? 'pinned' : ''}" href="#/p/${p.id}">${avatar(p, 'sm')}<span class="t">${esc(p.name)}</span>${p.review_pending ? `<span class="count" title="Recortes para aprobar">${p.review_pending}</span>` : ''}<button class="pin" data-act="pin" data-pin="${p.id}" title="${isPinned(p.id) ? 'Desfijar' : 'Fijar arriba'}" aria-label="${isPinned(p.id) ? 'Desfijar' : 'Fijar arriba'}" aria-pressed="${isPinned(p.id)}">${icon('star', 14)}</button></a>`).join('')}
     ${isGeneral() ? `<button class="item add" data-act="new-project">${icon('plus', 20)}<span class="t">Nuevo proyecto</span></button>` : ''}
@@ -446,15 +446,15 @@ function labReels() {
 // ---------- proyecto ----------
 function projectHead(p) {
   return `<div class="who">${avatar(p, true)}<div style="min-width:0"><h1 class="page-title">${esc(p.name)}</h1><p class="lead">${esc([p.role, p.org].filter(Boolean).join(' · ') || 'Proyecto')}</p></div></div>
-  <div class="row">${p.demo ? '<span class="chip s-pausada" title="No publica ni pauta nada">Demo · no publica</span>' : ''}${countdown(p)}${p.padron && !isSombra() ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
+  <div class="row">${p.demo ? '<span class="chip s-pausada" title="No publica ni pauta nada">Demo · no publica</span>' : ''}${countdown(p)}${p.padron && !isContent() ? `<span class="chip nodot">Padrón ${fmt(p.padron)}</span>` : ''}</div>`;
 }
 const TABS = [['resumen', 'Resumen'], ['cuentas', 'Cuentas'], ['reels', 'Reels'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario'], ['pauta', 'Pauta'], ['campanas', 'Campañas'], ['memoria', 'Memoria'], ['investigacion', 'Investigación'], ['comentarios', 'Comentarios'], ['ajustes', 'Ajustes']];
 function projectView(tab) {
   const p = state.project;
   const counts = { cuentas: state.accounts.length, reels: state.reels.length, aprobar: p.review_pending, calendario: state.posts.filter((x) => x.status === 'programado').length };
   const on = tab === 'reel' ? 'reels' : tab;
-  const T = isSombra() ? [['crudos', 'Subir crudos'], ['aprobar', 'Para aprobar'], ['calendario', 'Calendario']] : TABS;
-  if (isSombra()) counts.crudos = state.reels.length;
+  const T = isContent() ? [['crudos', 'Subir crudos'], ...(isEditor() ? [['aprobar', 'Para aprobar']] : []), ['calendario', 'Calendario']] : TABS;
+  if (isContent()) counts.crudos = state.reels.length;
   const tabs = `<nav class="tabs">${T.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
   const views = { crudos: crudosView, resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, memoria: memoriaView, reel: reelDetailView, investigacion: investigacionView, comentarios: comentariosView, ajustes: ajustesView };
   return tabs + (views[tab] || resumenView)();
@@ -498,7 +498,7 @@ function aprobarView() {
   const auto = R.review_mode === 'auto';
   const head = `<div class="ap-head"><div><h2 class="h2">Para aprobar <span class="count">${R.pending}</span></h2><p class="muted small">${R.pending ? `${R.pending} ${R.pending === 1 ? 'recorte espera' : 'recortes esperan'} tu decisión. Aprobás o rechazás todas sus versiones juntas.` : 'No hay recortes esperando.'}</p></div>
     <div class="row"><span class="chip ${auto ? 's-conectada' : 'nodot'}" title="${auto ? 'Lo que el analista aprueba entra solo; lo dudoso siempre espera acá. Un rechazo tuyo la vuelve a manual.' : 'Con 19 de los últimos 20 recortes aprobados pasa a automática.'}">Revisión ${auto ? 'automática' : 'manual'}</span>
-    ${isSombra() ? '' : `<button class="btn sm" data-act="share-open">${icon('link', 15)} Compartir para aprobar</button>`}</div></div>`;
+    ${isContent() ? '' : `<button class="btn sm" data-act="share-open">${icon('link', 15)} Compartir para aprobar</button>`}</div></div>`;
   const rec = (R.recent || []).length ? `<h2 class="h2" style="margin-top:8px">Aprobados recientes</h2>${R.recent.map((c) => `
   <section class="card ap-clip" data-clip="${esc(c.clip_id)}">
     <div class="card-head"><h2 class="h2">${esc(c.moment?.tema || c.clip_id)}</h2><span class="small muted">${c.reels.filter((r) => r.review === 'aprobado').length} aprobadas</span></div>
@@ -714,24 +714,24 @@ function usersView() {
   return `<section class="card">${U.length ? `<div class="table-wrap"><table class="list"><thead><tr><th>Persona</th><th>Rol</th><th>Dirigente</th><th>Última entrada</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no hay usuarios.</p>'}${help}</section>`;
 }
 function userDialog(u) {
-  const P = state.projects, role = u?.role || (isGeneral() ? 'admin' : 'sombra');
-  const roles = isGeneral() ? Object.entries(ROLE_NAME) : [['sombra', ROLE_NAME.sombra]];
-  const d = openDialog(u ? `Editar a ${esc(u.name)}` : (isGeneral() ? 'Nuevo usuario' : 'Nueva sombra'), `<form class="form" id="user-form">
+  const P = state.projects, role = u?.role || (isGeneral() ? 'admin' : 'editor');
+  const roles = isGeneral() ? Object.entries(ROLE_NAME) : [['editor', ROLE_NAME.editor], ['sombra', ROLE_NAME.sombra]];
+  const d = openDialog(u ? `Editar a ${esc(u.name)}` : (isGeneral() ? 'Nuevo usuario' : 'Nuevo integrante del equipo'), `<form class="form" id="user-form">
     <label class="field">Nombre<input class="input" name="name" required maxlength="80" value="${esc(u?.name || '')}"></label>
     ${u ? `<p class="small muted">${esc(u.email)}</p>` : '<label class="field">Mail<input class="input" name="email" type="email" required autocomplete="off"></label>'}
-    ${isGeneral() ? `<label class="field">Rol<select class="input" name="role">${roles.map(([k, l]) => `<option value="${k}" ${k === role ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-    <label class="field" id="user-proj">Dirigente<select class="input" name="project_id">${P.map((p) => `<option value="${p.id}" ${p.id === u?.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>` : ''}
+    <label class="field">Rol<select class="input" name="role">${roles.map(([k, l]) => `<option value="${k}" ${k === role ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    ${isGeneral() ? `<label class="field" id="user-proj">Dirigente<select class="input" name="project_id">${P.map((p) => `<option value="${p.id}" ${p.id === u?.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>` : ''}
     <label class="field">${u ? 'Contraseña nueva <span class="small muted">(vacía = no cambia)</span>' : 'Contraseña <span class="small muted">(mínimo 8; se la pasás vos)</span>'}<input class="input" name="password" type="password" minlength="8" ${u ? '' : 'required'} autocomplete="new-password"></label>
     <p class="small muted" id="user-what"></p>
     <div class="row"><button class="btn primary" type="submit">${u ? 'Guardar' : 'Dar de alta'}</button></div></form>`);
   const f = d.querySelector('form');
-  const what = { general: 'Ve y maneja todo, de todos los dirigentes.', admin: 'Maneja todo el proyecto de su dirigente, y nada de los otros.', sombra: 'Solo sube crudos y aprueba ediciones de su dirigente. No ve números.' };
-  const sync = () => { const r = f.role?.value || 'sombra'; const pj = d.querySelector('#user-proj'); if (pj) pj.hidden = r === 'general'; d.querySelector('#user-what').textContent = what[r]; };
+  const what = { general: 'Ve y maneja todo, de todos los dirigentes.', admin: 'Maneja todo el proyecto de su dirigente, y nada de los otros.', editor: 'Dice qué reel va y cuál no: aprueba, rechaza y comenta cada versión de su dirigente. También sube crudos. No ve números.', sombra: 'Solo sube crudos de su dirigente y mira el calendario. No aprueba ni ve números.' };
+  const sync = () => { const r = f.role?.value || 'editor'; const pj = d.querySelector('#user-proj'); if (pj) pj.hidden = r === 'general'; d.querySelector('#user-what').textContent = what[r]; };
   f.role?.addEventListener('change', sync); sync();
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = { name: f.name.value, ...(f.email ? { email: f.email.value } : {}), ...(f.password.value ? { password: f.password.value } : {}) };
-    if (f.role) { body.role = f.role.value; if (body.role !== 'general') body.project_id = Number(f.project_id.value); }
+    if (f.role) { body.role = f.role.value; if (body.role !== 'general' && f.project_id) body.project_id = Number(f.project_id.value); }
     try { await api(u ? `/api/users/${u.id}` : '/api/users', { method: u ? 'PUT' : 'POST', body }); d.close(); toast(u ? 'Usuario guardado' : 'Usuario dado de alta'); render(); } catch (err) { fail(err); }
   });
 }
@@ -776,7 +776,7 @@ function reelsView() {
 
 // Una publicación se puede mover (arrastrar a otro día) si todavía no salió y faltan más de 15 minutos.
 const LOCK_MS = 15 * 60 * 1000;
-const movable = (x) => !isSombra() && (x.status === 'programado' || x.status === 'fallido') && pdate(x.scheduled_at) - Date.now() > LOCK_MS;
+const movable = (x) => !isContent() && (x.status === 'programado' || x.status === 'fallido') && pdate(x.scheduled_at) - Date.now() > LOCK_MS;
 const viewKey = () => location.hash.split('?')[0] + '|' + (state.calMode || '');
 // Proyectos fijados arriba (preferencia de quien usa este navegador).
 const pins = () => { try { return JSON.parse(localStorage.getItem('acm.pins') || '[]'); } catch { return []; } };
@@ -813,11 +813,11 @@ function calendarioView() {
       <h2 class="h2">${title}</h2>
       <span class="small muted">${shown.length} ${shown.length === 1 ? 'publicación' : 'publicaciones'} ${week ? 'esta semana' : 'este mes'}</span>
       <span class="spacer"></span>
-      ${isSombra() ? '' : `<button class="btn cal-sync" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>`}
+      ${isContent() ? '' : `<button class="btn cal-sync" data-act="ics-open" title="Ver estas publicaciones en Google Calendar, el calendario del celular u Outlook">${icon('cal', 15)} Sincronizar</button>`}
       <span class="cal-nav" role="group" aria-label="Moverse en el calendario"><button class="cal-tb" data-act="cal-prev" aria-label="${week ? 'Semana anterior' : 'Mes anterior'}">${icon('left', 16)}</button><button class="cal-tb" data-act="cal-today">Hoy</button><button class="cal-tb" data-act="cal-next" aria-label="${week ? 'Semana siguiente' : 'Mes siguiente'}">${icon('right', 16)}</button></span>
       ${calModes()}
     </div>
-    ${isSombra() ? '' : `<p class="cal-hint small muted">${icon('move', 14)} Arrastrá una publicación a otro día para moverla: mantiene la hora. Las que ya salieron o salen en menos de 15 minutos quedan fijas.</p>`}
+    ${isContent() ? '' : `<p class="cal-hint small muted">${icon('move', 14)} Arrastrá una publicación a otro día para moverla: mantiene la hora. Las que ya salieron o salen en menos de 15 minutos quedan fijas.</p>`}
     <div class="cal-grid">
       ${days.slice(0, 7).map((d) => `<div class="cal-wd ${week && sameDay(d, todayD) ? 'today' : ''}">${d.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}${week ? ` <b>${d.getDate()}</b>` : ''}</div>`).join('')}
       ${days.map((d) => {
@@ -913,7 +913,7 @@ function grillaView() {
           <div class="ph-bar"><span class="ph-net">${netBadge(acc.network)}</span><b>${esc(name)}</b><span></span></div>
           <div class="ph-prof">
             <span class="ph-av" style="background:${esc(state.project.color)}">${state.project.photo ? `<img src="/media/${esc(state.project.photo)}" alt="">` : esc(initials(state.project.name))}</span>
-            <div class="ph-stats"><div><b>${L.filter((x) => x.status === 'publicado').length}</b><span>publicados</span></div><div><b>${L.filter((x) => x.status === 'programado').length}</b><span>por salir</span></div>${isSombra() ? '' : `<div><b>${fmtK(acc.followers || 0)}</b><span>seguidores</span></div>`}</div>
+            <div class="ph-stats"><div><b>${L.filter((x) => x.status === 'publicado').length}</b><span>publicados</span></div><div><b>${L.filter((x) => x.status === 'programado').length}</b><span>por salir</span></div>${isContent() ? '' : `<div><b>${fmtK(acc.followers || 0)}</b><span>seguidores</span></div>`}</div>
           </div>
           <div class="ph-name"><b>${esc(state.project.name)}</b>${state.project.role ? `<span>${esc(state.project.role)}</span>` : ''}</div>
           <div class="ph-tabs"><span class="on">${icon('grid', 16)}</span><span>${icon('play', 16)}</span><span>${icon('users', 16)}</span></div>
@@ -928,7 +928,7 @@ function grillaView() {
             <div class="lp-prof">
               <span class="ph-av lp-av" style="background:${esc(state.project.color)}">${state.project.photo ? `<img src="/media/${esc(state.project.photo)}" alt="">` : esc(initials(state.project.name))}</span>
               <div class="lp-info"><b>${esc(name)}</b><span class="small muted">${esc(state.project.name)}${state.project.role ? ' · ' + esc(state.project.role) : ''}</span>
-                <div class="lp-stats"><span><b>${L.filter((x) => x.status === 'publicado').length}</b> publicados</span><span><b>${L.filter((x) => x.status === 'programado').length}</b> programados</span>${isSombra() ? '' : `<span><b>${fmtK(acc.followers || 0)}</b> seguidores</span>`}</div></div>
+                <div class="lp-stats"><span><b>${L.filter((x) => x.status === 'publicado').length}</b> publicados</span><span><b>${L.filter((x) => x.status === 'programado').length}</b> programados</span>${isContent() ? '' : `<span><b>${fmtK(acc.followers || 0)}</b> seguidores</span>`}</div></div>
             </div>
             <div class="lp-grid">${L.map(tile).join('') || '<p class="small muted" style="grid-column:1/-1;padding:20px;text-align:center">Sin publicaciones en esta cuenta.</p>'}</div>
           </div>
@@ -1051,8 +1051,8 @@ function postDialog(ids) {
         ${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}
         ${x.external_url ? `<a class="btn sm" href="${esc(x.external_url)}" target="_blank" rel="noopener noreferrer">Ver en ${NETS[x.network].name} ↗</a>` : ''}
       </div>
-      <div class="pd-actions" ${isSombra() ? 'hidden' : ''}>
-        ${!isSombra() && x.network === 'tiktok' && (x.status === 'programado' || x.status === 'fallido') ? `<div class="tt-opts" data-acc="${x.account_id}"><p class="small muted">Cargando la cuenta de TikTok…</p></div>` : ''}
+      <div class="pd-actions" ${isContent() ? 'hidden' : ''}>
+        ${!isContent() && x.network === 'tiktok' && (x.status === 'programado' || x.status === 'fallido') ? `<div class="tt-opts" data-acc="${x.account_id}"><p class="small muted">Cargando la cuenta de TikTok…</p></div>` : ''}
         ${x.status !== 'publicando' && x.status !== 'publicado' ? `<div class="pd-btns">
           <button class="btn danger" data-act="del-post">Quitar</button>
           ${x.status === 'programado' ? `<button class="btn accent" data-act="post-now">Publicar ahora</button>` : ''}
@@ -1786,7 +1786,7 @@ function tabsFit() {
 let tabsQ = false;
 new MutationObserver(() => { if (!tabsQ) { tabsQ = true; requestAnimationFrame(() => { tabsQ = false; tabsFit(); }); } }).observe(document.body, { childList: true, subtree: true });
 addEventListener('resize', () => tabsFit());
-document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.authed && !isSombra()) { e.preventDefault(); paletteOpen(); } });
+document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.authed && !isContent()) { e.preventDefault(); paletteOpen(); } });
 // «Conectar con Facebook»: Facebook Login for Business con el SDK de Meta (se carga recién al tocar el botón).
 // El diálogo devuelve un código; el servidor lo canjea por sincro-wa. Si se autorizaron varias páginas o cuentas, se elige y se repite.
 let fbLoading = null;

@@ -1,19 +1,33 @@
-// Usuarios y permisos. Tres roles:
+// Usuarios y permisos. Cuatro roles:
 //   general → ve y maneja todo (hasta 3: Gero y dos más). La contraseña maestra (ACM_PASSWORD) solo entra mientras no haya ninguno.
 //   admin   → administrador de UN dirigente: todo su proyecto, nada de los otros, sin Laboratorio ni proyectos nuevos.
-//   sombra  → de UN dirigente: solo sube crudos y aprueba ediciones. No ve números.
+//   editor  → de UN dirigente: dice qué reel va y cuál no (aprueba, rechaza, comenta) y también sube crudos. No ve números.
+//   sombra  → de UN dirigente: solo sube crudos (y mira el calendario). No ve números.
 // El servidor niega por defecto: cada pedido tiene que caer en una regla que lo permita (no alcanza con esconder botones).
 import crypto from 'node:crypto';
 
-export const ROLES = ['general', 'admin', 'sombra'];
+export const ROLES = ['general', 'admin', 'editor', 'sombra'];
+// equipo de contenido de un dirigente: no ve números (padrón, pauta, cuentas, publicaciones)
+export const isContent = (u) => u?.role === 'sombra' || u?.role === 'editor';
 export const MAX_GENERALES = 3; // Gero y dos más (la contraseña maestra se cierra con el primero)
 export const OWNER = Object.freeze({ id: 0, email: '', name: 'Dueño', role: 'general', project_id: null });
 
 export function initUsers(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('general', 'admin', 'sombra')),
+    id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('general', 'admin', 'editor', 'sombra')),
     project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE, pass_hash TEXT NOT NULL, ver INTEGER NOT NULL DEFAULT 1,
     created_by INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')), last_login_at TEXT DEFAULT '');`);
+  // bases de antes del rol editor: el CHECK viejo no lo deja guardar → se rehace la tabla con los mismos datos
+  const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()?.sql || '';
+  if (!sql.includes("'editor'")) {
+    db.exec('BEGIN');
+    try {
+      db.exec(`ALTER TABLE users RENAME TO users_viejo;
+        ${sql.replace(/CREATE TABLE "?users_viejo"?|CREATE TABLE "?users"?/, 'CREATE TABLE users').replace("CHECK (role IN ('general', 'admin', 'sombra'))", "CHECK (role IN ('general', 'admin', 'editor', 'sombra'))")};
+        INSERT INTO users SELECT * FROM users_viejo; DROP TABLE users_viejo;`);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
   // quién aprobó o rechazó cada recorte
   if (!db.prepare('PRAGMA table_info(clip_reviews)').all().some((c) => c.name === 'reviewer')) db.exec("ALTER TABLE clip_reviews ADD COLUMN reviewer TEXT DEFAULT ''");
 }
@@ -85,16 +99,22 @@ export function projectOf(db, p, body) {
 }
 // Rutas que no son de un proyecto y que un administrador de dirigente sí puede usar (las que listan vienen filtradas en la ruta).
 const ADMIN_GLOBAL = [['GET', /^\/api\/(projects|overview|storage|clock|oauth|agent|search|me|session)$/], ['GET', /^\/api\/users$/], ['POST', /^\/api\/users$/]];
-// Lo único que puede hacer una sombra (además, todo dentro de su proyecto).
+// Lo único que puede hacer una sombra (además, todo dentro de su proyecto): subir crudos y mirar el calendario.
 const SOMBRA = [
   ['GET', /^\/api\/(projects|storage|me|session)$/],
   ['GET', /^\/api\/projects\/\d+$/],
-  ['GET', /^\/api\/projects\/\d+\/(reels|review|posts|accounts)$/], // el calendario: solo mirar, sin números
+  ['GET', /^\/api\/projects\/\d+\/(reels|posts|accounts)$/], // el calendario: solo mirar, sin números
   ['POST', /^\/api\/projects\/\d+\/reels(\/uploads|\/complete)?$/],
+];
+// El editor: lo de la sombra y además decide qué reel va (Para aprobar, aprobar/rechazar, comentar).
+const EDITOR = [
+  ...SOMBRA,
+  ['GET', /^\/api\/projects\/\d+\/review$/],
   ['POST', /^\/api\/clips\/[^/]+\/review$/],
   ['GET', /^\/api\/reels\/\d+\/comments$/],
   ['POST', /^\/api\/reels\/\d+\/comments$/],
 ];
+const CONTENT = { sombra: SOMBRA, editor: EDITOR };
 // Rutas de proyecto que el administrador de dirigente NO usa: las de usuarios van por su propia regla.
 const ADMIN_DENY = [['DELETE', /^\/api\/projects\/\d+$/]];
 const hit = (list, m, p) => list.some(([mm, re]) => mm === m && re.test(p));
@@ -104,10 +124,11 @@ export function permit(db, user, method, p, body) {
   if (!user) return { status: 401, error: 'Sin sesión' };
   if (user.role === 'general') return null;
   const m = method === 'HEAD' ? 'GET' : method;
-  if (user.role === 'sombra' && !hit(SOMBRA, m, p)) return { status: 403, error: 'Tu usuario solo sube crudos y aprueba ediciones' };
+  if (user.role === 'sombra' && !hit(SOMBRA, m, p)) return { status: 403, error: 'Tu usuario solo sube crudos' };
+  if (user.role === 'editor' && !hit(EDITOR, m, p)) return { status: 403, error: 'Tu usuario solo aprueba reels y sube crudos' };
   if (user.role === 'admin' && hit(ADMIN_DENY, m, p)) return { status: 403, error: 'Eso lo hace un administrador general' };
   const pid = projectOf(db, p, body);
-  if (pid === undefined) return hit(ADMIN_GLOBAL, m, p) || hit(SOMBRA, m, p) ? null : { status: 403, error: 'Eso lo hace un administrador general' };
+  if (pid === undefined) return (user.role === 'admin' ? hit(ADMIN_GLOBAL, m, p) : hit(CONTENT[user.role] || [], m, p)) ? null : { status: 403, error: 'Eso lo hace un administrador general' };
   if (pid === null || pid !== user.project_id) return { status: 404, error: 'No existe' };
   return null;
 }
@@ -122,7 +143,7 @@ export function mediaAllowed(db, user, file) {
 // A qué proyectos llega (null = a todos).
 export const scopeOf = (user) => (user.role === 'general' ? null : [user.project_id]);
 
-// Lo que ve una sombra de su proyecto: nada de números (padrón, pauta, cuentas, publicaciones).
+// Lo que ve el equipo de contenido (sombra o editor) de su proyecto: nada de números (padrón, pauta, cuentas, publicaciones).
 export const sombraProject = (p) => ({ id: p.id, name: p.name, role: p.role, org: p.org, color: p.color, photo: p.photo, review_mode: p.review_mode, review_pending: p.review_pending, kind: p.kind });
 export const sombraReel = (r) => ({ id: r.id, title: r.title, kind: r.kind, file: r.file, cover: r.cover, size: r.size, duration: r.duration, status: r.status, status_detail: r.status_detail, created_at: r.created_at, source_id: r.source_id, etiqueta: r.etiqueta });
 
@@ -135,17 +156,17 @@ export function mountUsers(app, { db }) {
   app.get('/api/users', (req, res) => {
     const u = req.user;
     if (u.role === 'general') return res.json(all('SELECT * FROM users ORDER BY role, name').map(pub));
-    if (u.role === 'admin') return res.json(all("SELECT * FROM users WHERE project_id = ? AND role IN ('admin', 'sombra') ORDER BY role, name", u.project_id).map(pub));
+    if (u.role === 'admin') return res.json(all("SELECT * FROM users WHERE project_id = ? AND role IN ('admin', 'editor', 'sombra') ORDER BY role, name", u.project_id).map(pub));
     res.status(403).json({ error: 'No' });
   });
   // qué puede tocar `me` sobre un usuario con rol `role` del proyecto `pid`
-  const canManage = (me, role, pid) => me.role === 'general' || (me.role === 'admin' && role === 'sombra' && pid === me.project_id);
+  const canManage = (me, role, pid) => me.role === 'general' || (me.role === 'admin' && (role === 'sombra' || role === 'editor') && pid === me.project_id);
   const check = (b, me, isNew) => {
     const role = b.role, pid = role === 'general' ? null : Number(b.project_id) || null;
     const no = (error, status = 400) => ({ status, error });
-    if (!ROLES.includes(role)) return no('El rol es general, admin o sombra');
+    if (!ROLES.includes(role)) return no('El rol es general, admin, editor o sombra');
     if (role !== 'general' && (!pid || !get('SELECT id FROM projects WHERE id = ?', pid))) return no('Elegí de qué dirigente es');
-    if (!canManage(me, role, pid)) return no(me.role === 'admin' ? 'Solo podés dar de alta sombras de tu dirigente' : 'No podés', 403);
+    if (!canManage(me, role, pid)) return no(me.role === 'admin' ? 'Solo podés dar de alta editores y sombras de tu dirigente' : 'No podés', 403);
     if ((isNew || b.password) && String(b.password || '').length < 8) return no('La contraseña tiene que tener al menos 8 caracteres');
     return null;
   };

@@ -137,6 +137,7 @@ export function recorridoCases(sb) {
       const mk = (b) => api('POST', '/api/users', { password: 'clave-segura-1', ...b });
       eq((await mk({ email: 'adm@x.com', name: 'Adm', role: 'admin', project_id: c.p })).status, 200, 'alta admin');
       eq((await mk({ email: 'som@x.com', name: 'Som', role: 'sombra', project_id: c.p })).status, 200, 'alta sombra');
+      eq((await mk({ email: 'edi@x.com', name: 'Edi', role: 'editor', project_id: c.p })).status, 200, 'alta editor');
       eq((await mk({ email: 'som@x.com', name: 'Otra', role: 'sombra', project_id: c.p })).status, 409, 'mail repetido');
       eq((await mk({ email: 'c@x.com', name: 'C', role: 'sombra', project_id: c.p, password: 'corta' })).status, 400, 'contraseña corta');
       eq((await mk({ email: 'd@x.com', name: 'D', role: 'admin' })).status, 400, 'admin sin dirigente');
@@ -153,7 +154,7 @@ export function recorridoCases(sb) {
       eq((await api('POST', '/api/login', { email: 'som@x.com', password: 'mala-mala-1' })).status, 401, 'sombra con contraseña mala');
       eq((await api('GET', '/api/me')).j?.role, 'general', 'el general sigue adentro');
     }],
-    [G('roles'), 'Administrador de dirigente: todo su proyecto, nada del otro, sin Laboratorio ni proyectos nuevos; solo da de alta sombras suyas', async () => {
+    [G('roles'), 'Administrador de dirigente: todo su proyecto, nada del otro, sin Laboratorio ni proyectos nuevos; solo da de alta editores y sombras suyos', async () => {
       const u = await sb.box.client('adm@x.com', 'clave-segura-1');
       eq((await u('GET', '/api/projects')).j?.map((p) => p.id), [c.p], 've solo su proyecto');
       eq((await u('GET', `/api/projects/${c.p}/performance`)).status, 200, 'números de su proyecto');
@@ -165,13 +166,14 @@ export function recorridoCases(sb) {
       eq((await u('DELETE', `/api/projects/${c.p}`)).status, 403, 'borrar su proyecto');
       eq((await u('POST', '/api/users', { email: 's2@x.com', name: 'S2', password: 'clave-segura-2' })).j?.role, 'sombra', 'alta de sombra propia');
       eq((await u('POST', '/api/users', { email: 's3@x.com', name: 'S3', role: 'sombra', project_id: c.otro, password: 'clave-segura-2' })).status, 403, 'sombra de otro dirigente');
+      eq((await u('POST', '/api/users', { email: 'e2@x.com', name: 'E2', role: 'editor', password: 'clave-segura-2' })).j?.role, 'editor', 'alta de editor propio');
       eq((await u('POST', '/api/users', { email: 'a2@x.com', name: 'A2', role: 'admin', project_id: c.p, password: 'clave-segura-2' })).status, 403, 'otro admin');
       eq((await u('POST', '/api/users', { email: 'g9@x.com', name: 'G9', role: 'general', password: 'clave-segura-2' })).status, 403, 'un general');
       eq((await u('GET', '/api/users')).j?.every((x) => x.project_id === c.p), true, 've solo usuarios de su proyecto');
       const gen = (await api('GET', '/api/users')).j.find((x) => x.email === 'g1@x.com');
       eq((await u('DELETE', `/api/users/${gen.id}`)).status, 404, 'borrar un general');
     }],
-    [G('roles'), 'Sombra: sube crudos (aunque pida «listo»), ve Para aprobar y el calendario; no ve números, conexiones ni otro proyecto', async () => {
+    [G('roles'), 'Sombra: sube crudos (aunque pida «listo») y ve el calendario; no aprueba ni ve números, conexiones ni otro proyecto', async () => {
       const u = await sb.box.client('som@x.com', 'clave-segura-1');
       const ps = (await u('GET', '/api/projects')).j;
       eq(ps.map((p) => p.id), [c.p], 've solo su proyecto');
@@ -185,13 +187,30 @@ export function recorridoCases(sb) {
       eq([ps2.status, (ps2.j || []).some((x) => 'error' in x || 'options' in x || 'external_id' in x || 'note' in x)], [200, false], 've el calendario, sin datos internos');
       eq((await u('PUT', `/api/posts/0`, { scheduled_at: '2030-01-01 10:00' })).status, 403, 'no mueve publicaciones');
       eq((await u('PUT', `/api/projects/${c.p}`, { name: 'x' })).status, 403, 'editar el proyecto');
-      eq((await u('GET', `/api/projects/${c.otro}/review`)).status, 404, 'Para aprobar de otro');
-      eq((await u('GET', `/api/projects/${c.p}/review`)).status, 200, 'su Para aprobar');
+      eq((await u('GET', `/api/projects/${c.otro}/accounts`)).status, 404, 'calendario de otro');
+      eq((await u('GET', `/api/projects/${c.p}/review`)).status, 403, 'no ve Para aprobar');
+      eq((await u('POST', `/api/clips/x/review`, { decision: 'aprobado' })).status, 403, 'no aprueba');
+      eq((await u('GET', `/api/reels/1/comments`)).status, 403, 'no comenta');
       const up = await u('POST', `/api/projects/${c.p}/reels`, form({ kind: 'listo', files: [[new Blob([Buffer.alloc(2048)], { type: 'video/mp4' }), 'crudo.mp4']] }), true);
       eq([up.status, up.j?.[0]?.kind], [200, 'crudo'], 'sube y queda como crudo');
       const rs = (await u('GET', `/api/projects/${c.p}/reels`)).j;
       eq([rs.every((r) => r.kind === 'crudo'), rs.some((r) => 'posts' in r)], [true, false], 'solo crudos, sin publicaciones');
       eq((await u('DELETE', `/api/reels/${up.j[0].id}`)).status, 403, 'borrar un reel');
+    }],
+    [G('roles'), 'Editor: ve Para aprobar y comenta; sube crudos; no ve números, no mueve el calendario ni toca otro proyecto', async () => {
+      const u = await sb.box.client('edi@x.com', 'clave-segura-1');
+      eq((await u('GET', '/api/me')).j?.role, 'editor', 'entra como editor');
+      const ps = (await u('GET', '/api/projects')).j;
+      eq([ps.map((p) => p.id), ['padron', 'pauta', 'accounts'].filter((k) => k in ps[0])], [[c.p], []], 'su proyecto, sin números');
+      eq((await u('GET', `/api/projects/${c.p}/review`)).status, 200, 'su Para aprobar');
+      eq((await u('GET', `/api/projects/${c.otro}/review`)).status, 404, 'Para aprobar de otro');
+      const up = await u('POST', `/api/projects/${c.p}/reels`, form({ kind: 'listo', files: [[new Blob([Buffer.alloc(2048)], { type: 'video/mp4' }), 'crudo-e.mp4']] }), true);
+      eq([up.status, up.j?.[0]?.kind], [200, 'crudo'], 'sube y queda como crudo');
+      eq((await u('GET', `/api/reels/${up.j[0].id}/comments`)).status, 200, 've los comentarios');
+      for (const url of [`/api/projects/${c.p}/performance`, `/api/projects/${c.p}/campaigns`, '/api/users', '/api/overview'])
+        eq((await u('GET', url)).status, 403, url);
+      eq((await u('PUT', `/api/posts/0`, { scheduled_at: '2030-01-01 10:00' })).status, 403, 'no mueve publicaciones');
+      eq((await u('POST', '/api/users', { email: 'x9@x.com', name: 'X', role: 'sombra', password: 'clave-segura-2' })).status, 403, 'no da de alta usuarios');
     }],
     [G('roles'), 'Al cambiarle la contraseña a un usuario se le cierra la sesión', async () => {
       const u = await sb.box.client('som@x.com', 'clave-segura-1');
