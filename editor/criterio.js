@@ -2,7 +2,8 @@
 import { crearElegirMomentos } from './momentos.js';
 import { crearArmarRecetas } from './recetas.js';
 import { crearAnalista } from './analista.js';
+import { crearAjustar } from './ajuste.js';
 
 export function crearCriterio({ claude }) {
-  return { elegirMomentos: crearElegirMomentos({ claude }), armarRecetas: crearArmarRecetas({ claude }), revisar: crearAnalista({ claude }) };
+  return { elegirMomentos: crearElegirMomentos({ claude }), armarRecetas: crearArmarRecetas({ claude }), revisar: crearAnalista({ claude }), ajustar: crearAjustar({ claude }) };
 }

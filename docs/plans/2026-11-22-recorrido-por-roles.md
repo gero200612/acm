@@ -1,0 +1,36 @@
+# Recorrido por roles: arreglos y «rehacer con los cambios pedidos»
+
+Gero, 22/11/2026: recorrido completo como dueño, admin del dirigente, editor y sombra (copia local con los reels de Posse) → «arreglá todo». Más: cuando se rechaza una edición, que ahí mismo se pueda rehacer con los cambios pedidos (hoy el rechazo queda solo como aprendizaje).
+
+## Errores
+- [ ] «Rechazar lo marcado» aprobaba sin avisar las versiones no marcadas: decisión por versión (👍/👎) y nada se aprueba sin que lo elijan
+- [ ] Subir crudo: falta el campo del barrio (el código lee `#up-etiqueta` pero no está en ninguna pantalla)
+- [ ] Un solo estado por reel en todas las pantallas: Tablero (Publicado contaba 0 con 16 publicadas; Para aprobar contaba versiones y la pestaña recortes), chip de Reels («Borrador» en reels aprobados y publicados)
+- [ ] Reels: sin «Aprobar» paralelo (se aprueba solo en Para aprobar) y sin «Repartir» un reel que espera aprobación o fue rechazado
+- [ ] «@@VolveGustavo» (doble arroba), «7.080 seg.» → seguidores, «Socios alcanzados» en un proyecto político
+- [ ] «Lo que mejor anduvo» con todo en 0 vistas: no se muestra sin números; textos cortados en las tarjetas de Inicio
+
+## Para aprobar (editor)
+- [ ] Cada recorte con su título real y contexto: de qué crudo sale, barrio, público, duración
+- [ ] Corregir el texto y los hashtags de una versión antes de aprobarla
+- [ ] Al aprobar, decir dónde y cuándo sale (cuentas y primera fecha)
+- [ ] Aprobados recientes livianos (portada, sin cargar todos los videos)
+
+## Rehacer con los cambios pedidos
+- [x] Editor (orquestador): `POST /rehacer` con la edición y lo que pidió la persona → Claude traduce el pedido a la receta (y recorte si pide más corto) → edita de nuevo y entrega una versión nueva del mismo recorte
+- [ ] ACM: al rechazar, «Rehacer con estos cambios» (prendido por defecto) manda el pedido al editor; el recorte muestra «Rehaciendo con tus cambios…» hasta que llega la versión nueva, que vuelve a Para aprobar
+- [ ] Banco: casos de rehacer (ACM y editor)
+
+## Admin del dirigente: sin lo técnico
+- [ ] Pauta: conectar Meta Ads / TikTok Ads / Google Ads solo para el general; TikTok Ads no aparece si TikTok no tiene pauta
+- [ ] Investigación: importar JSON y el nombre del modelo solo para el general; Memoria solo para el general
+
+## Pauta
+- [ ] Detalle semana a semana plegado (las primeras semanas + «ver todas») y el eje del gráfico legible
+
+## Celular y sombra
+- [ ] Encabezado compacto y pestañas que entran en el celular; «Subir video» en vez de «Arrastrá» en pantallas táctiles
+- [ ] Sombra: texto sin «Para aprobar»; cada crudo dice en qué va (en el editor, N ediciones, aprobadas, publicadas) y la fecha legible
+
+## Cierre
+- [ ] Banco completo, recorrido de nuevo con los cuatro roles en la copia local, push (Gero da el ok)

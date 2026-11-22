@@ -28,6 +28,15 @@ export function crearEditor({ token, db, estudio, acm, publicUrl, dir, hooks = {
     const id = runner.encolar({ project_id: Number(b.project_id), reel_id: Number(b.reel_id), url: b.url, duracion_s: Number(b.duracion_s) || null, aprendizajes_url: b.aprendizajes_url });
     res.status(202).json({ id });
   });
+  // una persona rechazó una edición en ACM y pidió rehacerla con cambios
+  app.post('/rehacer', auth, (req, res) => {
+    const b = req.body || {};
+    if (!String(b.edicion_id || '').trim() || !String(b.pedido || '').trim()) return res.status(400).json({ error: 'Faltan edicion_id o pedido' });
+    if (b.url && !/^https?:\/\//.test(String(b.url))) return res.status(400).json({ error: 'La url del crudo no es válida' });
+    const ok = runner.pedirRehacer({ edicion_id: String(b.edicion_id), pedido: String(b.pedido).slice(0, 2000), url: b.url ? String(b.url) : '' });
+    if (!ok) return res.status(404).json({ error: 'No encuentro esa edición en el editor' });
+    res.status(202).json({ ok: true });
+  });
   app.get('/trabajos/:id', auth, (req, res) => {
     const t = runner.trabajo(Number(req.params.id));
     if (!t) return res.status(404).json({ error: 'No existe' });
@@ -51,7 +60,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     estudio: crearEstudio({ url: process.env.ESTUDIO_URL, empresa: process.env.ESTUDIO_EMPRESA, clave: process.env.ESTUDIO_CLAVE }),
     acm: crearAcm({ url: process.env.ACM_URL, token: process.env.EDITOR_TOKEN }),
     // Tarea 6: momentos y recetas con Claude (sin ANTHROPIC_API_KEY el trabajo termina en «error» con el motivo). Tarea 7: revisar
-    hooks: crearCriterio({ claude: crearClaude() }),
+    hooks: crearCriterio({ claude: crearClaude() }), // incluye ajustar (rehacer a pedido)
   });
   const srv = app.listen(Number(process.env.PORT || 4000), () => console.log(`Editor en http://localhost:${srv.address().port}`));
   runner.arrancar();

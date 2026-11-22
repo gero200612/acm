@@ -36,5 +36,7 @@ export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn 
     estado: (reel_id, estado, detalle = '') => post('/api/editor/estado', { reel_id, estado, detalle }),
     // {crudo_id, clip_id, moment, recipe, caption, hashtags, file_url, cover_url, duration, review, expires_at?}
     edicion: (payload) => post('/api/editor/edicion', payload),
+    // un rehacer pedido por una persona no salió: ACM lo muestra con el motivo
+    rehecho: (payload) => post('/api/editor/rehecho', payload),
   };
 }

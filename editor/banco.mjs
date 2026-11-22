@@ -60,11 +60,12 @@ async function estudioFalso(opc = {}) {
 
 // ACM falso: guarda los avisos y, al recibir una edición, baja el video del link (como hace ACM de verdad)
 async function acmFalso() {
-  const estados = [], ediciones = [];
+  const estados = [], ediciones = [], rehechos = [];
   const srv = await escuchar(async (req, res) => {
     const b = await cuerpo(req);
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return json(res, 401, { error: 'sin token' });
     if (req.url === '/api/editor/estado') { const o = JSON.parse(b); estados.push(`${o.reel_id}:${o.estado}`); return json(res, 200, { ok: true }); }
+    if (req.url === '/api/editor/rehecho') { rehechos.push(JSON.parse(b)); return json(res, 200, { ok: true }); }
     if (req.url === '/api/editor/edicion') {
       const o = JSON.parse(b);
       const f = await fetch(o.file_url); o.bajado = f.ok ? (await f.arrayBuffer()).byteLength : -f.status;
@@ -74,7 +75,7 @@ async function acmFalso() {
     if (req.method === 'GET' && req.url.split('?')[0] === '/api/editor/aprendizajes/7') return json(res, 200, { project_id: 7, aprendizajes: [{ ritmo: 'rapido', horario: { instagram: '20:00' } }], investigacion: ['Candidato X: pide más seguridad'] });
     json(res, 404, {});
   });
-  return { ...srv, estados, ediciones };
+  return { ...srv, estados, ediciones, rehechos };
 }
 
 async function montar({ estudioOpc, hooks } = {}) {
@@ -151,6 +152,51 @@ const casos = [
       const g = await (await fetch(`${m.srv.base}/trabajos/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } })).json();
       eq(g.estado, 'listo', 'GET del trabajo');
     } finally { await m.fin(); }
+  }],
+  ['Rehacer', 'Rehacer a pedido: la edición rechazada se vuelve a editar con lo pedido y llega a ACM como versión nueva del mismo recorte, pendiente', async () => {
+    const m = await montar({ hooks: { ...hooksDePrueba, armarRecetas: async () => [{ subtitulos: 'karaoke', musica: { clima: 'energico', volumen: 0.25 }, ritmo: 'rapido', zoom: true, largo_s: 12, gancho: { desde_s: 0 }, variables: { subtitulos: 'karaoke', musica: 'energico', ritmo: 'rapido' } }] } });
+    try {
+      m.editor.runner.arrancar({ cadaMs: 20 });
+      const id = (await (await post(m, '/trabajos', TRABAJO)).json()).id;
+      await esperarEstado(m, id, ['listo', 'error']);
+      const vieja = m.acm.ediciones[0];
+      eq((await post(m, '/rehacer', { edicion_id: vieja.edicion_id, pedido: 'x' }, null)).status, 401, 'sin token');
+      eq((await post(m, '/rehacer', { edicion_id: vieja.edicion_id })).status, 400, 'sin pedido');
+      eq((await post(m, '/rehacer', { edicion_id: 'no-existe', pedido: 'más corto' })).status, 404, 'edición desconocida');
+      eq((await post(m, '/rehacer', { edicion_id: vieja.edicion_id, pedido: 'Sacale la música y que los subtítulos no tapen la cara', url: 'http://r2.test/crudo-nuevo.mp4' })).status, 202, 'aceptado');
+      await m.editor.runner.esperarRehacer();
+      eq(m.acm.ediciones.length, 2, 'llegó una versión más');
+      const n = m.acm.ediciones[1];
+      eq([n.clip_id, n.rehace_de, n.review, n.bajado > 0], [vieja.clip_id, vieja.edicion_id, 'pendiente', true], 'mismo recorte, rehace la vieja, espera a una persona');
+      yes(n.edicion_id !== vieja.edicion_id, 'uuid nuevo');
+      eq([n.recipe.musica, n.recipe.variables.musica, n.recipe.subtitulos], [null, 'sin', 'minimo'], 'la receta cambió según el pedido');
+      yes(/música/.test(n.entendido), `dice qué entendió: ${n.entendido}`);
+      eq(m.est.pedidos('/v1/editar-recorte').at(-1).url, 'http://r2.test/crudo-nuevo.mp4', 'edita con el link nuevo del crudo');
+    } finally { await m.fin(); }
+  }],
+  ['Rehacer', 'Si el rehacer falla (el Estudio no anda), ACM recibe el aviso con el motivo', async () => {
+    const m = await montar({ hooks: hooksDePrueba });
+    try {
+      m.editor.runner.arrancar({ cadaMs: 20 });
+      const id = (await (await post(m, '/trabajos', TRABAJO)).json()).id;
+      await esperarEstado(m, id, ['listo', 'error']);
+      m.editor.runner.detener();
+      await m.est.close();
+      eq((await post(m, '/rehacer', { edicion_id: m.acm.ediciones[0].edicion_id, pedido: 'más corto' })).status, 202, 'aceptado');
+      await m.editor.runner.esperarRehacer();
+      eq(m.acm.rehechos.length, 1, 'avisó a ACM'); eq([m.acm.rehechos[0].edicion_id, m.acm.rehechos[0].ok], [m.acm.ediciones[0].edicion_id, false], 'qué edición y que no salió');
+      yes(m.acm.rehechos[0].detalle, 'con el motivo');
+    } finally { await m.fin().catch(() => {}); }
+  }],
+  ['Rehacer', 'ajustePorPalabras entiende lo básico sin Claude y aplicarAjuste respeta 12 s y el momento', async () => {
+    const { ajustePorPalabras, aplicarAjuste } = await import('./ajuste.js');
+    const rec = { subtitulos: 'karaoke', musica: { clima: 'energico', volumen: 0.25 }, ritmo: 'normal', largo_s: 40, gancho: { desde_s: 10 }, variables: {} };
+    const c = ajustePorPalabras('Es muy largo, hacelo más corto y sin música', rec);
+    eq([c.largo, c.musica], ['corto', 'sin'], 'entiende corto y sin música');
+    const n = aplicarAjuste(rec, c, { inicio_s: 10, fin_s: 50 });
+    eq([n.musica, n.largo_s], [null, 18], 'corto = 45 % de lo disponible (40 s)');
+    eq(aplicarAjuste(rec, { largo_s: 3 }, { inicio_s: 10, fin_s: 50 }).largo_s, 12, 'nunca menos de 12 s');
+    eq(aplicarAjuste(rec, { recortar_inicio_s: 5 }, { inicio_s: 10, fin_s: 50 }).gancho.desde_s, 15, 'recortar el arranque corre el inicio');
   }],
   ['Tubería', 'Con los rellenos (sin momentos) el trabajo termina en sin_momentos', async () => {
     const m = await montar();

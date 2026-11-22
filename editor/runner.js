@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { repo, TERMINALES } from './db.js';
 import { corregirReceta as corregirPorDefecto } from './analista.js';
+import { ajustePorPalabras, aplicarAjuste } from './ajuste.js';
 
 // lo que el Estudio no conoce (su esquema es estricto) se saca antes de mandarle la receta
 const META_RECETA = ['explora', 'caption', 'hashtags', 'variables'];
@@ -29,7 +30,7 @@ export const rellenos = {
 };
 const MAX_RECETAS = 3;
 
-export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegirMomentos, armarRecetas = rellenos.armarRecetas, revisar = rellenos.revisar, corregirReceta = corregirPorDefecto, publicUrl = '', dir = '', log = console.log } = {}) {
+export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegirMomentos, armarRecetas = rellenos.armarRecetas, revisar = rellenos.revisar, corregirReceta = corregirPorDefecto, ajustar = async ({ receta, pedido, momento }) => { const c = ajustePorPalabras(pedido, receta); return { receta: aplicarAjuste(receta, c, momento), entendido: c.entendido }; }, publicUrl = '', dir = '', log = console.log } = {}) {
   const R = repo(db);
   if (dir) fs.mkdirSync(dir, { recursive: true });
   let andando = false, parar = false, despertar = null, motivoSinMomentos = '';
@@ -153,6 +154,55 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     }
   }
 
+  // Rehacer a pedido de una persona (rechazó en ACM y tildó «Rehacer con estos cambios»): se busca la edición por su uuid,
+  // el pedido se traduce a la receta, se edita de nuevo y se entrega como versión NUEVA del mismo recorte (rehace_de = la rechazada).
+  // Van de a uno, aparte de los trabajos; si algo falla, se le avisa a ACM con el motivo.
+  const pedidosRehacer = [];
+  let rehaciendo = false;
+  function buscarEdicion(uuid) {
+    const e = db.prepare('SELECT * FROM ediciones WHERE uuid = ?').get(String(uuid || ''));
+    if (!e) return null;
+    const t = R.trabajo(e.trabajo_id), m = R.momentos(e.trabajo_id).find((x) => x.id === e.momento_id);
+    return t && m ? { e: R.ediciones(t.id).find((x) => x.id === e.id), t, m } : null;
+  }
+  async function rehacerPedido({ edicion_id, pedido, url }) {
+    const f = buscarEdicion(edicion_id);
+    if (!f) throw new Error('No encuentro esa edición en el editor');
+    const { e, m } = f, t = { ...f.t, url: url || f.t.url };
+    const palabras = (t.transcripcion?.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
+    const { receta, entendido } = await ajustar({ receta: e.receta, pedido, momento: m, palabras });
+    const res = await estudio.editarRecorte({ url: t.url, palabras, inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(receta), ...tramosDe(m) });
+    const idx = (db.prepare('SELECT max(idx) AS n FROM ediciones WHERE momento_id = ?').get(m.id)?.n ?? 0) + 1;
+    const nid = R.guardarEdicion(t.id, m.id, idx, receta), nueva = R.ediciones(t.id).find((x) => x.id === nid);
+    const base = crypto.randomUUID();
+    const archivo = await estudio.descargar(res.archivo, path.join(dir, `${base}.mp4`));
+    const portada = res.portada ? await estudio.descargar(res.portada, path.join(dir, `${base}.jpg`)).catch(() => '') : '';
+    const resultado = { ...res, archivo_local: path.basename(archivo), portada_local: portada ? path.basename(portada) : '' };
+    R.edicion(nid, { resultado, estado: 'editada', revision: { pedido: String(pedido).slice(0, 2000), rehace_de: e.uuid, entendido } });
+    const pub = publicUrl.replace(/\/+$/, '');
+    await acm.edicion({
+      crudo_id: t.reel_id, clip_id: m.clip_id, moment: { inicio_s: m.inicio_s, fin_s: m.fin_s, ...m.datos }, recipe: paraAcm(receta),
+      edicion_id: nueva.uuid, rehace_de: e.uuid, entendido, caption: receta.caption ?? '', hashtags: receta.hashtags ?? '',
+      file_url: `${pub}/entregas/${resultado.archivo_local}`, cover_url: resultado.portada_local ? `${pub}/entregas/${resultado.portada_local}` : '',
+      duration: res.duracion_s, review: 'pendiente', // lo que pidió una persona lo vuelve a mirar una persona
+    });
+    R.edicion(nid, { estado: 'entregada' });
+    for (const x of [resultado.archivo_local, resultado.portada_local].filter(Boolean)) fs.rm(unArchivo(x), { force: true }, () => {});
+    return nueva.uuid;
+  }
+  async function vueltaRehacer() {
+    if (rehaciendo) return; rehaciendo = true;
+    try {
+      for (let p; (p = pedidosRehacer.shift());) {
+        try { await rehacerPedido(p); }
+        catch (err) {
+          log(`[rehacer ${p.edicion_id}] falló: ${err.message}`);
+          try { await acm.rehecho?.({ edicion_id: p.edicion_id, ok: false, detalle: err.message.slice(0, 400) }); } catch {}
+        }
+      }
+    } finally { rehaciendo = false; }
+  }
+
   // procesa un trabajo de punta a punta (o desde donde quedó)
   async function procesar(id) {
     let t = R.trabajo(id);
@@ -188,6 +238,10 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
   }
   return {
     procesar,
+    rehacerPedido,
+    // encola un pedido de rehacer; false si la edición no existe en el editor
+    pedirRehacer(p) { if (!buscarEdicion(p.edicion_id)) return false; pedidosRehacer.push(p); vueltaRehacer(); return true; },
+    esperarRehacer: async () => { while (rehaciendo || pedidosRehacer.length) await new Promise((r) => setTimeout(r, 20)); },
     encolar(datos) { const id = R.crearTrabajo(datos); despertar?.(); return id; },
     trabajo: R.trabajo,
     pendientes: () => R.pendientes(),
