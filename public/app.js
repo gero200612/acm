@@ -100,7 +100,9 @@ const isGeneral = () => state.me?.role === 'general', isContent = () => ['sombra
 // a quién le llega: en un club, socios; en política, vecinos
 const gente = (p = state.project, pl = true) => p?.kind === 'politica' ? (pl ? 'vecinos' : 'vecino') : (pl ? 'socios' : 'socio');
 const ROLE_NAME = { general: 'Administrador general', admin: 'Administrador del dirigente', editor: 'Editor del dirigente', sombra: 'Sombra del dirigente' };
-try { state.calMode = localStorage.getItem('acm.calMode') || 'mes'; } catch { state.calMode = 'mes'; }
+// en el celular el calendario arranca en Lista (la grilla del mes queda en iconitos)
+const calDef = () => { try { return matchMedia('(max-width: 560px)').matches ? 'lista' : 'mes'; } catch { return 'mes'; } };
+try { state.calMode = localStorage.getItem('acm.calMode') || calDef(); } catch { state.calMode = calDef(); }
 
 async function loadProjects() { state.projects = await api('/api/projects'); }
 async function loadProject(id) {
@@ -1316,7 +1318,7 @@ function pautaOut(p, c) {
         <line class="ref" x1="0" x2="${VW}" y1="${refY}" y2="${refY}"/>
         ${W.map((w) => `<g class="pz-bar"><rect x="${w.i * bw + bw * 0.2}" y="${y(w.cum)}" width="${bw * 0.6}" height="${Math.max(has ? 2 : 0, H - padB - y(w.cum))}" rx="4"/><rect class="hit" x="${w.i * bw}" y="0" width="${bw}" height="${H - padB}"><title>${fmtShort(ymd(w.d0))} al ${fmtShort(ymd(w.d1))}: ${fmt(w.cum, 1)} vistas por ${gente(state.project, false)} acumuladas</title></rect></g>`).join('')}
       </svg>
-      <div class="pz-xl" style="grid-template-columns:repeat(${W.length},1fr)">${W.map((w) => `<span>${has ? `<b>${fmt(w.cum, 1)}</b>` : ''}${w.d0.getDate()}/${w.d0.getMonth() + 1}</span>`).join('')}</div>
+      <div class="pz-xl" style="grid-template-columns:repeat(${W.length},1fr)">${(() => { const k = Math.ceil(W.length / 12); return W.map((w) => (w.i % k === 0 || w.i === W.length - 1) && !(w.i !== W.length - 1 && W.length - 1 - w.i < k / 2) ? `<span>${has ? `<b>${fmt(w.cum, 1)}</b>` : ''}${w.d0.getDate()}/${w.d0.getMonth() + 1}</span>` : '<span></span>').join(''); })()}</div>
       <p class="pz-ref-t">- - - 8 vistas: el mensaje se instala</p>
     </section>`;
 }
@@ -1326,9 +1328,10 @@ function pautaTabla(p, c) {
   return `<div class="card-head"><h2 class="h2">Detalle semana a semana</h2><span class="small muted">La inversión se reparte pareja entre los días · ${fmt(c.people)} ${gente()} alcanzados</span></div>
   <div class="table-wrap"><table class="list pz-table">
     <thead><tr><th>Semana</th><th class="r">Días</th><th class="r">Inversión</th><th class="r">Pauta</th><th class="r">IVA</th><th class="r">Vistas</th><th class="r">Vistas por ${gente(state.project, false)}</th><th class="r">Acumulado por ${gente(state.project, false)}</th></tr></thead>
-    <tbody>${W.map((w) => `<tr><td>${fmtShort(ymd(w.d0))} – ${fmtShort(ymd(w.d1))}</td><td class="r num">${w.dd}</td><td class="r num">${u(w.budget)}</td><td class="r num">${u(w.net)}</td><td class="r num">${u(w.iva)}</td><td class="r num">${n(w.imps)}</td><td class="r num">${n(w.per, 1)}</td><td class="r num">${n(w.cum, 1)}</td></tr>`).join('')}</tbody>
+    <tbody>${W.filter((w, i) => state.pzAll || W.length <= 10 || i < 8).map((w) => `<tr><td>${fmtShort(ymd(w.d0))} – ${fmtShort(ymd(w.d1))}</td><td class="r num">${w.dd}</td><td class="r num">${u(w.budget)}</td><td class="r num">${u(w.net)}</td><td class="r num">${u(w.iva)}</td><td class="r num">${n(w.imps)}</td><td class="r num">${n(w.per, 1)}</td><td class="r num">${n(w.cum, 1)}</td></tr>`).join('')}</tbody>
     <tfoot><tr><td>Total</td><td class="r num">${c.days}</td><td class="r num">${u(c.budget)}</td><td class="r num">${u(c.net)}</td><td class="r num">${u(c.budget - c.net)}</td><td class="r num">${n(c.imps)}</td><td class="r num">${n(c.freq, 1)}</td><td class="r num">${n(c.freq, 1)}</td></tr></tfoot>
   </table></div>
+  ${W.length > 10 ? `<button class="btn sm" data-act="pz-all" style="margin-top:10px">${state.pzAll ? 'Ver menos' : `Ver las ${W.length} semanas`}</button>` : ''}
   <p class="small muted" style="margin-top:12px">Es solo la plata que cobra Meta por mostrar los videos; la plataforma va aparte. TikTok no acepta propaganda política paga. Meta exige verificar al anunciante y mostrar quién paga.</p>`;
 }
 
@@ -2396,6 +2399,7 @@ document.addEventListener('click', async (e) => {
       case 'pause-account': { const a = state.accounts.find((x) => x.id === id); await api(`/api/accounts/${id}`, { method: 'PUT', body: { status: a.status === 'pausada' ? 'activa' : 'pausada' } }); toast(a.status === 'pausada' ? 'Cuenta reanudada' : 'Cuenta pausada: no recibe publicaciones nuevas'); render(); break; }
       case 'del-account': if (await confirmBox('Borrar cuenta', 'Se quitan también sus publicaciones programadas.')) { await api(`/api/accounts/${id}`, { method: 'DELETE' }); render(); } break;
       case 'del-reel': if (await confirmBox('Borrar reel', 'Se borra el video y sus publicaciones programadas.')) { await api(`/api/reels/${id}`, { method: 'DELETE' }); render(); } break;
+      case 'pz-all': state.pzAll = !state.pzAll; render(); break;
       case 'ap-dec': {
         const ed = el.closest('.ap-ed'); ed.dataset.dec = el.dataset.v;
         $$('.ap-dec button', ed).forEach((b) => b.setAttribute('aria-pressed', String(b === el)));

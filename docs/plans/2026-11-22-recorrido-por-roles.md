@@ -26,11 +26,11 @@ Gero, 22/11/2026: recorrido completo como dueño, admin del dirigente, editor y 
 - [x] Investigación: importar JSON y el nombre del modelo solo para el general; Memoria solo para el general
 
 ## Pauta
-- [ ] Detalle semana a semana plegado (las primeras semanas + «ver todas») y el eje del gráfico legible
+- [x] Detalle semana a semana plegado (las primeras semanas + «ver todas») y el eje del gráfico legible
 
 ## Celular y sombra
-- [ ] Encabezado compacto y pestañas que entran en el celular; «Subir video» en vez de «Arrastrá» en pantallas táctiles
-- [ ] Sombra: texto sin «Para aprobar»; cada crudo dice en qué va (en el editor, N ediciones, aprobadas, publicadas) y la fecha legible
+- [x] Encabezado compacto y pestañas que entran en el celular; «Subir video» en vez de «Arrastrá» en pantallas táctiles
+- [x] Sombra: texto sin «Para aprobar»; cada crudo dice en qué va (en el editor, N ediciones, aprobadas, publicadas) y la fecha legible
 
 ## Cierre
 - [ ] Banco completo, recorrido de nuevo con los cuatro roles en la copia local, push (Gero da el ok)
