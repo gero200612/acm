@@ -734,7 +734,7 @@ function cuentasView() {
 // el barrio o lugar del crudo: el editor lo dibuja como etiqueta en el video (con los ya usados como sugerencia)
 function barrioField() {
   const usados = [...new Set((state.reels || []).map((r) => r.etiqueta).filter(Boolean))].slice(0, 20);
-  return `<label class="field up-barrio">Barrio o lugar <span class="hint">sale como etiqueta en el video; opcional</span><input class="input" id="up-etiqueta" maxlength="30" placeholder="Ej.: Beccar" autocomplete="off" list="barrios-dl" value="${esc(state.upEtiqueta || '')}"></label>
+  return `<label class="field up-barrio"><span class="cr-lbl">¿Dónde se grabó?</span><input class="input" id="up-etiqueta" maxlength="30" placeholder="Barrio o lugar, ej.: Beccar" autocomplete="off" list="barrios-dl" value="${esc(state.upEtiqueta || '')}"><span class="hint">Opcional: sale como etiqueta en el video.</span></label>
     <datalist id="barrios-dl">${usados.map((b) => `<option value="${esc(b)}">`).join('')}</datalist>`;
 }
 const tactil = () => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } };
@@ -761,13 +761,23 @@ const CRUDO_ESTADO = { en_cola: 'En cola', transcribiendo: 'Transcribiendo', bus
 function crudosView() {
   state.upKind = 'crudo';
   const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
-  const list = state.reels.length ? `<div class="table-wrap"><table class="list crudos-t"><thead><tr><th>Crudo</th><th>Subido</th><th>Estado</th></tr></thead><tbody>${state.reels.map((r) => `<tr>
-    <td>${esc(r.title)}${r.etiqueta ? ` <span class="chip nodot">${esc(r.etiqueta)}</span>` : ''}</td><td class="small muted nowrap">${esc(cuando(new Date(String(r.created_at || '').replace(' ', 'T') + 'Z')))}</td>
-    <td>${(([c, t]) => `<span class="chip ${c}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(t)}</span>`)(crudoEstado(r))}</td></tr>`).join('')}</tbody></table></div>`
-    : '<p class="muted" style="margin-top:12px">Todavía no subiste crudos.</p>';
-  return `<section class="card"><div class="card-head"><div><h2 class="h2">Subir crudos</h2><p class="small muted">Videos sin editar, tal como se grabaron. ${isEditor() ? 'El editor saca las ediciones y aparecen en «Para aprobar».' : 'El editor saca las ediciones; acá ves en qué va cada uno.'}</p></div></div>
-    ${barrioField()}${up}<label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}${dropText('crudos')}${tactil() ? '' : `<p class="small">o tocá para elegirlos · MP4 o MOV, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p>`}</label>
-    ${list}</section>`;
+  const fecha = (r) => cuando(new Date(String(r.created_at || '').replace(' ', 'T') + 'Z'));
+  const item = (r) => { const [c, t] = crudoEstado(r); return `<li class="cr-item">
+      <span class="cr-thumb">${r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : `<video src="/media/${esc(r.file)}#t=1" preload="metadata" muted playsinline></video>`}</span>
+      <div class="cr-body"><b class="cr-title">${esc(r.title)}</b>
+        <span class="cr-meta">${r.etiqueta ? `<span class="chip nodot">${icon('home', 12)} ${esc(r.etiqueta)}</span>` : ''}<span class="small muted">Subido ${esc(fecha(r))}</span></span>
+        <span class="chip ${c} cr-state" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(t)}</span></div></li>`; };
+  const list = state.reels.length ? `<ul class="cr-list">${state.reels.map(item).join('')}</ul>` : '<p class="muted cr-empty">Todavía no subiste crudos. Cuando subas uno, acá vas a ver en qué va.</p>';
+  return `<div class="cr-grid">
+    <section class="card cr-up"><h2 class="h2">Subir un crudo</h2>
+      <p class="small muted">El video tal como se grabó. ${isEditor() ? 'El editor saca las ediciones y aparecen en «Para aprobar».' : 'El editor saca las ediciones.'}</p>
+      <div class="cr-step"><span class="cr-n">1</span><div class="grow">${barrioField()}</div></div>
+      <div class="cr-step"><span class="cr-n">2</span><div class="grow"><span class="cr-lbl">Elegí el video</span>
+        ${up}<label class="drop cr-drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden><span class="cr-ico">${icon('up', 26)}</span>${dropText('crudos')}${tactil() ? '' : `<p class="small">o hacé clic para elegirlos · MP4 o MOV, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p>`}</label></div></div>
+      <p class="small muted cr-tip">Vertical, con el celular quieto y cerca de quien habla, sin música de fondo.</p>
+    </section>
+    <section class="card cr-mine"><div class="card-head"><h2 class="h2">Tus crudos</h2>${state.reels.length ? `<span class="small muted">${state.reels.length}</span>` : ''}</div>${list}</section>
+  </div>`;
 }
 
 // ---------- Usuarios ----------
