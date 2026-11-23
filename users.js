@@ -149,7 +149,8 @@ export function mediaAllowed(db, user, file) {
 export const scopeOf = (user) => (user.role === 'general' ? null : [user.project_id]);
 
 // Lo que ve el equipo de contenido (sombra o editor) de su proyecto: nada de números (padrón, pauta, cuentas, publicaciones).
-export const sombraProject = (p) => ({ id: p.id, name: p.name, role: p.role, org: p.org, color: p.color, photo: p.photo, review_mode: p.review_mode, review_pending: p.review_pending, kind: p.kind });
+export const sombraProject = (p) => ({ id: p.id, name: p.name, role: p.role, org: p.org, color: p.color, photo: p.photo, review_mode: p.review_mode, review_pending: p.review_pending, kind: p.kind,
+  publicos: (Array.isArray(p.publicos) ? p.publicos : []).map(({ clave, nombre }) => ({ clave, nombre })) }); // para elegir el público al subir un crudo
 export const sombraReel = (r) => ({ id: r.id, title: r.title, kind: r.kind, file: r.file, cover: r.cover, size: r.size, duration: r.duration, status: r.status, status_detail: r.status_detail, created_at: r.created_at, source_id: r.source_id, etiqueta: r.etiqueta, publico: r.publico });
 
 // ---------- rutas de usuarios ----------
