@@ -1530,3 +1530,24 @@ kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 
 .cr-state { white-space: normal; }
 .cr-empty { padding: 18px 0 6px; }
 @media (max-width: 900px) { .cr-grid { grid-template-columns: 1fr; } }
+
+/* Subir crudos: una franja ancha para subir (no un chat) y la lista abajo */
+.cr-page { display: flex; flex-direction: column; gap: 18px; }
+.cr-band { display: flex; align-items: center; gap: 18px; padding: 22px 24px; border: 2px dashed #f3c9b5; border-radius: 16px; background: #fffaf7; cursor: pointer; transition: background .15s, border-color .15s; }
+.cr-band:hover, .cr-band.over { background: #fff3ec; border-color: var(--blue); }
+.cr-band .cr-ico { flex: none; }
+.cr-band-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cr-band-t b { font-size: 17px; }
+.cr-band-b { flex: none; pointer-events: none; }
+.cr-mine .cr-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
+.cr-mine .cr-item + .cr-item { border-top: 0; }
+.cr-mine .cr-item { border-bottom: 1px solid var(--line-2); }
+.cr-ask { gap: 16px; }
+.cr-pubs { display: flex; gap: 8px; flex-wrap: wrap; }
+.cr-pubs .aj-net input:checked + span { border-color: var(--blue); }
+.cr-ask-b { justify-content: flex-end; gap: 8px; margin-top: 4px; }
+@media (max-width: 720px) {
+  .cr-band { flex-direction: column; text-align: center; padding: 22px 18px; gap: 10px; }
+  .cr-band-b { width: 100%; justify-content: center; }
+  .cr-mine .cr-list { grid-template-columns: 1fr; }
+}

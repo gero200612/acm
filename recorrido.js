@@ -669,6 +669,13 @@ export function recorridoCases(sb) {
       const ej = await sb.box.editorApi('/api/editor/edicion', { ...base, clip_id: 'clip-pub-j', edicion_id: '0a1b2c3d-0000-4000-8000-000000000901', moment: { inicio_s: 1, fin_s: 9, publico: 'jovenes' } });
       const ex = await sb.box.editorApi('/api/editor/edicion', { ...base, clip_id: 'clip-pub-x', edicion_id: '0a1b2c3d-0000-4000-8000-000000000902', moment: { inicio_s: 1, fin_s: 9, publico: 'chicos' } });
       eq([ej.j?.publico, ex.j?.publico], ['jovenes', ''], 'la edición guarda el público válido');
+      const vid = () => [[new Blob([fakeMp4(1080, 1920, 7)], { type: 'video/mp4' }), 'crudo-pub.mp4']];
+      const cj = (await api('POST', `/api/projects/${c.p}/reels`, form({ kind: 'crudo', publico: 'jovenes', etiqueta: 'Beccar', files: vid() }), true)).j[0];
+      const cx = (await api('POST', `/api/projects/${c.p}/reels`, form({ kind: 'crudo', publico: 'chicos', files: vid() }), true)).j[0];
+      eq([cj.publico, cj.etiqueta, cx.publico], ['jovenes', 'Beccar', ''], 'el crudo guarda el público elegido (opcional; uno inventado no)');
+      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}?crudo=${cj.id}`)).j?.publico_crudo, { clave: 'jovenes', nombre: 'Jóvenes' }, 'al editor le llega como pista');
+      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}?crudo=${cx.id}`)).j?.publico_crudo, null, 'sin público, nada');
+      for (const x of [cj, cx]) await api('DELETE', `/api/reels/${x.id}`);
       const acc = (await api('POST', `/api/projects/${c.p}/accounts`, { network: 'youtube' })).j;
       eq((await api('PUT', `/api/accounts/${acc.id}`, { publico: 'chicos' })).status, 400, 'público que no existe');
       eq((await api('PUT', `/api/accounts/${acc.id}`, { publico: 'mayores' })).j?.publico, 'mayores', 'la cuenta le habla a mayores');

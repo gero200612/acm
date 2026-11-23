@@ -265,7 +265,9 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
     // lo aprendido de cada público por separado (sus aprobaciones y comparaciones): el editor arma las versiones de ese público con esto
     por_publico: Object.fromEntries(publicosDe(pid).map((x) => [x.clave, winningVariables(db, pid, { publico: x.clave })])),
     // la marca del proyecto y, si el editor pregunta por un crudo, su etiqueta (el barrio)
-    marca: { ...marcaDe(pid), ...(() => { const e = Number(req.query.crudo) > 0 ? get("SELECT etiqueta FROM reels WHERE id = ? AND project_id = ? AND kind = 'crudo'", Number(req.query.crudo), pid)?.etiqueta : ''; return e ? { etiqueta: e } : {}; })() } });
+    marca: { ...marcaDe(pid), ...(() => { const e = Number(req.query.crudo) > 0 ? get("SELECT etiqueta FROM reels WHERE id = ? AND project_id = ? AND kind = 'crudo'", Number(req.query.crudo), pid)?.etiqueta : ''; return e ? { etiqueta: e } : {}; })() },
+    // para qué público dijo el equipo que es este crudo (pista, no obligación)
+    publico_crudo: (() => { const k = Number(req.query.crudo) > 0 ? get("SELECT publico FROM reels WHERE id = ? AND project_id = ? AND kind = 'crudo'", Number(req.query.crudo), pid)?.publico : ''; const x = k && publicosDe(pid).find((y) => y.clave === k); return x ? { clave: x.clave, nombre: x.nombre } : null; })() });
 });
 // el admin de un dirigente no ve las credenciales de anuncios (qué está cargado y los IDs): eso lo maneja el general
 const sinAds = ({ ads, ...p }) => p;
@@ -454,6 +456,8 @@ function limpiarMarca(v) {
 }
 // la etiqueta de un crudo (el barrio o lugar): se ve arriba en todo el video editado
 const etiquetaDe = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+// el público que el equipo eligió al subir un crudo (opcional): tiene que ser uno del proyecto
+const publicoDe = (pid, v) => (publicosDe(pid).some((x) => x.clave === v) ? String(v) : '');
 const marcaDe = (pid) => { try { return JSON.parse(get('SELECT marca FROM projects WHERE id = ?', pid)?.marca || '{}'); } catch { return {}; } };
 // opciones de edición del editor (editor/recetas.js OPCIONES): un público puede quedarse con algunas
 const OPCIONES_EDICION = { gancho: ['directo', 'pregunta', 'adelanto'], subtitulos: ['karaoke', 'placa', 'minimo', 'frase', 'grande'], musica: ['energico', 'calido', 'sin'], ritmo: ['rapido', 'normal', 'lento'], largo: ['completo', 'medio', 'corto'] };
@@ -745,8 +749,8 @@ app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
     const title = (req.body?.title && files.length === 1) ? req.body.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
     const m = probe(f.path) || {};
     const kind = req.body?.kind === 'crudo' || isContent(req.user) ? 'crudo' : 'listo';
-    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind, etiqueta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '');
+    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind, etiqueta, publico) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '', kind === 'crudo' ? publicoDe(Number(req.params.id), req.body?.publico) : '');
     return get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid);
   });
   res.json(out);
@@ -786,8 +790,8 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
     if (!h) return res.status(400).json({ error: `«${it.name}» no terminó de subir` });
     const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
     const title = path.parse(String(it.name || 'reel')).name.replace(/[_-]+/g, ' ');
-    const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage, etiqueta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2', ?)",
-      pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '');
+    const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage, etiqueta, publico) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2', ?, ?)",
+      pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '', kind === 'crudo' ? publicoDe(pid, req.body?.publico) : '');
     if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola', status_at = datetime('now') WHERE id = ?", r.lastInsertRowid);
     out.push(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
   }

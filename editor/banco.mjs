@@ -198,6 +198,13 @@ const casos = [
     eq(aplicarAjuste(rec, { largo_s: 3 }, { inicio_s: 10, fin_s: 50 }).largo_s, 12, 'nunca menos de 12 s');
     eq(aplicarAjuste(rec, { recortar_inicio_s: 5 }, { inicio_s: 10, fin_s: 50 }).gancho.desde_s, 15, 'recortar el arranque corre el inicio');
   }],
+  ['Momentos', 'El público que eligió el equipo al subir el crudo llega al pedido de momentos como pista (y uno que no es del proyecto, no)', async () => {
+    const { usuarioMomentos } = await import('./prompts.js');
+    const P = [{ clave: 'jovenes', nombre: 'Jóvenes' }, { clave: 'mayores', nombre: 'Mayores' }], palabras = [{ inicio_s: 0, fin_s: 1, texto: 'hola' }];
+    yes(/sobre todo para el público «Jóvenes»/.test(usuarioMomentos({ palabras, publicos: P, publicoCrudo: { clave: 'jovenes', nombre: 'Jóvenes' } })), 'con pista');
+    yes(!/sobre todo para el público/.test(usuarioMomentos({ palabras, publicos: P, publicoCrudo: { clave: 'chicos', nombre: 'Chicos' } })), 'público ajeno: sin pista');
+    yes(!/sobre todo para el público/.test(usuarioMomentos({ palabras, publicos: P })), 'sin público: sin pista');
+  }],
   ['Tubería', 'Con los rellenos (sin momentos) el trabajo termina en sin_momentos', async () => {
     const m = await montar();
     try {
