@@ -43,10 +43,11 @@ export function crearEditor({ token, db, estudio, acm, publicUrl, dir, hooks = {
     const { transcripcion, ...resto } = t;
     res.json(resto);
   });
-  // los videos terminados se sirven un rato para que ACM los baje (el nombre es un UUID: no se adivina)
+  // los videos terminados se sirven un rato para que ACM los baje (el nombre es un UUID: no se adivina; con root, que la carpeta
+  // de datos esté adentro de una oculta como ~/.cache no la hace invisible)
   if (dir) app.get('/entregas/:f', (req, res) => {
     if (!/^[0-9a-f-]{36}\.(mp4|jpg)$/.test(req.params.f)) return res.status(404).end();
-    res.sendFile(path.resolve(dir, req.params.f), (e) => { if (e && !res.headersSent) res.status(404).end(); });
+    res.sendFile(req.params.f, { root: path.resolve(dir) }, (e) => { if (e && !res.headersSent) res.status(404).end(); });
   });
   return { app, runner, db };
 }
