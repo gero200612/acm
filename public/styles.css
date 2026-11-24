@@ -1601,3 +1601,13 @@ kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 
   .cm-ed, .ap-ed { flex: 0 0 74%; scroll-snap-align: center; }
   .cm-ed video, .ap-ed video { height: auto; width: 100%; max-height: none; }
 }
+
+/* seleccionar varios reels */
+.rl-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.sel-bar { position: sticky; top: 8px; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--surface); border: 1px solid #4b33c9; border-radius: var(--r); padding: 8px 12px; margin: 10px 0 14px; box-shadow: 0 4px 14px rgba(0,0,0,.12); }
+.sel-bar .spacer { flex: 1; }
+.sel-hit { position: absolute; inset: 0; z-index: 3; background: transparent; border: 2px solid transparent; border-radius: inherit; cursor: pointer; }
+.sel-box { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border-radius: 7px; border: 2px solid #8a8f99; background: rgba(255,255,255,.95); color: transparent; display: flex; align-items: center; justify-content: center; }
+.sel-hit[aria-pressed=true] .sel-box { background: #4b33c9; border-color: #4b33c9; color: #fff; }
+.sel-hit[aria-pressed=true] { border-color: #4b33c9; background: rgba(75,51,201,.07); }
+.cd.sel, .reel.sel { outline: 2px solid #4b33c9; outline-offset: -1px; }

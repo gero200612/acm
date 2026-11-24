@@ -206,6 +206,24 @@ export function recorridoCases(sb) {
       eq([rs.every((r) => r.kind === 'crudo'), rs.some((r) => 'posts' in r)], [true, false], 'solo crudos, sin publicaciones');
       eq((await u('DELETE', `/api/reels/${up.j[0].id}`)).status, 403, 'borrar un reel');
     }],
+    [G('roles'), 'Borrar varios reels: un crudo arrastra sus ediciones; lo de otro proyecto no se toca; la sombra y el editor no borran', async () => {
+      const sube = async (p, kind, n) => (await api('POST', `/api/projects/${p}/reels`, form({ kind, files: Array.from({ length: n }, (_, i) => [new Blob([fakeMp4(1080, 1920, 5 + i)], { type: 'video/mp4' }), `b${kind}${i}.mp4`]) }), true)).j;
+      const [cr] = await sube(c.p, 'crudo', 1), [libre] = await sube(c.p, 'listo', 1), [ajeno] = await sube(c.otro, 'listo', 1), eds = await sube(c.p, 'listo', 2);
+      for (const e of eds) eq((await api('PUT', `/api/reels/${e.id}`, { source_id: cr.id })).status, 200, 'la edición queda atada a su crudo');
+      const ids = async () => new Set([...(await api('GET', `/api/projects/${c.p}/reels`)).j, ...(await api('GET', `/api/projects/${c.otro}/reels`)).j].map((r) => r.id));
+      const dest = `/api/projects/${c.p}/reels/borrar`;
+      for (const [em, pw] of [['som@x.com', 'clave-segura-1'], ['edi@x.com', 'clave-segura-1']]) eq((await (await sb.box.client(em, pw))('POST', dest, { ids: [cr.id] })).status, 403, `${em} no borra varios`);
+      eq((await api('POST', dest, { ids: [] })).status, 400, 'sin ids');
+      eq((await api('POST', dest, { ids: [libre.id, ajeno.id] })).status, 404, 'con un reel de otro proyecto');
+      const antes = await ids();
+      eq([antes.has(libre.id), antes.has(ajeno.id)], [true, true], 'no se borró ninguno, ni el propio');
+      eq((await api('POST', `/api/projects/${c.otro}/reels/borrar`, { ids: [libre.id] })).status, 404, 'tampoco por la ruta del otro proyecto');
+      const ok = await api('POST', dest, { ids: [cr.id, libre.id] });
+      eq([ok.status, ok.j?.borrados], [200, 4], 'borra el crudo, sus 2 ediciones y el listo suelto');
+      const luego = await ids();
+      eq([cr, libre, ...eds, ajeno].map((r) => luego.has(r.id)), [false, false, false, false, true], 'queda solo el del otro proyecto');
+      await api('DELETE', `/api/reels/${ajeno.id}`);
+    }],
     [G('roles'), 'Editor: ve Para aprobar y comenta; sube crudos; no ve números, no mueve el calendario ni toca otro proyecto', async () => {
       const u = await sb.box.client('edi@x.com', 'clave-segura-1');
       eq((await u('GET', '/api/me')).j?.role, 'editor', 'entra como editor');

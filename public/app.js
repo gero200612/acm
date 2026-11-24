@@ -826,7 +826,7 @@ const nTxt = (n, a, b) => `${n} ${n === 1 ? a : b}`;
 function crudoCard(r) {
   const T = crudoTree(r), st = r.status === 'error' ? 's-error' : 'nodot', fecha = cuando(new Date(String(r.created_at || '').replace(' ', 'T') + 'Z'));
   const href = `#/p/${state.project.id}/reel/${r.id}`, ok = state.reels.filter((x) => x.source_id === r.id && x.review === 'aprobado').length;
-  return `<article class="cd" data-id="${r.id}">
+  return `<article class="cd ${selOn() && state.sel.has(r.id) ? 'sel' : ''}" data-id="${r.id}">
     <a class="cd-thumb" href="${href}">${r.archived_at ? '<span class="cd-gone">Video borrado</span>' : coverOf(r)}<span class="cd-tag">Crudo</span></a>
     <div class="cd-body">
       <a class="cd-title" href="${href}">${esc(r.descripcion || r.title)}</a>
@@ -836,7 +836,46 @@ function crudoCard(r) {
       ${T.total ? `<div class="cd-eds">${T.moments.flatMap((m) => m.eds).concat(T.otras).slice(0, 9).map((e) => `<a class="cd-ed rv-${e.review}" href="#/p/${state.project.id}/reel/${e.id}" title="${esc(e.title)}">${coverOf(e)}</a>`).join('')}${T.total > 9 ? `<span class="small muted">+${T.total - 9}</span>` : ''}</div>` : ''}
       <div class="row" style="gap:6px"><a class="btn sm" href="${href}">Ver momentos${T.total ? ' y ediciones' : ''}</a></div>
     </div>
-    <button class="icon-btn danger reel-del" data-act="del-reel" title="Borrar crudo" aria-label="Borrar crudo">${icon('trash', 16)}</button></article>`;
+    ${selMark(r)}</article>`;
+}
+// Seleccionar varios: en ese modo cada tarjeta tiene una casilla (y toda la tarjeta marca/desmarca) en vez del tacho.
+const selOn = () => !!state.sel;
+const selMark = (r) => selOn() ? `<button type="button" class="sel-hit" data-act="sel-one" aria-label="Seleccionar" aria-pressed="${state.sel.has(r.id)}"><span class="sel-box">${icon('check', 14)}</span></button>`
+  : `<button class="icon-btn danger reel-del" data-act="del-reel" title="Borrar ${r.kind === 'crudo' ? 'crudo' : 'reel'}" aria-label="Borrar ${r.kind === 'crudo' ? 'crudo' : 'reel'}">${icon('trash', 16)}</button>`;
+// lo que se ve en el filtro actual: con «Todos», los crudos y los listos que no salen de ningún crudo (las ediciones van dentro de su crudo)
+function selVisibles() {
+  const ALL = state.reels, F = state.reelFilter || 'todos', ids = new Set(ALL.filter((r) => r.kind === 'crudo').map((r) => r.id));
+  return ALL.filter((r) => F === 'crudo' ? r.kind === 'crudo' : F === 'listo' ? r.kind !== 'crudo' : r.kind === 'crudo' || !ids.has(r.source_id)).map((r) => r.id);
+}
+// ids elegidos + las ediciones de cada crudo elegido (es lo que de verdad se borra)
+function selAlcance(ids) {
+  const set = new Set(ids), crudos = state.reels.filter((r) => set.has(r.id) && r.kind === 'crudo');
+  for (const c of crudos) for (const e of state.reels.filter((x) => x.source_id === c.id)) set.add(e.id);
+  const R = state.reels.filter((r) => set.has(r.id));
+  return { R, crudos: crudos.length, ediciones: R.filter((r) => r.kind !== 'crudo' && crudos.some((c) => c.id === r.source_id)).length, posts: R.reduce((a, r) => a + (r.posts || 0), 0) };
+}
+function selBar() {
+  const n = state.sel.size, V = selVisibles(), todo = V.length > 0 && V.every((i) => state.sel.has(i));
+  return `<div class="sel-bar" id="sel-bar"><b>${n === 1 ? '1 seleccionado' : `${n} seleccionados`}</b>
+    <button type="button" class="btn sm" data-act="sel-all">${todo ? 'Quitar todo' : 'Seleccionar todo'}</button><span class="spacer"></span>
+    <button type="button" class="btn sm danger" data-act="sel-del" ${n ? '' : 'disabled'}>${icon('trash', 14)} Borrar</button><button type="button" class="btn sm" data-act="sel-cancel">Cancelar</button></div>`;
+}
+function selSync() {
+  $$('.rl-main [data-act=sel-one]').forEach((b) => { const card = b.closest('[data-id]'), on = state.sel.has(Number(card.dataset.id)); b.setAttribute('aria-pressed', String(on)); card.classList.toggle('sel', on); });
+  const old = $('#sel-bar'); if (old) old.outerHTML = selBar();
+}
+// Un diálogo para uno o varios: dice cuántos se van (con las ediciones de cada crudo) y que no se deshace.
+async function borrarReelsDialog(ids) {
+  const A = selAlcance(ids), n = A.R.length;
+  if (!n) return false;
+  const one = ids.length === 1 ? state.reels.find((r) => r.id === ids[0]) : null;
+  const eds = A.crudos ? `<p>${A.ediciones ? `También se borran sus <b>${nTxt(A.ediciones, 'edición', 'ediciones')}</b>.` : 'Ese crudo no tiene ediciones.'}</p>` : '';
+  const txt = `${one ? `<p>Se borra <b>${esc(one.descripcion || one.title)}</b> con su video.</p>${eds}` : `<p>Se borran <b>${nTxt(n, 'reel', 'reels')}</b> con su video${A.crudos ? ` (${nTxt(A.crudos, 'crudo', 'crudos')} y ${A.ediciones === 1 ? 'su edición' : `sus ${A.ediciones} ediciones`})` : ''}.</p>`}
+    <p>${A.posts ? `También se borran sus <b>${nTxt(A.posts, 'publicación', 'publicaciones')}</b> de ACM, las programadas y las ya publicadas (en las redes no se baja nada).` : 'No tienen publicaciones.'}</p>
+    <p><b>No se puede deshacer.</b></p>`;
+  if (!(await confirmBox(one ? (one.kind === 'crudo' ? 'Borrar crudo' : 'Borrar reel') : `Borrar ${nTxt(n, 'reel', 'reels')}`, txt))) return false;
+  await api(`/api/projects/${state.project.id}/reels/borrar`, { method: 'POST', body: { ids } });
+  return true;
 }
 function reelsView() {
   const ALL = state.reels, F = state.reelFilter || 'todos';
@@ -860,7 +899,7 @@ function reelsView() {
     <p class="note">${state.accounts.length ? `Con <b>Repartir</b> cada reel listo sale en una cuenta por red: el mismo video en dos cuentas de la misma red hace que la red las bloquee. Para más cuentas, subí otra edición del crudo.` : 'Cargá cuentas para poder repartir los reels.'}</p>
   </aside>`;
   const filt = `<div class="kn-chips rl-filter">${[['todos', 'Todos', ALL.length], ['listo', 'Listos', ALL.filter((r) => r.kind !== 'crudo').length], ['crudo', 'Crudos', ALL.filter((r) => r.kind === 'crudo').length]].map(([k, l, n]) => `<button type="button" data-act="reel-filter" data-k="${k}" aria-pressed="${F === k}">${l} <b>${n}</b></button>`).join('')}</div>`;
-  const cardListo = (r) => `<article class="reel" data-id="${r.id}">
+  const cardListo = (r) => `<article class="reel ${selOn() && state.sel.has(r.id) ? 'sel' : ''}" data-id="${r.id}">
     <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está">${r.archived_at ? `<div class="gone">Video borrado<span>se publicó hace más de ${state.storage?.retentionDays ?? 7} días</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video>`}<span class="reel-ver">Ver dónde está</span></a>
     <div class="body">
       <input class="title" value="${esc(r.title)}" data-act="reel-title" aria-label="Título">
@@ -870,14 +909,16 @@ function reelsView() {
         ${r.clip_id && r.review === 'pendiente' ? `<a class="btn sm accent" href="#/p/${state.project.id}/aprobar">Ir a aprobar</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length && repartible(r) ? '' : 'disabled'} ${repartible(r) ? '' : 'title="Una versión rechazada no se reparte"'}>Repartir</button>`}
       </div>
     </div>
-    <button class="icon-btn danger reel-del" data-act="del-reel" title="Borrar reel" aria-label="Borrar reel">${icon('trash', 16)}</button></article>`;
+    ${selMark(r)}</article>`;
   // Todos: cada crudo es una tarjeta con sus ediciones adentro (nunca sueltas); abajo, solo los listos que no salen de ningún crudo.
   // Listos: todos los listos, también las ediciones, para repartirlos. Crudos: solo las tarjetas de crudo.
   const ids = new Set(ALL.filter((r) => r.kind === 'crudo').map((r) => r.id));
   const crudos = R.filter((r) => r.kind === 'crudo'), listos = F === 'todos' ? R.filter((r) => r.kind !== 'crudo' && !ids.has(r.source_id)) : R.filter((r) => r.kind !== 'crudo');
   const grid = R.length ? `${crudos.length ? `<div class="cd-list">${crudos.map(crudoCard).join('')}</div>` : ''}${listos.length ? `${F === 'todos' && crudos.length ? '<h3 class="h3 cd-sec">Listos sin crudo</h3>' : ''}<div class="reels">${listos.map(cardListo).join('')}</div>` : ''}`
     : `<div class="card empty rl-empty"><h2 class="h2">Todavía no hay reels</h2><p>Arrastrá los videos ya editados a la izquierda.</p></div>`;
-  return `<div class="rl">${side}<div class="rl-main">${ALL.length ? filt : ''}${grid}</div></div>`;
+  if (state.sel && !ALL.length) state.sel = null;
+  const top = ALL.length ? `<div class="rl-top">${filt}${selOn() ? '' : `<button type="button" class="btn sm" data-act="sel-start">${icon('check', 14)} Seleccionar</button>`}</div>${selOn() ? selBar() : ''}` : '';
+  return `<div class="rl">${side}<div class="rl-main ${selOn() ? 'selmode' : ''}">${top}${grid}</div></div>`;
 }
 
 // Una publicación se puede mover (arrastrar a otro día) si todavía no salió y faltan más de 15 minutos.
@@ -2513,7 +2554,12 @@ document.addEventListener('click', async (e) => {
       case 'tt-videos': ttVideosDialog(state.accounts.find((a) => a.id === id)); break;
       case 'pause-account': { const a = state.accounts.find((x) => x.id === id); await api(`/api/accounts/${id}`, { method: 'PUT', body: { status: a.status === 'pausada' ? 'activa' : 'pausada' } }); toast(a.status === 'pausada' ? 'Cuenta reanudada' : 'Cuenta pausada: no recibe publicaciones nuevas'); render(); break; }
       case 'del-account': if (await confirmBox('Borrar cuenta', 'Se quitan también sus publicaciones programadas.')) { await api(`/api/accounts/${id}`, { method: 'DELETE' }); render(); } break;
-      case 'del-reel': if (await confirmBox('Borrar reel', 'Se borra el video y sus publicaciones programadas.')) { await api(`/api/reels/${id}`, { method: 'DELETE' }); render(); } break;
+      case 'del-reel': if (await borrarReelsDialog([id])) render(); break;
+      case 'sel-start': state.sel = new Set(); render(); break;
+      case 'sel-cancel': state.sel = null; render(); break;
+      case 'sel-one': state.sel.has(id) ? state.sel.delete(id) : state.sel.add(id); selSync(); break;
+      case 'sel-all': { const V = selVisibles(), todo = V.every((i) => state.sel.has(i)); V.forEach((i) => (todo ? state.sel.delete(i) : state.sel.add(i))); selSync(); break; }
+      case 'sel-del': if (state.sel.size && await borrarReelsDialog([...state.sel])) { state.sel = null; toast('Reels borrados'); render(); } break;
       case 'pz-all': state.pzAll = !state.pzAll; render(); break;
       case 'ap-dec': {
         const ed = el.closest('.ap-ed'); ed.dataset.dec = el.dataset.v;
@@ -2596,7 +2642,7 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('[data-act=reel-title]')) e.target.blur(); });
 
 setInterval(() => { if (state.authed && !document.querySelector('dialog, .cp-host') && state.posts.some((x) => x.status === 'publicando' || (x.status === 'programado' && pdate(x.scheduled_at) <= new Date()))) render(); }, 15000);
-window.addEventListener('hashchange', () => { $('.side')?.classList.remove('open'); render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { state.sel = null; $('.side')?.classList.remove('open'); render(); window.scrollTo(0, 0); });
 // vuelta de «Conectar con TikTok / Google»: el servidor manda ?conexion=ok|error en la dirección
 { const q = new URLSearchParams(location.search); const c = q.get('conexion');
   if (c) { history.replaceState(null, '', location.pathname + location.hash); setTimeout(() => toast(c === 'ok' ? `Cuenta conectada: ${q.get('cuenta') || ''}` : `No se pudo conectar. ${q.get('motivo') || ''}`, c !== 'ok'), 600); } }

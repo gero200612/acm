@@ -935,10 +935,25 @@ app.put('/api/reels/:id', (req, res) => {
   update('reels', r.id, d);
   res.json(get('SELECT * FROM reels WHERE id = ?', r.id));
 });
-app.delete('/api/reels/:id', (req, res) => {
+// Borra el reel con su video y, por la base, sus publicaciones (también las programadas o ya publicadas: de la red no se baja nada). Un crudo arrastra sus ediciones.
+async function borrarReels(rows) {
+  const ids = new Set(rows.map((r) => r.id));
+  for (const r of rows.filter((x) => x.kind === 'crudo')) for (const e of all('SELECT * FROM reels WHERE source_id = ?', r.id)) if (!ids.has(e.id)) { ids.add(e.id); rows.push(e); }
+  for (const r of rows) { await dropFile(r); run('DELETE FROM reels WHERE id = ?', r.id); }
+  return rows.length;
+}
+app.delete('/api/reels/:id', async (req, res) => {
   const r = get('SELECT * FROM reels WHERE id = ?', req.params.id);
-  if (r) { dropFile(r); run('DELETE FROM reels WHERE id = ?', r.id); }
-  res.json({ ok: true });
+  const n = r ? await borrarReels([r]) : 0;
+  res.json({ ok: true, borrados: n });
+});
+// Varios juntos, todos del mismo proyecto: si uno es de otro, no se borra ninguno.
+app.post('/api/projects/:id/reels/borrar', async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number))];
+  if (!ids.length || ids.length > 500 || ids.some((i) => !Number.isInteger(i) || i <= 0)) return res.status(400).json({ error: 'Elegí qué reels borrar' });
+  const rows = ids.map((i) => get('SELECT * FROM reels WHERE id = ? AND project_id = ?', i, Number(req.params.id)));
+  if (rows.some((r) => !r)) return res.status(404).json({ error: 'No existe' });
+  res.json({ ok: true, borrados: await borrarReels(rows) });
 });
 
 // publicaciones
