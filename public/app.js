@@ -806,6 +806,33 @@ function userDialog(u) {
   });
 }
 
+// Crudo -> momentos -> ediciones. Los momentos salen de las ediciones (clip_id + moment); sin ellos van a «Otras».
+function momentOf(r) { try { const m = typeof r.moment === 'string' ? JSON.parse(r.moment || 'null') : r.moment; return m && typeof m === 'object' ? m : null; } catch { return null; } }
+function crudoTree(c) {
+  const E = state.reels.filter((x) => x.source_id === c.id && x.kind !== 'crudo'), by = new Map(), otras = [];
+  for (const e of E) { const m = momentOf(e); if (!e.clip_id || !m) { otras.push(e); continue; } if (!by.has(e.clip_id)) by.set(e.clip_id, { clip_id: e.clip_id, moment: m, eds: [] }); by.get(e.clip_id).eds.push(e); }
+  const moments = [...by.values()].sort((a, b) => (a.moment.inicio_s ?? 0) - (b.moment.inicio_s ?? 0));
+  for (const m of moments) m.eds.sort((a, b) => a.id - b.id);
+  return { moments, otras: otras.sort((a, b) => a.id - b.id), total: E.length };
+}
+const REV = { pendiente: ['s-pendiente', 'Pendiente'], aprobado: ['s-aprobado', 'Aprobada'], rechazado: ['s-error', 'Rechazada'] };
+const revChip = (r) => { const [c, t] = REV[r.review] || ['nodot', 'Sin revisar']; return `<span class="chip ${c}">${t}</span>`; };
+const nTxt = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+function crudoCard(r) {
+  const T = crudoTree(r), st = r.status === 'error' ? 's-error' : 'nodot', fecha = cuando(new Date(String(r.created_at || '').replace(' ', 'T') + 'Z'));
+  const href = `#/p/${state.project.id}/reel/${r.id}`, ok = state.reels.filter((x) => x.source_id === r.id && x.review === 'aprobado').length;
+  return `<article class="cd" data-id="${r.id}">
+    <a class="cd-thumb" href="${href}">${r.archived_at ? '<span class="cd-gone">Video borrado</span>' : coverOf(r)}<span class="cd-tag">Crudo</span></a>
+    <div class="cd-body">
+      <a class="cd-title" href="${href}">${esc(r.descripcion || r.title)}</a>
+      <div class="cd-meta">${r.etiqueta ? `<span class="chip nodot">${icon('home', 12)} ${esc(r.etiqueta)}</span>` : ''}<span class="small muted">Subido ${esc(fecha)}</span></div>
+      <div class="cd-meta"><span class="chip ${st}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(CRUDO_ESTADO[r.status] || 'En el editor')}</span>
+        <span class="small"><b>${nTxt(T.moments.length, 'momento', 'momentos')}</b> · <b>${nTxt(T.total, 'edición', 'ediciones')}</b>${ok ? ` · ${nTxt(ok, 'aprobada', 'aprobadas')}` : ''}</span></div>
+      ${T.total ? `<div class="cd-eds">${T.moments.flatMap((m) => m.eds).concat(T.otras).slice(0, 9).map((e) => `<a class="cd-ed rv-${e.review}" href="#/p/${state.project.id}/reel/${e.id}" title="${esc(e.title)}">${coverOf(e)}</a>`).join('')}${T.total > 9 ? `<span class="small muted">+${T.total - 9}</span>` : ''}</div>` : ''}
+      <div class="row" style="gap:6px"><a class="btn sm" href="${href}">Ver momentos${T.total ? ' y ediciones' : ''}</a></div>
+    </div>
+    <button class="icon-btn danger reel-del" data-act="del-reel" title="Borrar crudo" aria-label="Borrar crudo">${icon('trash', 16)}</button></article>`;
+}
 function reelsView() {
   const ALL = state.reels, F = state.reelFilter || 'todos';
   const R = F === 'todos' ? ALL : ALL.filter((r) => (r.kind || 'listo') === F);
@@ -828,17 +855,22 @@ function reelsView() {
     <p class="note">${state.accounts.length ? `Con <b>Repartir</b> cada reel listo sale en una cuenta por red: el mismo video en dos cuentas de la misma red hace que la red las bloquee. Para más cuentas, subí otra edición del crudo.` : 'Cargá cuentas para poder repartir los reels.'}</p>
   </aside>`;
   const filt = `<div class="kn-chips rl-filter">${[['todos', 'Todos', ALL.length], ['listo', 'Listos', ALL.filter((r) => r.kind !== 'crudo').length], ['crudo', 'Crudos', ALL.filter((r) => r.kind === 'crudo').length]].map(([k, l, n]) => `<button type="button" data-act="reel-filter" data-k="${k}" aria-pressed="${F === k}">${l} <b>${n}</b></button>`).join('')}</div>`;
-  const grid = R.length ? `<div class="reels">${R.map((r) => `<article class="reel" data-id="${r.id}">
+  const cardListo = (r) => `<article class="reel" data-id="${r.id}">
     <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está">${r.archived_at ? `<div class="gone">Video borrado<span>se publicó hace más de ${state.storage?.retentionDays ?? 7} días</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video>`}<span class="reel-ver">Ver dónde está</span></a>
     <div class="body">
       <input class="title" value="${esc(r.title)}" data-act="reel-title" aria-label="Título">
       <div class="meta">${reelChip(r)}<span>${mb(r.size)}</span></div>
-      ${r.kind === 'crudo' ? `<a class="reel-nets none" href="#/p/${state.project.id}/reel/${r.id}">${(() => { const n = state.reels.filter((x) => x.source_id === r.id).length; return n ? `${n} ${n === 1 ? 'edición' : 'ediciones'}` : 'Sin ediciones todavía'; })()}</a>` : reelNets(r.id)}
+      ${reelNets(r.id)}
       <div class="row" style="gap:6px">
-        ${r.kind === 'crudo' ? `<a class="btn sm" href="#/p/${state.project.id}/reel/${r.id}">Ver crudo</a>` : r.clip_id && r.review === 'pendiente' ? `<a class="btn sm accent" href="#/p/${state.project.id}/aprobar">Ir a aprobar</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length && repartible(r) ? '' : 'disabled'} ${repartible(r) ? '' : 'title="Una versión rechazada no se reparte"'}>Repartir</button>`}
+        ${r.clip_id && r.review === 'pendiente' ? `<a class="btn sm accent" href="#/p/${state.project.id}/aprobar">Ir a aprobar</a>` : `<button class="btn sm accent" data-act="distribute" ${state.accounts.length && repartible(r) ? '' : 'disabled'} ${repartible(r) ? '' : 'title="Una versión rechazada no se reparte"'}>Repartir</button>`}
       </div>
     </div>
-    <button class="icon-btn danger reel-del" data-act="del-reel" title="Borrar reel" aria-label="Borrar reel">${icon('trash', 16)}</button></article>`).join('')}</div>`
+    <button class="icon-btn danger reel-del" data-act="del-reel" title="Borrar reel" aria-label="Borrar reel">${icon('trash', 16)}</button></article>`;
+  // Todos: cada crudo es una tarjeta con sus ediciones adentro (nunca sueltas); abajo, solo los listos que no salen de ningún crudo.
+  // Listos: todos los listos, también las ediciones, para repartirlos. Crudos: solo las tarjetas de crudo.
+  const ids = new Set(ALL.filter((r) => r.kind === 'crudo').map((r) => r.id));
+  const crudos = R.filter((r) => r.kind === 'crudo'), listos = F === 'todos' ? R.filter((r) => r.kind !== 'crudo' && !ids.has(r.source_id)) : R.filter((r) => r.kind !== 'crudo');
+  const grid = R.length ? `${crudos.length ? `<div class="cd-list">${crudos.map(crudoCard).join('')}</div>` : ''}${listos.length ? `${F === 'todos' && crudos.length ? '<h3 class="h3 cd-sec">Listos sin crudo</h3>' : ''}<div class="reels">${listos.map(cardListo).join('')}</div>` : ''}`
     : `<div class="card empty rl-empty"><h2 class="h2">Todavía no hay reels</h2><p>Arrastrá los videos ya editados a la izquierda.</p></div>`;
   return `<div class="rl">${side}<div class="rl-main">${ALL.length ? filt : ''}${grid}</div></div>`;
 }
@@ -1371,8 +1403,8 @@ function reelDetailView() {
       ${r.kind === 'crudo' || r.archived_at ? '' : `<div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length && libres.length && repartible(r) ? '' : 'disabled'}>${libres.length ? 'Repartir en más cuentas' : 'Ya está en todas las redes'}</button></div>`}
     </aside>
     <div class="stack">
-      ${reelForm(r)}
-      ${r.kind === 'crudo' ? crudoInfo(r) : `<div class="rd-stats card"><div><b>${P.length}</b><span>cuentas</span></div><div><b>${n('publicado')}</b><span>publicadas</span></div><div><b>${n('programado') + n('publicando')}</b><span>programadas</span></div><div><b>${n('fallido')}</b><span>con error</span></div></div>
+      ${r.kind === 'crudo' ? crudoInfo(r) + reelForm(r) : reelForm(r)}
+      ${r.kind === 'crudo' ? '' : `<div class="rd-stats card"><div><b>${P.length}</b><span>cuentas</span></div><div><b>${n('publicado')}</b><span>publicadas</span></div><div><b>${n('programado') + n('publicando')}</b><span>programadas</span></div><div><b>${n('fallido')}</b><span>con error</span></div></div>
       <section class="card"><div class="card-head"><h2 class="h2">Dónde está este reel</h2></div>
         ${P.length ? `<div class="table-wrap"><table class="list rd-table"><thead><tr><th>Cuenta</th><th>Estado</th><th>Cuándo</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no está en ninguna cuenta. Tocá <b>Repartir</b>.</p>'}
       </section>
@@ -1397,12 +1429,22 @@ function reelForm(r) {
   </form></section>`;
 }
 function crudoInfo(r) {
-  const E = state.reels.filter((x) => x.source_id === r.id);
-  return `<section class="card"><h2 class="h2">Ediciones de este crudo</h2>
-    <p class="small muted">Un crudo no se publica. Cada edición distinta es un reel aparte que puede ir a otra cuenta de la misma red.</p>
-    ${E.length ? `<div class="rd-eds">${E.map((e) => `<a href="#/p/${state.project.id}/reel/${e.id}"><video src="/media/${esc(e.file)}#t=0.5" preload="metadata" muted playsinline></video><b>${esc(e.title)}</b><span class="small muted">${state.posts.filter((x) => x.reel_id === e.id).length} publicaciones</span></a>`).join('')}</div>`
-      : '<p class="muted">Todavía no hay ediciones. Subí el reel editado como <b>Listo</b> y en su página elegí «Edición de» este crudo.</p>'}
-  </section>`;
+  const T = crudoTree(r), pid = state.project.id;
+  const ed = (e, i) => `<div class="cm-ed">
+      <video src="/media/${esc(e.file)}${e.cover ? '' : '#t=0.5'}" ${e.cover ? `poster="/media/${esc(e.cover)}" preload="none"` : 'preload="metadata"'} controls playsinline></video>
+      <span class="cm-ed-h"><b>Edición ${i + 1}</b>${revChip(e)}</span><span class="small muted">${esc(e.title)}${e.duration ? ` · ${durTxt(e.duration)}` : ''}</span><a class="cm-go small" href="#/p/${pid}/reel/${e.id}">Ver detalle</a></div>`;
+  const block = (head, sub, eds) => `<section class="card cm"><div class="cm-h">${head}${sub ? `<p class="small muted">${sub}</p>` : ''}</div><div class="cm-eds">${eds.map(ed).join('')}</div></section>`;
+  const q = r.buscar ? `<p class="small"><b>Qué buscamos:</b> ${esc(r.buscar)}</p>` : '';
+  const top = `<section class="card"><h2 class="h2">${esc(r.descripcion || r.title)}</h2>
+    <p class="small muted">${[r.etiqueta ? esc(r.etiqueta) : '', r.publico ? `Para ${esc(pubName(r.publico))}` : '', `subido el ${fmtDate(r.created_at)}`].filter(Boolean).join(' · ')}</p>
+    ${r.descripcion && r.title ? `<p class="small muted">Archivo: ${esc(r.title)}</p>` : ''}${q}
+    <p><span class="chip ${r.status === 'error' ? 's-error' : 'nodot'}">${esc(CRUDO_ESTADO[r.status] || 'En el editor')}</span> <span class="small muted">${nTxt(T.moments.length, 'momento', 'momentos')} · ${nTxt(T.total, 'edición', 'ediciones')}</span></p>
+    ${r.status_detail ? `<p class="small cm-detail">${esc(r.status_detail)}</p>` : ''}
+    <p class="small muted">Un crudo no se publica. Cada edición es un reel aparte que puede ir a otra cuenta de la misma red.</p></section>`;
+  const mo = T.moments.map((m, i) => { const x = m.moment, ini = x.inicio_s, fin = x.fin_s, rng = ini != null && fin != null ? ` · ${mmss(ini)}–${mmss(fin)}` : '';
+    return block(`<h2 class="h2">Momento ${i + 1}${rng}${x.tema ? ` · ${esc(x.tema)}` : ''}</h2>`, [x.motivo ? esc(x.motivo) : '', x.publico ? `Para ${esc(pubName(x.publico))}` : ''].filter(Boolean).join(' · '), m.eds); }).join('');
+  const ot = T.otras.length ? block('<h2 class="h2">Otras</h2>', 'Ediciones sin momento asignado.', T.otras) : '';
+  return `${top}${mo}${ot}${T.total ? '' : '<section class="card"><p class="muted">Todavía no hay ediciones. Cuando el editor las entregue aparecen acá, por momento. También podés subir un reel como <b>Listo</b> y elegir «Edición de» este crudo.</p></section>'}`;
 }
 const tagsOf = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((t) => t.replace(/^#+/, '').trim()).filter(Boolean).map((t) => '#' + t))].join(' ');
 function reelPreview(f) {
