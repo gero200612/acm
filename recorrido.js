@@ -642,8 +642,10 @@ export function recorridoCases(sb) {
       const done = await api('POST', `/api/projects/${c.p}/reels/complete`, { kind: 'crudo', items: [{ key, name: 'crudo-editor.mp4', duration: 30 }] });
       eq([done.status, done.j?.[0]?.kind, done.j?.[0]?.status], [200, 'crudo', 'en_cola'], 'crudo en cola');
       c.crudo = done.j[0].id;
-      for (let i = 0; i < 40 && !sb.editor.jobs.length; i++) await sleep(100);
-      const job = sb.editor.jobs[0]; yes(job, 'el editor no recibió el trabajo');
+      // los crudos subidos directo al servidor también van al editor: se busca el de esta subida
+      const deEste = () => sb.editor.jobs.find((x) => x.body?.reel_id === c.crudo);
+      for (let i = 0; i < 40 && !deEste(); i++) await sleep(100);
+      const job = deEste(); yes(job, 'el editor no recibió el trabajo');
       eq(job.auth, `Bearer ${EDITOR_TOKEN}`, 'token');
       eq([job.body.project_id, job.body.reel_id, job.body.duracion_s], [c.p, c.crudo, 30], 'datos del trabajo');
       yes(/X-Amz-Signature=/.test(job.body.url), 'el link del crudo no está firmado');
@@ -682,6 +684,18 @@ export function recorridoCases(sb) {
       const ed = (await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}?crudo=${cd.id}`)).j;
       eq([ed.descripcion, ed.buscar], [cd.descripcion, cd.buscar], 'al editor le llegan descripcion y buscar');
       eq([(await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.descripcion, (await sb.box.editorApi('/api/editor/estado', { reel_id: cd.id, estado: 'mirando', detalle: 'Mirando el video' })).status], ['', 200], 'sin crudo, vacío; estado mirando aceptado');
+      // subida en partes (sin R2: el proxy corta los pedidos largos): orden, reanudar desde lo recibido y alta como crudo en cola
+      const mp4 = Buffer.from(fakeMp4(1080, 1920, 7)), mitad = Math.floor(mp4.length / 2), bin = (b) => new Blob([b], { type: 'application/octet-stream' });
+      const up = (await api('POST', `/api/projects/${c.p}/reels/partes`, { name: 'calle.mp4', size: mp4.length })).j;
+      eq((await api('PUT', `/api/projects/${c.p}/reels/partes/${up.id}?desde=0`, bin(mp4.subarray(0, mitad)), true)).j?.recibido, mitad, 'primera parte');
+      const fuera = await api('PUT', `/api/projects/${c.p}/reels/partes/${up.id}?desde=0`, bin(mp4.subarray(0, mitad)), true);
+      eq([fuera.status, fuera.j?.recibido], [409, mitad], 'una parte repetida no se pega dos veces: dice desde dónde seguir');
+      eq((await api('POST', `/api/projects/${c.p}/reels/partes/fin`, { ids: [up.id], kind: 'crudo' })).status, 400, 'sin terminar no se da de alta');
+      await api('PUT', `/api/projects/${c.p}/reels/partes/${up.id}?desde=${mitad}`, bin(mp4.subarray(mitad)), true);
+      const cp = (await api('POST', `/api/projects/${c.p}/reels/partes/fin`, { ids: [up.id], kind: 'crudo', descripcion: 'Recorrida', etiqueta: 'Boulogne' })).j?.[0];
+      eq([cp?.kind, cp?.status, cp?.size, cp?.descripcion, cp?.etiqueta], ['crudo', 'en_cola', mp4.length, 'Recorrida', 'Boulogne'], 'el crudo en partes queda entero y en cola');
+      eq((await api('POST', `/api/projects/${c.p}/reels/partes`, { name: 'virus.exe', size: 10 })).status, 400, 'solo videos');
+      await api('DELETE', `/api/reels/${cp.id}`);
       for (const x of [cj, cx, cd]) await api('DELETE', `/api/reels/${x.id}`);
       const acc = (await api('POST', `/api/projects/${c.p}/accounts`, { network: 'youtube' })).j;
       eq((await api('PUT', `/api/accounts/${acc.id}`, { publico: 'chicos' })).status, 400, 'público que no existe');

@@ -749,26 +749,71 @@ app.get('/api/projects/:id/reels', (req, res) => {
     sum((SELECT count(*) FROM posts p WHERE p.reel_id = reels.id AND p.status = 'publicado') > 0) AS pub FROM reels WHERE project_id = ? AND kind = 'listo' AND source_id IS NOT NULL GROUP BY source_id`, req.params.id).map((x) => [x.id, x]));
   res.json(R.filter((r) => r.kind === 'crudo').map((r) => { const x = ed.get(r.id) || {}; return { ...sombraReel(r), ediciones: x.n || 0, aprobadas: x.ok || 0, pendientes: x.pend || 0, publicadas: x.pub || 0 }; }));
 });
+// alta de un video que ya quedó en el disco del servidor (subida directa o en partes); un crudo queda en cola y va al editor
+function altaLocal(pid, req, b, f) {
+  const title = (b?.title && f.unico) ? b.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
+  const m = probe(f.path) || {};
+  const kind = b?.kind === 'crudo' || isContent(req.user) ? 'crudo' : 'listo';
+  const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind, etiqueta, publico, descripcion, buscar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    pid, title, b?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, kind, kind === 'crudo' ? etiquetaDe(b?.etiqueta) : '', kind === 'crudo' ? publicoDe(Number(pid), b?.publico) : '', kind === 'crudo' ? descripcionDe(b?.descripcion) : '', kind === 'crudo' ? buscarDe(b?.buscar) : '');
+  if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola', status_at = datetime('now') WHERE id = ?", r.lastInsertRowid);
+  return get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid);
+}
+const alEditor = (out) => { for (const r of out) if (r.kind === 'crudo') sendToEditor(r).catch((e) => console.error('editor:', e.message)); };
 app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe' });
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No llegó ningún video' });
-  const out = files.map((f) => {
-    const title = (req.body?.title && files.length === 1) ? req.body.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
-    const m = probe(f.path) || {};
-    const kind = req.body?.kind === 'crudo' || isContent(req.user) ? 'crudo' : 'listo';
-    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind, etiqueta, publico, descripcion, buscar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '', kind === 'crudo' ? publicoDe(Number(req.params.id), req.body?.publico) : '', kind === 'crudo' ? descripcionDe(req.body?.descripcion) : '', kind === 'crudo' ? buscarDe(req.body?.buscar) : '');
-    return get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid);
+  const out = files.map((f) => altaLocal(req.params.id, req, req.body, { ...f, unico: files.length === 1 }));
+  res.json(out);
+  alEditor(out);
+});
+// Subida en partes (sin R2): el proxy de adelante corta los pedidos largos, así que un video grande viaja en pedazos de hasta 16 MB.
+// 1) POST …/partes {name, size} → {id}  2) PUT …/partes/:id?desde=N (cuerpo crudo; si desde no coincide, 409 con lo recibido)  3) POST …/partes/fin
+const PARTES = new Map();
+const PARTE_MAX = 16 * 1024 * 1024;
+setInterval(() => { const lim = Date.now() - 24 * 3600e3; for (const [k, u] of PARTES) if (u.t < lim) { fs.rm(u.path, { force: true }, () => {}); PARTES.delete(k); } }, 3600e3).unref();
+const parteDe = (req) => { const u = PARTES.get(String(req.params.uid || '')); return u && u.pid === Number(req.params.id) && u.uid === req.user?.id ? u : null; };
+app.post('/api/projects/:id/reels/partes', (req, res) => {
+  const pid = Number(req.params.id);
+  if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe' });
+  const name = String(req.body?.name || '').slice(0, 200), size = Number(req.body?.size);
+  if (!VIDEO_EXT.test(name)) return res.status(400).json({ error: `«${name}» no es un video MP4, MOV o WEBM` });
+  if (!(size > 0) || size > MAX_UPLOAD) return res.status(400).json({ error: `«${name}» pesa más de ${Math.round(MAX_UPLOAD / 1024 ** 3)} GB` });
+  const id = crypto.randomUUID(), filename = id + path.extname(name).toLowerCase().replace(/[^.a-z0-9]/g, '');
+  const u = { pid, uid: req.user?.id, name, size, recibido: 0, filename, path: path.join(UPLOADS, `tmp-up-${filename}`), t: Date.now() };
+  fs.writeFileSync(u.path, ''); PARTES.set(id, u);
+  res.json({ id });
+});
+app.put('/api/projects/:id/reels/partes/:uid', express.raw({ type: () => true, limit: PARTE_MAX }), (req, res) => {
+  const u = parteDe(req);
+  if (!u) return res.status(404).json({ error: 'Esa subida ya no existe: empezala de nuevo' });
+  const desde = Number(req.query.desde), buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  if (desde !== u.recibido) return res.status(409).json({ error: 'Parte fuera de orden', recibido: u.recibido });
+  if (!buf.length || u.recibido + buf.length > u.size) return res.status(400).json({ error: 'Parte inválida', recibido: u.recibido });
+  fs.appendFileSync(u.path, buf); u.recibido += buf.length; u.t = Date.now();
+  res.json({ recibido: u.recibido });
+});
+app.post('/api/projects/:id/reels/partes/fin', (req, res) => {
+  const pid = Number(req.params.id);
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 30).map(String) : [];
+  const us = ids.map((id) => [id, PARTES.get(id)]);
+  const mal = us.find(([, u]) => !u || u.pid !== pid || u.uid !== req.user?.id);
+  if (!ids.length || mal) return res.status(400).json({ error: 'Esa subida ya no existe: empezala de nuevo' });
+  const corta = us.find(([, u]) => u.recibido !== u.size);
+  if (corta) return res.status(400).json({ error: `«${corta[1].name}» no terminó de subir` });
+  const out = us.map(([id, u]) => {
+    fs.renameSync(u.path, path.join(UPLOADS, u.filename)); PARTES.delete(id);
+    return altaLocal(pid, req, req.body, { filename: u.filename, originalname: u.name, size: u.size, path: path.join(UPLOADS, u.filename), unico: ids.length === 1 });
   });
   res.json(out);
-});
-// «#uno dos,#tres» → «#uno #dos #tres» (sin repetidos)
+  alEditor(out);
+});// «#uno dos,#tres» → «#uno #dos #tres» (sin repetidos)
 const tags = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((t) => t.replace(/^#+/, '').trim()).filter(Boolean).map((t) => '#' + t))].join(' ');
 // el texto que sale en la red: descripción + hashtags (los que no estén ya escritos en la descripción)
 const postText = (r) => { const cap = (r.caption || '').trim(); const extra = tags(r.hashtags).split(' ').filter((t) => t && !cap.toLowerCase().includes(t.toLowerCase())).join(' '); return [cap || r.title || '', extra].filter(Boolean).join('\n\n').trim(); };
 // subida directa a R2: 1) el navegador pide links firmados, 2) sube cada video, 3) avisa y se crean los reels
-app.get('/api/storage', (req, res) => res.json({ r2: r2Ready(), max: r2Ready() ? MAX_UPLOAD : 1024 ** 3, retentionDays: RETENTION_DAYS }));
+app.get('/api/storage', (req, res) => res.json({ r2: r2Ready(), max: MAX_UPLOAD, retentionDays: RETENTION_DAYS })); // sin R2 se sube en partes
 const VIDEO_EXT = /\.(mp4|mov|m4v|webm)$/i;
 app.post('/api/projects/:id/reels/uploads', async (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe' });

@@ -817,7 +817,7 @@ function reelsView() {
       <button type="button" data-act="up-kind" data-k="listo" aria-pressed="${kind === 'listo'}"><b>Listo</b><span>editado, para publicar</span></button>
       <button type="button" data-act="up-kind" data-k="crudo" aria-pressed="${kind === 'crudo'}"><b>Crudo</b><span>sin editar, para editar</span></button>
     </div>
-    <label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los ${kind === 'crudo' ? 'crudos' : 'reels listos'} acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos · hasta ${state.storage?.r2 ? '5' : '1'} GB cada uno</p></label>
+    <label class="drop" id="drop"><input type="file" id="reel-input" accept="video/*" multiple hidden>${icon('up', 28)}<p style="margin-top:8px"><b>Arrastrá los ${kind === 'crudo' ? 'crudos' : 'reels listos'} acá</b></p><p class="small">o tocá para elegirlos · MP4 o MOV, vertical 9:16, varios juntos · hasta ${Math.round((state.storage?.max || 5 * 1024 ** 3) / 1024 ** 3)} GB cada uno</p></label>
     ${up}
     <div class="rl-stats">
       <div><b>${ALL.filter((r) => r.kind !== 'crudo').length}</b><span>listos</span></div>
@@ -2183,7 +2183,7 @@ async function uploadToR2(files) {
     for (let i = 0; i < files.length; i += 3) await Promise.all(files.slice(i, i + 3).map((f, k) => putOne(f, links[i + k], i + k)));
     await api(`/api/projects/${pid}/reels/complete`, { method: 'POST', body: { kind, etiqueta: kind === 'crudo' ? state.upEtiqueta || '' : '', descripcion: kind === 'crudo' ? state.upDescripcion || '' : '', buscar: kind === 'crudo' ? state.upBuscar || '' : '', publico: kind === 'crudo' ? state.upPublico || '' : '', items: files.map((f, i) => ({ key: links[i].key, name: f.name, ...metas[i] })) } });
     toast(`${files.length} ${kind === 'crudo' ? (files.length === 1 ? 'crudo subido' : 'crudos subidos') : (files.length === 1 ? 'reel listo subido' : 'reels listos subidos')}`);
-  } catch (err) { fail(err); }
+  } catch (err) { falloSubida(err); }
   state.uploads = []; render();
 }
 // Antes de subir crudos: dónde se grabó, para qué público, de qué es y qué buscar (todo opcional: suman, no traban)
@@ -2214,14 +2214,39 @@ async function uploadReels(files) {
   const max = state.storage?.max || 1024 ** 3;
   const big = files.find((f) => f.size > max); if (big) return toast(`«${big.name}» pesa más de ${Math.round(max / 1024 ** 3)} GB`, true);
   if (state.storage?.r2) return uploadToR2(files);
-  const fd = new FormData(); fd.append('kind', state.upKind || 'listo'); if ((state.upKind || 'listo') === 'crudo') { fd.append('etiqueta', state.upEtiqueta || ''); fd.append('publico', state.upPublico || ''); fd.append('descripcion', state.upDescripcion || ''); fd.append('buscar', state.upBuscar || ''); } files.forEach((f) => fd.append('files', f));
+  return uploadEnPartes(files);
+}
+// Una subida que falla se muestra en una ventana (un cartel que se va solo pasa desapercibido mientras se espera)
+function falloSubida(err) {
+  const d = openDialog('No se pudo subir', `<p>${esc(err?.message || 'Algo falló')}</p><p class="small muted">No quedó nada a medias: probá de nuevo. Si se repite, avisá con este mensaje.</p>`, '<button class="btn primary" data-close>Entendido</button>');
+  return d;
+}
+// Sin R2: cada video viaja en partes de 8 MB (el proxy corta los pedidos largos); cada parte se reintenta y la subida sigue desde lo recibido
+async function uploadEnPartes(files) {
+  const kind = state.upKind || 'listo', pid = state.project.id, PARTE = 8 * 1024 * 1024;
+  const total = files.reduce((a, f) => a + f.size, 0); let hecho = 0;
+  const bar = (n) => { const b = $('#up-bar'); if (b) b.style.width = ((hecho + n) / total * 100) + '%'; };
+  const putParte = (id, desde, blob) => new Promise((ok, ko) => { const x = new XMLHttpRequest(); x.open('PUT', `/api/projects/${pid}/reels/partes/${id}?desde=${desde}`); x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.upload.onprogress = (e) => bar(desde + e.loaded); x.timeout = 10 * 60e3;
+    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch {} if (x.status < 300) ok(j.recibido); else if (x.status === 409 && Number.isFinite(j.recibido)) ok(j.recibido); else ko(Object.assign(new Error(j.error || `El servidor respondió ${x.status}`), { definitivo: x.status === 404 || x.status === 400 })); };
+    x.onerror = () => ko(new Error('Se cortó la conexión')); x.ontimeout = () => ko(new Error('La conexión está muy lenta')); x.send(blob); });
   state.uploads = files; render();
-  const x = new XMLHttpRequest();
-  x.open('POST', `/api/projects/${state.project.id}/reels`);
-  x.upload.onprogress = (e) => { const b = $('#up-bar'); if (b && e.lengthComputable) b.style.width = (e.loaded / e.total * 100) + '%'; };
-  x.onload = () => { state.uploads = []; if (x.status < 300) toast(`${files.length} ${state.upKind === 'crudo' ? (files.length === 1 ? 'crudo subido' : 'crudos subidos') : (files.length === 1 ? 'reel listo subido' : 'reels listos subidos')}`); else { try { fail(new Error(JSON.parse(x.responseText).error)); } catch { fail(new Error('No se pudo subir')); } } render(); };
-  x.onerror = () => { state.uploads = []; fail(new Error('Se cortó la subida')); render(); };
-  x.send(fd);
+  try {
+    const ids = [];
+    for (const f of files) {
+      const { id } = await api(`/api/projects/${pid}/reels/partes`, { method: 'POST', body: { name: f.name, size: f.size } });
+      let desde = 0, fallas = 0;
+      while (desde < f.size) {
+        try { desde = await putParte(id, desde, f.slice(desde, Math.min(desde + PARTE, f.size))); fallas = 0; }
+        catch (e) { if (e.definitivo || ++fallas > 5) throw new Error(`«${f.name}»: ${e.message}`); await new Promise((r) => setTimeout(r, 2000 * fallas)); }
+      }
+      hecho += f.size; ids.push(id);
+    }
+    const body = { ids, kind }; if (kind === 'crudo') Object.assign(body, { etiqueta: state.upEtiqueta || '', publico: state.upPublico || '', descripcion: state.upDescripcion || '', buscar: state.upBuscar || '' });
+    await api(`/api/projects/${pid}/reels/partes/fin`, { method: 'POST', body });
+    toast(`${files.length} ${kind === 'crudo' ? (files.length === 1 ? 'crudo subido' : 'crudos subidos') : (files.length === 1 ? 'reel listo subido' : 'reels listos subidos')}`);
+  } catch (err) { falloSubida(err); }
+  state.uploads = []; render();
 }
 
 // ---------- eventos ----------

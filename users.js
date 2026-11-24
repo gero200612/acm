@@ -104,7 +104,8 @@ const SOMBRA = [
   ['GET', /^\/api\/(projects|storage|me|session)$/],
   ['GET', /^\/api\/projects\/\d+$/],
   ['GET', /^\/api\/projects\/\d+\/(reels|posts|accounts)$/], // el calendario: solo mirar, sin números
-  ['POST', /^\/api\/projects\/\d+\/reels(\/uploads|\/complete)?$/],
+  ['POST', /^\/api\/projects\/\d+\/reels(\/uploads|\/complete|\/partes|\/partes\/fin)?$/],
+  ['PUT', /^\/api\/projects\/\d+\/reels\/partes\/[0-9a-f-]{36}$/],
 ];
 // El editor: lo de la sombra y además decide qué reel va (Para aprobar, aprobar/rechazar, comentar).
 const EDITOR = [
