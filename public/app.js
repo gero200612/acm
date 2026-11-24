@@ -811,7 +811,7 @@ function reelsView() {
   const R = F === 'todos' ? ALL : ALL.filter((r) => (r.kind || 'listo') === F);
   const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
   const sinRepartir = ALL.filter((r) => r.kind !== 'crudo' && !r.posts).length;
-  const kind = state.upKind || 'listo';
+  const kind = state.upKind || 'crudo';
   const side = `<aside class="rl-side">
     <div class="seg seg-cards" role="radiogroup" aria-label="Qué estás subiendo">
       <button type="button" data-act="up-kind" data-k="listo" aria-pressed="${kind === 'listo'}"><b>Listo</b><span>editado, para publicar</span></button>
@@ -2170,7 +2170,7 @@ function distributeDialog(reel) {
 const videoMeta = (f) => new Promise((ok) => { const v = document.createElement('video'); const u = URL.createObjectURL(f); const end = (m) => { URL.revokeObjectURL(u); ok(m); };
   v.preload = 'metadata'; v.onloadedmetadata = () => end({ duration: v.duration, width: v.videoWidth, height: v.videoHeight }); v.onerror = () => end({}); setTimeout(() => end({}), 8000); v.src = u; });
 async function uploadToR2(files) {
-  const kind = state.upKind || 'listo', pid = state.project.id;
+  const kind = state.upKind || 'crudo', pid = state.project.id;
   state.uploads = files; render();
   try {
     const links = await api(`/api/projects/${pid}/reels/uploads`, { method: 'POST', body: { files: files.map((f) => ({ name: f.name, size: f.size, type: f.type || 'video/mp4' })) } });
@@ -2208,7 +2208,7 @@ function crudoDatos(files) {
 async function uploadReels(files) {
   files = [...files].filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name));
   if (!files.length) return toast('Elegí archivos de video', true);
-  if ((state.upKind || 'listo') === 'crudo') { const x = await crudoDatos(files); if (!x) return; state.upEtiqueta = x.etiqueta; state.upPublico = x.publico; state.upDescripcion = x.descripcion; state.upBuscar = x.buscar; }
+  if ((state.upKind || 'crudo') === 'crudo') { const x = await crudoDatos(files); if (!x) return; state.upEtiqueta = x.etiqueta; state.upPublico = x.publico; state.upDescripcion = x.descripcion; state.upBuscar = x.buscar; }
   files = [...files].filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name));
   if (!files.length) return toast('Elegí archivos de video', true);
   const max = state.storage?.max || 1024 ** 3;
@@ -2223,7 +2223,7 @@ function falloSubida(err) {
 }
 // Sin R2: cada video viaja en partes de 8 MB (el proxy corta los pedidos largos); cada parte se reintenta y la subida sigue desde lo recibido
 async function uploadEnPartes(files) {
-  const kind = state.upKind || 'listo', pid = state.project.id, PARTE = 8 * 1024 * 1024;
+  const kind = state.upKind || 'crudo', pid = state.project.id, PARTE = 8 * 1024 * 1024;
   const total = files.reduce((a, f) => a + f.size, 0); let hecho = 0;
   const bar = (n) => { const b = $('#up-bar'); if (b) b.style.width = ((hecho + n) / total * 100) + '%'; };
   const putParte = (id, desde, blob) => new Promise((ok, ko) => { const x = new XMLHttpRequest(); x.open('PUT', `/api/projects/${pid}/reels/partes/${id}?desde=${desde}`); x.setRequestHeader('Content-Type', 'application/octet-stream');
