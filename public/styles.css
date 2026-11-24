@@ -1488,8 +1488,24 @@ kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 
 .ver-cel { align-self: center; }
 .cel-dlg { padding: 0; border: 0; background: transparent; max-height: 100vh; overflow: visible; }
 .cel-dlg::backdrop { background: rgba(10,10,12,.88); }
-.cel-frame { height: min(92vh, 900px); aspect-ratio: 9 / 19.5; background: #000; border-radius: 34px; padding: 10px; box-shadow: 0 0 0 2px #34363c, 0 30px 80px rgba(0,0,0,.6); display: flex; align-items: center; }
-.cel-frame video { width: 100%; height: 100%; object-fit: contain; border-radius: 26px; background: #000; display: block; }
+.cel-frame { height: min(92vh, 900px); aspect-ratio: 9 / 16; background: #000; border-radius: 34px; padding: 10px; box-shadow: 0 0 0 2px #34363c, 0 30px 80px rgba(0,0,0,.6); display: flex; align-items: center; }
+.cel-scr { position: relative; width: 100%; height: 100%; border-radius: 26px; overflow: hidden; background: #000; }
+.cel-scr video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cel-ui { position: absolute; inset: 0; z-index: 1; isolation: isolate; pointer-events: none; color: #fff; font-size: 13px; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+.cel-ui::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 32%; background: linear-gradient(transparent, rgba(0,0,0,.45)); z-index: -1; }
+.cel-side { position: absolute; right: 10px; bottom: 96px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.cel-b { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.cel-b svg { filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
+.cel-b small { font-size: 12px; font-weight: 600; }
+.cel-disc { width: 30px; height: 30px; border-radius: 8px; border: 2px solid #fff; background: #333; overflow: hidden; }
+.cel-disc img, .cel-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cel-foot { position: absolute; left: 12px; right: 64px; bottom: 18px; display: flex; flex-direction: column; gap: 6px; }
+.cel-acc { display: flex; align-items: center; gap: 8px; }
+.cel-av { width: 30px; height: 30px; border-radius: 50%; background: #555; overflow: hidden; display: grid; place-items: center; font-weight: 700; }
+.cel-follow { border: 1px solid rgba(255,255,255,.8); border-radius: 8px; padding: 2px 9px; font-size: 12px; font-weight: 600; }
+.cel-cap { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
+.cel-mus { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.cel-play { position: absolute; inset: 0; z-index: 2; background: transparent; border: 0; cursor: pointer; }
 .cel-close { position: fixed; top: 16px; right: 16px; background: #fff; color: #121316; width: 40px; height: 40px; border-radius: 50%; }
 .ap-redo-chk > span { display: flex; flex-direction: column; gap: 2px; }
 /* celular: crudos y lista del calendario como tarjetas (las tablas se salían de la pantalla) */

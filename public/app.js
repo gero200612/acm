@@ -23,6 +23,9 @@ const ICON = {
   plus: 'M12 5v14M5 12h14',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   x: 'M6 6l12 12M18 6 6 18',
+  send: 'M21 3 10 14M21 3l-7 18-4-7-7-4 18-7z',
+  dots: 'M12 5.5h.01M12 12h.01M12 18.5h.01',
+  music: 'M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z',
   phone: 'M8 2.5h8a1.5 1.5 0 0 1 1.5 1.5v16a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V4A1.5 1.5 0 0 1 8 2.5zM11 18.5h2',
   check: 'm5 12 5 5 9-10',
   cal: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
@@ -518,7 +521,7 @@ function aprobarView() {
   const version = (r, i) => `
       <article class="ap-ed" data-id="${r.id}">
         <video src="/media/${esc(r.file)}${r.cover ? '' : '#t=0.5'}" ${r.cover ? `poster="/media/${esc(r.cover)}" preload="none"` : 'preload="metadata"'} controls controlslist="nofullscreen" playsinline></video>
-        <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="/media/${esc(r.file)}">${icon('phone', 15)} Ver como celular</button>
+        <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="/media/${esc(r.file)}" data-cap="${esc(r.caption || '')}">${icon('phone', 15)} Ver como celular</button>
         ${tcBlock(r)}
         <div class="ap-ed-h"><b>Versión ${i + 1}</b>${r.duration ? `<span class="small muted">${durTxt(r.duration)}</span>` : ''}</div>
         ${r.redo_pedido ? `<p class="ap-redone">${icon('refresh', 14)} Rehecha: pediste «${esc(r.redo_pedido)}»${r.redo_detail ? `<span>${esc(r.redo_detail)}</span>` : ''}</p>` : ''}
@@ -1434,7 +1437,7 @@ function crudoInfo(r) {
   const T = crudoTree(r), pid = state.project.id;
   const ed = (e, i) => `<div class="cm-ed">
       <video src="/media/${esc(e.file)}${e.cover ? '' : '#t=0.5'}" ${e.cover ? `poster="/media/${esc(e.cover)}" preload="none"` : 'preload="metadata"'} controls controlslist="nofullscreen" playsinline></video>
-      <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="/media/${esc(e.file)}">${icon('phone', 15)} Ver como celular</button>
+      <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="/media/${esc(e.file)}" data-cap="${esc(e.caption || '')}">${icon('phone', 15)} Ver como celular</button>
       <span class="cm-ed-h"><b>Edición ${i + 1}</b>${revChip(e)}</span><span class="small muted">${esc(e.title)}${e.duration ? ` · ${durTxt(e.duration)}` : ''}</span><a class="cm-go small" href="#/p/${pid}/reel/${e.id}">Ver detalle</a></div>`;
   const block = (head, sub, eds) => `<section class="card cm"><div class="cm-h">${head}${sub ? `<p class="small muted">${sub}</p>` : ''}</div><div class="cm-eds">${eds.map(ed).join('')}</div></section>`;
   const q = r.buscar ? `<p class="small"><b>Qué buscamos:</b> ${esc(r.buscar)}</p>` : '';
@@ -2448,7 +2451,18 @@ document.addEventListener('click', async (e) => {
       case 'ver-cel': { // el video a pantalla completa pero vertical, como en el celular (la pantalla completa del navegador lo deja acostado en la compu)
         document.querySelectorAll('video').forEach((v) => v.pause());
         const d = document.createElement('dialog'); d.className = 'cel-dlg';
-        d.innerHTML = `<button class="icon-btn cel-close" data-close aria-label="Cerrar">${icon('x')}</button><div class="cel-frame"><video src="${esc(el.dataset.src)}" controls controlslist="nofullscreen" autoplay playsinline></video></div>`;
+        // encima, lo que pone la app de reels (genérico, sin marca de ninguna red): botones a la derecha y cuenta + texto abajo, para ver qué tapa
+        const P = state.project || {}, cuenta = String(P.name || 'cuenta').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        const btn = (i, n) => `<span class="cel-b">${icon(i, 30)}${n ? `<small>${n}</small>` : ''}</span>`;
+        d.innerHTML = `<button class="icon-btn cel-close" data-close aria-label="Cerrar">${icon('x')}</button><div class="cel-frame"><div class="cel-scr">
+          <video src="${esc(el.dataset.src)}" autoplay loop playsinline></video>
+          <div class="cel-ui" aria-hidden="true">
+            <div class="cel-side">${btn('heart', '1.284')}${btn('chat', '96')}${btn('send', '')}${btn('dots', '')}<span class="cel-disc">${P.photo ? `<img src="/media/${esc(P.photo)}" alt="">` : ''}</span></div>
+            <div class="cel-foot"><div class="cel-acc"><span class="cel-av">${P.photo ? `<img src="/media/${esc(P.photo)}" alt="">` : esc((P.name || '?').slice(0, 1))}</span><b>${esc(cuenta)}</b><span class="cel-follow">Seguir</span></div>
+              <p class="cel-cap">${esc(el.dataset.cap || '')}</p><span class="cel-mus">${icon('music', 13)} Audio original</span></div>
+          </div>
+          <button type="button" class="cel-play" aria-label="Pausa"></button></div></div>`;
+        const v = d.querySelector('video'); d.querySelector('.cel-play').addEventListener('click', () => (v.paused ? v.play() : v.pause()));
         document.body.append(d); d.addEventListener('close', () => d.remove());
         d.addEventListener('click', (e) => { if (e.target === d || e.target.closest('[data-close]')) d.close(); });
         d.showModal(); break;
