@@ -60,6 +60,7 @@ async function estudioFalso(opc = {}) {
       }
       if (m[1] === 'transcribir') {
         if (opc.falloTranscribir) return json(res, 200, { estado: 'fallo', error: 'whisper se cayó' });
+        if (opc.sinAudio) return json(res, 200, { estado: 'fallo', error: 'El video no tiene audio: sin habla, no hay nada que transcribir.' });
         return json(res, 200, { estado: 'listo', progreso: 1, resultado: { duracion_s: 60, palabras: opc.palabras || [{ inicio_s: 1, fin_s: 2, texto: 'hola' }, { inicio_s: 10, fin_s: 11, texto: 'chau' }, { inicio_s: 30, fin_s: 31, texto: 'afuera' }], audio: { lufs: -20 } } });
       }
       return json(res, 200, { estado: 'listo', resultado: { archivo: `/archivos/${m[2]}.mp4`, portada: `/archivos/${m[2]}.jpg`, duracion_s: t.pedido.fin_s - t.pedido.inicio_s, receta: t.pedido.receta, tecnica: opc.tecnica ? opc.tecnica(t.pedido) : {}, cuadros: opc.cuadros ? opc.cuadros : [] } });
@@ -590,6 +591,15 @@ const hooksVisual = (claude) => (estudio) => crearCriterio({ claude, estudio });
 const correrVisual = async (m, trabajo = TRABAJO) => { m.editor.runner.arrancar({ cadaMs: 20 }); const id = (await (await post(m, '/trabajos', trabajo)).json()).id; return { id, j: await esperarEstado(m, id, ['listo', 'sin_momentos', 'error'], 8000) }; };
 
 casos.push(
+  ['Mirar', 'Crudo sin pista de audio: no queda en error, se mira y sale el momento visual', async () => {
+    const claude = claudeVisual({ momentos: [MV({ inicio_s: 10.04, fin_s: 24.96 })] });
+    const m = await montar({ estudioOpc: { sinAudio: true }, acmOpc: { descripcion: 'Caminando por Beccar' }, hooks: hooksVisual(claude) });
+    try {
+      const { j } = await correrVisual(m);
+      eq([j.estado, j.detalle], ['listo', '3 ediciones'], 'estado final');
+      yes(m.est.pedidos('/v1/editar-recorte').every((p) => p.visual === true && !('palabras' in p)), 'editar-recorte visual sin palabras');
+    } finally { await m.fin(); }
+  }],
   ['Mirar', 'Crudo mudo: se mira, Sonnet recibe el registro, el momento sin habla sale como reel visual (visual:true, sin palabras) y los tokens de Haiku viajan en el momento', async () => {
     const claude = claudeVisual({ momentos: [MV({ inicio_s: 10.04, fin_s: 24.96 })] });
     const m = await montar({ estudioOpc: { palabras: [] }, acmOpc: { descripcion: 'Caminando por Beccar' }, hooks: hooksVisual(claude) });

@@ -48,7 +48,14 @@ export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomento
   async function transcribir(t) {
     if (t.transcripcion) return t.transcripcion;
     await etapa(t, 'transcribiendo');
-    const tr = await estudio.transcribir(t.url, (s) => { if (s.progreso != null) R.estado(t.id, 'transcribiendo', `${Math.round(s.progreso * (s.progreso <= 1 ? 100 : 1))} %`); });
+    let tr;
+    try {
+      tr = await estudio.transcribir(t.url, (s) => { if (s.progreso != null) R.estado(t.id, 'transcribiendo', `${Math.round(s.progreso * (s.progreso <= 1 ? 100 : 1))} %`); });
+    } catch (e) {
+      // un crudo sin pista de audio no tiene nada que transcribir, pero se puede mirar: sigue con la transcripción vacía
+      if (!mirarVideo || !/no tiene audio/i.test(String(e?.message || e))) throw e;
+      tr = { duracion_s: Number(t.duracion_s) || 0, palabras: [], audio: null, sin_audio: true };
+    }
     R.guardarTranscripcion(t.id, tr);
     return tr;
   }
