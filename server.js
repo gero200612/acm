@@ -1631,3 +1631,5 @@ if (process.env.ACM_SCHEDULER !== 'off' && process.env.ACM_WATCH !== 'off') { se
 // al arrancar completa vectores pendientes (la copia del banco lo hace enseguida para reproducir el orden de producción: primero este, después las importaciones)
 setTimeout(fillVectors, Number(process.env.ACM_FILL_MS) || 5000);
 const srv = app.listen(PORT, () => console.log(`ACM en http://localhost:${srv.address().port} (datos en ${DATA})`));
+// Node corta por defecto los pedidos que duran más de 5 minutos: una subida de crudo grande con una conexión lenta tarda más (se cortaba sin quedar nada)
+srv.requestTimeout = 3 * 3600e3;
