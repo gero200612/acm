@@ -355,6 +355,21 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
   res.json(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
 });
 // el editor no pudo rehacer una edición pedida: queda el motivo para mostrarlo (y reintentar)
+// Link firmado del crudo para el editor y el Estudio: en R2 es el link de R2; en el disco del servidor, esta ruta con firma y vencimiento
+const firmaCrudo = (id, exp) => crypto.createHmac('sha256', SECRET).update(`crudo:${id}:${exp}`).digest('hex');
+async function crudoUrl(r, ttlS = 6 * 86400) {
+  if (r.storage === 'r2') return getUrl(r.file, ttlS);
+  const exp = Math.floor(Date.now() / 1000) + ttlS;
+  return `${PUBLIC_URL}/api/editor/crudo/${r.id}?exp=${exp}&sig=${firmaCrudo(r.id, exp)}`;
+}
+app.get('/api/editor/crudo/:id', (req, res) => {
+  const id = Number(req.params.id), exp = Number(req.query.exp), sig = String(req.query.sig || '');
+  const want = Buffer.from(firmaCrudo(id, exp)), got = Buffer.from(sig);
+  if (!(exp > Date.now() / 1000) || got.length !== want.length || !crypto.timingSafeEqual(got, want)) return res.status(403).json({ error: 'Link vencido o inválido' });
+  const r = get("SELECT file, storage FROM reels WHERE id = ? AND kind = 'crudo' AND archived_at = ''", id);
+  if (!r || r.storage === 'r2') return res.status(404).end();
+  res.sendFile(path.join(UPLOADS, path.basename(r.file)));
+});
 app.post('/api/editor/rehecho', requireEditor, (req, res) => {
   const b = req.body || {};
   const r = get("SELECT id FROM reels WHERE editor_edition_id = ? AND redo = 'pedido'", String(b.edicion_id || ''));
@@ -375,7 +390,7 @@ async function sendRedo(reel, pedido) {
   try {
     const resp = await fetch(`${base}/rehacer`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.EDITOR_TOKEN || ''}` }, signal: AbortSignal.timeout(20000),
-      body: JSON.stringify({ edicion_id: reel.editor_edition_id, pedido, url: await getUrl(crudo.file, 6 * 86400) }),
+      body: JSON.stringify({ edicion_id: reel.editor_edition_id, pedido, url: await crudoUrl(crudo) }),
     });
     if (!resp.ok) return fail(resp.status === 404 ? 'El editor ya no tiene esta edición: no se puede rehacer.' : `El editor respondió ${resp.status}`);
     return true;
@@ -858,7 +873,7 @@ async function sendToEditor(r) {
   try {
     const resp = await fetch(`${base}/trabajos`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.EDITOR_TOKEN || ''}` }, signal: AbortSignal.timeout(20000),
-      body: JSON.stringify({ project_id: r.project_id, reel_id: r.id, url: await getUrl(r.file, 6 * 86400), duracion_s: r.duration, aprendizajes_url: `${PUBLIC_URL}/api/editor/aprendizajes/${r.project_id}` }),
+      body: JSON.stringify({ project_id: r.project_id, reel_id: r.id, url: await crudoUrl(r), duracion_s: r.duration, aprendizajes_url: `${PUBLIC_URL}/api/editor/aprendizajes/${r.project_id}` }),
     });
     if (!resp.ok) throw new Error(`el editor respondió ${resp.status}`);
   } catch (e) {
