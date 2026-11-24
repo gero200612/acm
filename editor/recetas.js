@@ -83,15 +83,17 @@ function cierreDeIdea(palabras, tramos, desde, objetivo, disp) {
   return f === undefined ? objetivo : Math.min(disp + 0.3, f + 0.5); // con aire: el Estudio saca frases enteras si se pasa por décimas
 }
 
-// El texto de un cartel (gancho o portada): de 1 a 3 palabras. Si Haiku escribió una frase, se queda con las palabras clave (sin relleno, las más largas) en su orden.
-const RELLENO = new Set('a al algo ante con como cual cuando de del desde donde e el ella ellos en entre es esa ese eso esta este esto la las le les lo los me mi mis muy ni no nos o para pero por que se si sin sobre su sus te tu tus un una uno unos unas y ya hay fue son ser'.split(' '));
+// El texto de un cartel (gancho o portada): de 1 a 3 palabras SEGUIDAS, que se lean como frase. Si Haiku escribió una frase larga, se queda con
+// el último tramo corto entre signos (el remate: «Obras un sábado: sin acceso, sin ventas» → «sin ventas»); sacar palabras sueltas daba cosas sin sentido.
 export const MAX_PALABRAS_CARTEL = 3;
 export function cartelCorto(texto, max = MAX_PALABRAS_CARTEL) {
   const letras = (w) => w.replace(/[^\p{L}\p{N}]/gu, '');
-  const palabras = String(texto || '').split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}¿¡]+|[^\p{L}\p{N}?!]+$/gu, '')).filter((w) => letras(w).length > 0);
+  const pal = (t) => String(t || '').split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}¿¡]+|[^\p{L}\p{N}?!]+$/gu, '')).filter((w) => letras(w).length > 0);
+  const palabras = pal(texto);
   if (palabras.length <= max) return palabras.join(' ');
-  const todas = palabras.map((w, i) => ({ w, i })), util = todas.filter((x) => !RELLENO.has(letras(x.w).toLowerCase()));
-  return [...(util.length >= max ? util : todas)].sort((a, b) => letras(b.w).length - letras(a.w).length || a.i - b.i).slice(0, max).sort((a, b) => a.i - b.i).map((x) => x.w).join(' ');
+  const tramos = String(texto).split(/[:;,.—–|]+|\s-\s/).map(pal).filter((t) => t.length);
+  const corto = [...tramos].reverse().find((t) => t.length <= max);
+  return corto ? corto.join(' ') : ''; // sin un tramo corto, mejor sin cartel que palabras sueltas sin sentido
 }
 const r1 = (x) => Math.round(x * 10) / 10;
 

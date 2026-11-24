@@ -751,10 +751,10 @@ casos.push(
     // carteles de 1 a 3 palabras, en gancho y portada, con la clave de la frase larga
     const n = (t) => t.split(/\s+/).length;
     yes(n(ad.gancho.texto) <= 3 && n(ad.portada.texto) <= 3, `cartel largo: «${ad.gancho.texto}» / «${ad.portada.texto}»`);
-    eq(ad.gancho.texto, 'sábado acceso ventas', 'palabras clave del gancho');
+    eq(ad.gancho.texto, 'sin ventas', 'palabras clave del gancho');
     for (const [t, max] of [['Obras', 1], ['Mirá esto', 2], ['La obra que nadie quiere ver hoy en San Isidro', 3], ['', 0]]) yes(cartelCorto(t).split(/\s+/).filter(Boolean).length <= max, `cartelCorto(${t})`);
-    // portada sin texto: sale del tema, también en 3 palabras
-    eq(construirReceta({ v: { ...base, gancho: 'directo', largo: 'completo' }, momento, palabras: pal, textos: { ...textos, portada_texto: '' } }).portada.texto, 'Obras sábado acceso', 'portada del tema');
+    // portada sin texto: sale del tema si tiene un tramo corto; si no, el genérico
+    eq(construirReceta({ v: { ...base, gancho: 'directo', largo: 'completo' }, momento, palabras: pal, textos: { ...textos, portada_texto: '' } }).portada.texto, 'Mirá esto', 'portada: un tema sin tramo corto no da palabras sueltas, va el genérico');
     // el punch-in va en todas las recetas, también con ritmo lento
     eq([ad.zoom, construirReceta({ v: { ...base, gancho: 'directo', largo: 'completo', ritmo: 'lento' }, momento, palabras: pal, textos }).zoom], [true, true], 'zoom siempre');
   }],
