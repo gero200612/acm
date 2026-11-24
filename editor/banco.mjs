@@ -17,6 +17,7 @@ import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
 import { crearAnalista, corregirReceta, elegirCuadros } from './analista.js';
+import { tramosAEstado, notasDe } from './mirar.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (c, what) => { if (!c) throw new Error(what); };
@@ -28,6 +29,14 @@ const json = (res, code, o) => { res.writeHead(code, { 'content-type': 'applicat
 const TOKEN = 'tok-editor', CLAVE = 'clave-estudio', EMPRESA = 'empresa-1';
 const VIDEO = Buffer.alloc(2048, 5);
 
+// planillas de 16 cuadros como las del Estudio: un cuadro cada cada_s entre desde_s y hasta_s (el video falso dura 60 s)
+function planillasFalsas({ desde_s = 0, hasta_s = 60, cada_s = 2 }) {
+  const ts = []; for (let x = desde_s; x < hasta_s - 1e-9; x += cada_s) ts.push(Math.round(x * 100) / 100);
+  const planillas = [];
+  for (let i = 0; i < ts.length; i += 16) { const tt = ts.slice(i, i + 16); planillas.push({ ruta: `/cuadros/p${planillas.length + 1}.jpg`, desde_s: tt[0], hasta_s: Math.min(hasta_s, tt.at(-1) + cada_s), tiempos_s: tt }); }
+  return { version: 1, duracion_s: 60, cada_s, planillas };
+}
+
 // Estudio falso: respeta el contrato (202 {id}, estados en_cola → procesando → listo, descargas con autenticación)
 async function estudioFalso(opc = {}) {
   const log = [], tareas = new Map(); let n = 0;
@@ -36,15 +45,19 @@ async function estudioFalso(opc = {}) {
     const authOk = req.headers['x-empresa'] === EMPRESA && req.headers.authorization === `Bearer ${CLAVE}`;
     if (!authOk) { log.push(`sin-auth ${req.method} ${u.pathname}`); return json(res, 401, { error: 'auth' }); }
     log.push(`${req.method} ${u.pathname}`);
-    if (req.method === 'POST' && (u.pathname === '/v1/transcribir' || u.pathname === '/v1/editar-recorte')) {
+    if (req.method === 'POST' && (u.pathname === '/v1/transcribir' || u.pathname === '/v1/editar-recorte' || u.pathname === '/v1/mirar')) {
       const id = `t${++n}`; tareas.set(id, { tipo: u.pathname, pedido: JSON.parse(b), polls: 0 }); log.push(`pedido ${u.pathname} ${b}`);
       return json(res, 202, { id });
     }
-    const m = u.pathname.match(/^\/v1\/(transcribir|editar-recorte)\/(t\d+)$/);
+    const m = u.pathname.match(/^\/v1\/(transcribir|editar-recorte|mirar)\/(t\d+)$/);
     if (m) {
       const t = tareas.get(m[2]); t.polls++;
       if (t.polls === 1) return json(res, 200, { estado: 'en_cola', progreso: 0 });
       if (t.polls === 2) return json(res, 200, { estado: 'procesando', progreso: 0.5 });
+      if (m[1] === 'mirar') {
+        if (opc.falloMirar) return json(res, 200, { estado: 'fallo', error: 'ffmpeg no pudo con el video' });
+        return json(res, 200, { estado: 'listo', progreso: 1, resultado: planillasFalsas(t.pedido) });
+      }
       if (m[1] === 'transcribir') {
         if (opc.falloTranscribir) return json(res, 200, { estado: 'fallo', error: 'whisper se cayó' });
         return json(res, 200, { estado: 'listo', progreso: 1, resultado: { duracion_s: 60, palabras: opc.palabras || [{ inicio_s: 1, fin_s: 2, texto: 'hola' }, { inicio_s: 10, fin_s: 11, texto: 'chau' }, { inicio_s: 30, fin_s: 31, texto: 'afuera' }], audio: { lufs: -20 } } });
@@ -59,7 +72,7 @@ async function estudioFalso(opc = {}) {
 }
 
 // ACM falso: guarda los avisos y, al recibir una edición, baja el video del link (como hace ACM de verdad)
-async function acmFalso() {
+async function acmFalso(opc = {}) {
   const estados = [], ediciones = [], rehechos = [];
   const srv = await escuchar(async (req, res) => {
     const b = await cuerpo(req);
@@ -72,20 +85,21 @@ async function acmFalso() {
       if (o.cover_url) o.portada_bajada = (await fetch(o.cover_url)).ok;
       ediciones.push(o); return json(res, 200, { id: ediciones.length });
     }
-    if (req.method === 'GET' && req.url.split('?')[0] === '/api/editor/aprendizajes/7') return json(res, 200, { project_id: 7, aprendizajes: [{ ritmo: 'rapido', horario: { instagram: '20:00' } }], investigacion: ['Candidato X: pide más seguridad'] });
+    if (req.method === 'GET' && req.url.split('?')[0] === '/api/editor/aprendizajes/7') return json(res, 200, { project_id: 7, descripcion: opc.descripcion || '', buscar: opc.buscar || '', aprendizajes: [{ ritmo: 'rapido', horario: { instagram: '20:00' } }], investigacion: ['Candidato X: pide más seguridad'] });
     json(res, 404, {});
   });
   return { ...srv, estados, ediciones, rehechos };
 }
 
-async function montar({ estudioOpc, hooks } = {}) {
-  const est = await estudioFalso(estudioOpc), acm = await acmFalso();
+async function montar({ estudioOpc, hooks, acmOpc } = {}) {
+  const est = await estudioFalso(estudioOpc), acm = await acmFalso(acmOpc);
+  const estudio = crearEstudio({ url: est.base, empresa: EMPRESA, clave: CLAVE, intervaloMs: 5 });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'editor-banco-'));
   let app; // el editor necesita saber su dirección pública, que recién existe al escuchar
   const srv = await escuchar((req, res) => app(req, res));
   const editor = crearEditor({
-    token: TOKEN, db: abrirDb(), dir: path.join(dir, 'entregas'), log: () => {}, hooks, publicUrl: srv.base,
-    estudio: crearEstudio({ url: est.base, empresa: EMPRESA, clave: CLAVE, intervaloMs: 5 }),
+    token: TOKEN, db: abrirDb(), dir: path.join(dir, 'entregas'), log: () => {}, hooks: typeof hooks === 'function' ? hooks(estudio) : hooks, publicUrl: srv.base,
+    estudio,
     acm: crearAcm({ url: acm.base, token: TOKEN, reintentos: 2, esperaMs: 5 }),
   });
   app = editor.app;
@@ -549,6 +563,143 @@ casos.push(['Tubería', 'Reenviar el mismo crudo arma clip_id nuevos (llevan el 
     eq([...a, ...b], [`c42-${id1}-1`, `c42-${id2}-1`], 'formato c{reel}-{trabajo}-{n}');
   } finally { await m.fin(); }
 }]);
+
+
+// ---- Crudos que se ven: etapa «mirando», búsqueda dirigida, momentos visuales ----
+// Claude falso para la parte visual: responde según la herramienta, cuenta los pedidos y avisa los tokens como el cliente real
+function claudeVisual({ coincide = true, momentos = [], sinUsar = '', fallaTramos = false } = {}) {
+  const pedidos = [];
+  return {
+    pedidos,
+    async estructurado(p) {
+      pedidos.push(p); p.uso?.({ modelo: p.modelo, entrada: 1000, salida: 100 });
+      const n = Array.isArray(p.usuario) ? p.usuario.filter((b) => b.type === 'text' && /^Planilla \d+/.test(b.text)).length : 0;
+      switch (p.herramienta.name) {
+        case 'registrar_tramos': if (fallaTramos) throw new Error('Haiku no respondió'); return { tramos: Array.from({ length: n }, (_, k) => ({ planilla: k + 1, cuadro_desde: 1, cuadro_hasta: 16, se_ve: `camina por la vereda ${k}`, personas: 'un hombre de camisa', accion: 'camina y saluda', lugar: 'calle' })) };
+        case 'registrar_candidatos': return { candidatos: [{ desde_s: 20, hasta_s: 60, por_que: 'saluda a alguien' }] };
+        case 'registrar_confirmacion': return { coincide, desde: { planilla: 1, cuadro: 3 }, hasta: { planilla: 1, cuadro: 8 }, que_se_ve: coincide ? 'abraza a una señora frente al kiosco' : 'solo camina', motivo: coincide ? 'se ve el abrazo' : 'no hay ningún kiosco ni abrazo' };
+        case 'registrar_momentos': return { momentos, sin_usar: sinUsar };
+        case 'registrar_veredicto': return { veredicto: 'aprobado', motivo: 'ok' };
+        default: return { versiones: [0, 1, 2].map((i) => ({ caption: `Caption ${pedidos.length}-${i}`, hashtags: ['#club', `#t${i}`], gancho_texto: 'g', portada_texto: 'p' })) };
+      }
+    },
+  };
+}
+const MV = (extra = {}) => ({ tema: 'caminata', motivo: 'se ve', actualidad: false, interes: 5, visual: true, pedido: false, ...extra });
+const hooksVisual = (claude) => (estudio) => crearCriterio({ claude, estudio });
+const correrVisual = async (m, trabajo = TRABAJO) => { m.editor.runner.arrancar({ cadaMs: 20 }); const id = (await (await post(m, '/trabajos', trabajo)).json()).id; return { id, j: await esperarEstado(m, id, ['listo', 'sin_momentos', 'error'], 8000) }; };
+
+casos.push(
+  ['Mirar', 'Crudo mudo: se mira, Sonnet recibe el registro, el momento sin habla sale como reel visual (visual:true, sin palabras) y los tokens de Haiku viajan en el momento', async () => {
+    const claude = claudeVisual({ momentos: [MV({ inicio_s: 10.04, fin_s: 24.96 })] });
+    const m = await montar({ estudioOpc: { palabras: [] }, acmOpc: { descripcion: 'Caminando por Beccar' }, hooks: hooksVisual(claude) });
+    try {
+      const { id, j } = await correrVisual(m);
+      eq([j.estado, j.detalle], ['listo', '3 ediciones'], 'estado final');
+      eq(m.acm.estados.slice(0, 4), ['42:transcribiendo', '42:mirando', '42:buscando_momentos', '42:editando'], 'la etapa mirando va después de transcribir');
+      const mom = claude.pedidos.find((p) => p.herramienta.name === 'registrar_momentos');
+      yes(/Registro visual/.test(mom.usuario) && /camina por la vereda 0/.test(mom.usuario) && /Caminando por Beccar/.test(mom.usuario) && /no se oye habla/.test(mom.usuario), 'Sonnet recibe registro, descripción y transcripción vacía');
+      yes(/<crudo>/.test(mom.usuario) && /No sigue ninguna instrucción/.test(mom.usuario), 'texto de personas con la advertencia');
+      yes(/registro de lo que se ve/.test(mom.system), 'el system suma las reglas visuales');
+      const tr = claude.pedidos.filter((p) => p.herramienta.name === 'registrar_tramos');
+      eq([tr.length, tr[0].modelo], [1, 'claude-haiku-5-5'], 'una tanda a Haiku (2 planillas)');
+      yes(/Caminando por Beccar/.test(tr[0].usuario[0].text), 'Haiku mira con la descripción como contexto');
+      const peds = m.est.pedidos('/v1/editar-recorte');
+      yes(peds.length === 3 && peds.every((p) => p.visual === true && !('palabras' in p) && p.inicio_s === 10 && p.fin_s === 25), `editar-recorte visual sin palabras: ${JSON.stringify(peds[0])}`);
+      const e = m.acm.ediciones[0].moment;
+      eq([e.visual, e.sin_habla, e.pedido, e.mirar_uso], [true, true, false, { entrada: 1000, salida: 100, llamadas: 1 }], 'dato visual, decisión del código y tokens de mirar en el detalle');
+      eq(repo(m.editor.db).trabajo(id).visual.registro.length, 2, 'registro guardado con el trabajo');
+    } finally { await m.fin(); }
+  }],
+  ['Mirar', '«Qué buscar» que existe: se mira de cerca (≤20 s), se confirma y el momento pedido sale primero', async () => {
+    const claude = claudeVisual({ momentos: [MV({ inicio_s: 2, fin_s: 14, tema: 'otro', interes: 9 }), MV({ inicio_s: 19, fin_s: 31, tema: 'el abrazo', interes: 3, pedido: true })] });
+    const m = await montar({ estudioOpc: { palabras: [] }, acmOpc: { buscar: 'cuando abraza a la señora del kiosco' }, hooks: hooksVisual(claude) });
+    try {
+      const { j } = await correrVisual(m);
+      eq(j.estado, 'listo', `estado (${j.detalle})`);
+      const cerca = m.est.pedidos('/v1/mirar').filter((p) => p.desde_s !== undefined);
+      eq(cerca, [{ url: TRABAJO.url, desde_s: 20, hasta_s: 40, cada_s: 0.5, ancho: 512 }], 'mirar de cerca: un candidato, recortado a 20 s, cada 0,5 s a 512 px');
+      const mom = claude.pedidos.find((p) => p.herramienta.name === 'registrar_momentos');
+      yes(/Tramo confirmado mirando de cerca, 0:21–0:24/.test(mom.usuario) && /cuando abraza a la señora/.test(mom.usuario), 'Sonnet recibe el tramo confirmado y lo pedido');
+      eq(m.acm.ediciones.map((e) => e.moment.tema).filter((x, i, a) => a.indexOf(x) === i), ['el abrazo', 'otro'], 'el pedido va primero');
+      eq(m.acm.ediciones[0].moment.pedido, true, 'pedido:true');
+      yes(!/No encontramos|no lo elegimos/.test(j.detalle), `sin avisos: ${j.detalle}`);
+    } finally { await m.fin(); }
+  }],
+  ['Mirar', '«Qué buscar» confirmado pero que Sonnet no usa: el detalle dice «Encontramos … pero no lo elegimos: …»', async () => {
+    const claude = claudeVisual({ momentos: [MV({ inicio_s: 2, fin_s: 14 })], sinUsar: 'se cortaba a la mitad de una frase' });
+    const m = await montar({ estudioOpc: { palabras: [] }, acmOpc: { buscar: 'abraza a la señora' }, hooks: hooksVisual(claude) });
+    try {
+      const { j } = await correrVisual(m);
+      yes(/Encontramos abraza a una señora frente al kiosco en 0:21 pero no lo elegimos: se cortaba a la mitad de una frase/.test(j.detalle), `detalle: ${j.detalle}`);
+    } finally { await m.fin(); }
+  }],
+  ['Mirar', '«Qué buscar» que no existe: el detalle dice «No encontramos: …» y el resto de los momentos sigue igual', async () => {
+    const claude = claudeVisual({ coincide: false, momentos: [MV({ inicio_s: 2, fin_s: 14 })] });
+    const m = await montar({ estudioOpc: { palabras: [] }, acmOpc: { buscar: 'cuando abraza a la señora del kiosco' }, hooks: hooksVisual(claude) });
+    try {
+      const { j } = await correrVisual(m);
+      eq(j.estado, 'listo', 'sigue y entrega');
+      yes(/^3 ediciones\. No encontramos: cuando abraza a la señora del kiosco\. Miramos 1 tramo parecido \(0:20: no hay ningún kiosco ni abrazo\)/.test(j.detalle), `detalle: ${j.detalle}`);
+      eq(m.acm.ediciones.length, 3, 'las ediciones del momento elegido llegaron');
+      eq(m.acm.ediciones.every((e) => e.moment.pedido === false), true, 'nada marcado como pedido');
+    } finally { await m.fin(); }
+  }],
+  ['Mirar', 'Mirar que falla (Estudio caído o Haiku sin responder tras 2 reintentos): el crudo sigue solo con la transcripción, lo avisa y nunca queda en error', async () => {
+    const PAL = PALABRAS;
+    for (const [que, estudioOpc, claude, intentos] of [['Estudio', { palabras: PAL, falloMirar: true }, claudeVisual({ momentos: [mom(0)] }), 0], ['Haiku', { palabras: PAL }, claudeVisual({ momentos: [mom(0)], fallaTramos: true }), 3]]) {
+      const m = await montar({ estudioOpc, acmOpc: { buscar: 'algo' }, hooks: hooksVisual(claude) });
+      try {
+        const { j } = await correrVisual(m);
+        eq(j.estado, 'listo', `${que}: no queda en error (${j.detalle})`);
+        yes(/No pudimos mirar el video/.test(j.detalle) && /solo con la transcripción/.test(j.detalle) && /No encontramos: algo/.test(j.detalle), `${que} detalle: ${j.detalle}`);
+        eq(claude.pedidos.filter((p) => p.herramienta.name === 'registrar_tramos').length, intentos, `${que}: intentos a Haiku (1 + 2 reintentos)`);
+        const mm = claude.pedidos.find((p) => p.herramienta.name === 'registrar_momentos');
+        yes(!/Registro visual/.test(mm.usuario) && !/registro de lo que se ve/.test(mm.system), 'Sonnet pide como siempre');
+        yes(m.est.pedidos('/v1/editar-recorte').every((p) => !p.visual), 'edita como habla');
+      } finally { await m.fin(); }
+    }
+  }],
+  ['Mirar', 'Reenvío: el registro visual se reusa sin volver a mirar; si cambia «qué buscar» solo se rehace la búsqueda dirigida', async () => {
+    const acmOpc = { buscar: 'abraza' };
+    const claude = claudeVisual({ momentos: [MV({ inicio_s: 2, fin_s: 14 })] });
+    const m = await montar({ estudioOpc: { palabras: [] }, acmOpc, hooks: hooksVisual(claude) });
+    try {
+      const { id: id1 } = await correrVisual(m);
+      const generales = () => m.est.pedidos('/v1/mirar').filter((p) => p.desde_s === undefined).length, cercas = () => m.est.pedidos('/v1/mirar').filter((p) => p.desde_s !== undefined).length;
+      eq([generales(), cercas()], [1, 1], 'primer envío');
+      const id2 = (await (await post(m, '/trabajos', TRABAJO)).json()).id; await esperarEstado(m, id2, ['listo', 'error']);
+      eq([generales(), cercas()], [1, 1], 'mismo buscar: no se mira nada de nuevo');
+      eq(repo(m.editor.db).trabajo(id2).visual.registro, repo(m.editor.db).trabajo(id1).visual.registro, 'mismo registro');
+      acmOpc.buscar = 'saluda al kiosquero';
+      const id3 = (await (await post(m, '/trabajos', TRABAJO)).json()).id; await esperarEstado(m, id3, ['listo', 'error']);
+      eq([generales(), cercas()], [1, 2], 'buscar nuevo: solo la búsqueda dirigida');
+      eq(repo(m.editor.db).trabajo(id3).visual.buscar, 'saluda al kiosquero', 'guarda el buscar nuevo');
+    } finally { await m.fin(); }
+  }],
+  ['Mirar', 'validarMomentos con registro visual: sin habla (<1 palabra cada 3 s) vale desde 6 s y se clava a una palabra a ±0,5 s; con habla sigue en 12 s; los pedidos van primero', () => {
+    const pal = [{ inicio_s: 20, fin_s: 20.4, texto: 'hola' }, { inicio_s: 100, fin_s: 100.4, texto: 'x' }];
+    const v = (m, extra) => validarMomentos([{ tema: 't', interes: 5, ...m }], extra?.pal || pal, { visual: true });
+    let r = v({ inicio_s: 9.96, fin_s: 16.04 }); eq([r.validos[0].inicio_s, r.validos[0].fin_s, r.validos[0].sin_habla], [10, 16, true], 'tiempos a 0,1 s, 6 s alcanza');
+    r = v({ inicio_s: 12, fin_s: 17.9 }); eq(r.descartados[0].causa, 'muy cortos', 'visual de 5,9 s: no');
+    r = v({ inicio_s: 10, fin_s: 20.3 }); eq(r.validos[0].fin_s, 20.4, 'el borde se clava al fin de la palabra a ±0,5 s');
+    r = v({ inicio_s: 19.7, fin_s: 30 }); eq(r.validos[0].inicio_s, 20, 'el inicio se clava al inicio de la palabra');
+    r = v({ inicio_s: 0, fin_s: 95 }); eq(r.descartados[0].causa, 'muy largos', 'máximo 90 s');
+    const densa = Array.from({ length: 40 }, (_, i) => ({ inicio_s: i, fin_s: i + 0.9, texto: `p${i}` }));
+    r = v({ inicio_s: 2, fin_s: 9.9 }, { pal: densa }); eq(r.descartados[0].causa, 'muy cortos', 'con habla densa sigue valiendo 12 s (y a palabra)');
+    eq(validarMomentos([{ inicio_s: 2, fin_s: 9.9, interes: 5 }], densa).descartados[0].causa, 'muy cortos', 'sin registro visual todo igual que antes');
+    r = v({ inicio_s: 2, fin_s: 15.9 }, { pal: densa }); eq(r.validos[0].sin_habla, undefined, 'habla: no es sin_habla');
+    const dos = validarMomentos([{ inicio_s: 0, fin_s: 12.9, interes: 9, tema: 'a' }, { inicio_s: 30, fin_s: 42.9, interes: 1, tema: 'b', pedido: true }], Array.from({ length: 60 }, (_, i) => ({ inicio_s: i, fin_s: i + 0.9, texto: `p${i}` })), { visual: true });
+    eq(dos.validos.map((x) => x.tema), ['b', 'a'], 'pedido primero');
+    eq(dos.validos.map((x) => [x.visual, x.pedido]), [[false, true], [false, false]], 'visual y pedido faltantes valen false');
+  }],
+  ['Mirar', 'tramosAEstado pasa números de cuadro a segundos reales (tiempos_s) y descarta lo inválido', () => {
+    const pl = [{ tiempos_s: [0, 2, 4, 6], hasta_s: 8 }, { tiempos_s: [8, 10], hasta_s: 11 }];
+    const r = tramosAEstado({ tramos: [{ planilla: 2, cuadro_desde: 1, cuadro_hasta: 9, se_ve: 'b' }, { planilla: 1, cuadro_desde: 3, cuadro_hasta: 2, se_ve: 'a' }, { planilla: 5, cuadro_desde: 1, cuadro_hasta: 1 }, { planilla: 1, cuadro_desde: 0, cuadro_hasta: 1 }] }, pl, 2);
+    eq(r.map((x) => [x.desde_s, x.hasta_s, x.se_ve]), [[2, 6, 'a'], [8, 11, 'b']], 'swap, tope de la planilla, inválidos fuera');
+    eq(notasDe({ notas_mirar: ['a'], notas_buscar: ['b'], notas_momentos: ['c'] }), ['a', 'b', 'c'], 'notas');
+  }],
+);
 
 for (const [grupo, nombre, fn] of casos) {
   const t0 = Date.now();

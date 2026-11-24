@@ -14,7 +14,7 @@ const DIMS = Object.keys(OPCIONES);
 const FACTOR_LARGO = { completo: 1, medio: 0.7, corto: 0.45 };
 const POS_PORTADA = { completo: 0.4, medio: 0.25, corto: 0.1 };
 const VOLUMEN = 0.25;
-export const MIN_LARGO_S = 12;
+export const MIN_LARGO_S = 12, MIN_LARGO_VISUAL_S = 6; // un momento sin habla puede ser de 6 s
 
 // Los aprendizajes llegan vacíos hoy; pueden venir como objeto o como lista de objetos (se juntan, gana el último). Vacío = sin aprendizajes.
 export function normalizarAprendizajes(a) {
@@ -88,7 +88,9 @@ export function construirReceta({ v, momento, palabras = [], textos, marca = {} 
   const disp = tramos ? tramos.reduce((a, t) => a + (t.fin_s - t.inicio_s), 0) - (desde - momento.inicio_s) : momento.fin_s - desde;
   const tope = Number(marca.largo_max_s) >= 6 ? Math.min(90, Number(marca.largo_max_s)) : 90; // el largo máximo del proyecto (ej.: 60 s)
   // nunca menos de 12 s (o el fragmento entero si es más corto): después el Estudio saca los silencios y un reel de 5 s no sirve
-  const largo_s = r1(Math.min(tope, Math.max(Math.min(MIN_LARGO_S, disp), disp * FACTOR_LARGO[v.largo])));
+  // (un momento visual —sin habla— baja el mínimo a 6 s; el audio real adelante y la música baja la mezcla el Estudio, la receta sigue con el volumen de siempre)
+  const minimo = momento.datos?.sin_habla === true ? MIN_LARGO_VISUAL_S : MIN_LARGO_S;
+  const largo_s = r1(Math.min(tope, Math.max(Math.min(minimo, disp), disp * FACTOR_LARGO[v.largo])));
   const mr = marcaParaReceta(marca);
   const gancho = { desde_s: desde };
   const gtxt = String(textos.gancho_texto || '').trim().slice(0, 60);

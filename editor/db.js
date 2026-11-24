@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS ediciones (
 `);
   if (!db.prepare('PRAGMA table_info(momentos)').all().some((c) => c.name === 'estado')) db.exec("ALTER TABLE momentos ADD COLUMN estado TEXT NOT NULL DEFAULT 'elegido'");
   if (!db.prepare('PRAGMA table_info(ediciones)').all().some((c) => c.name === 'uuid')) db.exec("ALTER TABLE ediciones ADD COLUMN uuid TEXT NOT NULL DEFAULT ''");
+  if (!db.prepare('PRAGMA table_info(trabajos)').all().some((c) => c.name === 'visual')) db.exec('ALTER TABLE trabajos ADD COLUMN visual TEXT');
   return db;
 }
 
@@ -40,7 +41,7 @@ export function repo(db) {
   const get = (sql, ...p) => db.prepare(sql).get(...p);
   const all = (sql, ...p) => db.prepare(sql).all(...p);
   const run = (sql, ...p) => db.prepare(sql).run(...p);
-  const trabajo = (t) => t && { ...t, transcripcion: P(t.transcripcion) };
+  const trabajo = (t) => t && { ...t, transcripcion: P(t.transcripcion), visual: P(t.visual) };
   return {
     crearTrabajo({ project_id, reel_id, url, duracion_s, aprendizajes_url }) {
       // un crudo con un trabajo en marcha no se duplica
@@ -54,6 +55,9 @@ export function repo(db) {
     pendientes: () => all(`SELECT id FROM trabajos WHERE estado NOT IN ('listo','sin_momentos','error') ORDER BY id`).map((r) => r.id),
     estado(id, estado, detalle = '') { run("UPDATE trabajos SET estado = ?, detalle = ?, updated_at = datetime('now') WHERE id = ?", estado, detalle, id); },
     guardarTranscripcion(id, t) { run('UPDATE trabajos SET transcripcion = ? WHERE id = ?', J(t), id); },
+    // el registro visual (etapa «mirando») se guarda con el trabajo; un reenvío del mismo crudo reusa el último que salió bien
+    guardarVisual(id, v) { run('UPDATE trabajos SET visual = ? WHERE id = ?', J(v), id); },
+    visualPrevio: (reel_id, excluir) => all('SELECT visual FROM trabajos WHERE reel_id = ? AND id <> ? AND visual IS NOT NULL ORDER BY id DESC', reel_id, excluir).map((r) => P(r.visual)).find((v) => v && !v.fallo) || null,
     // los momentos se guardan una sola vez: si el trabajo se retoma, se reusan (y con ellos el clip_id)
     momentos: (tid) => all('SELECT * FROM momentos WHERE trabajo_id = ? ORDER BY idx', tid).map((m) => ({ ...m, datos: P(m.datos) || {} })),
     guardarMomento(tid, idx, clip_id, inicio_s, fin_s, datos, estado = 'elegido') {

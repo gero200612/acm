@@ -1,7 +1,8 @@
 // El corredor de trabajos. La tubería es siempre la misma y cada etapa avisa a ACM:
-//   transcribiendo → buscando_momentos → editando → revisando → listo   (o sin_momentos / error)
+//   transcribiendo → mirando → buscando_momentos → editando → revisando → listo   (o sin_momentos / error)
 // Las partes con criterio se inyectan (las llenan las tareas siguientes):
-//   elegirMomentos({ trabajo, transcripcion, aprendizajes })           → [{ inicio_s, fin_s, estado?, ...datos }]  (o { momentos, motivo }; estado 'candidato' = no se edita)
+//   mirarVideo({ trabajo, transcripcion, descripcion, buscar, previo, progreso }) → registro visual (ver mirar.js); sin este gancho no hay etapa «mirando»
+//   elegirMomentos({ trabajo, transcripcion, aprendizajes, visual, descripcion, buscar })           → [{ inicio_s, fin_s, estado?, ...datos }]  (o { momentos, motivo }; estado 'candidato' = no se edita)
 //   armarRecetas({ trabajo, momento, transcripcion, aprendizajes })    → [receta, ...]  (hasta 3 por momento)
 //   revisar({ trabajo, momento, edicion, resultado, tecnica, cuadros, palabras }) → { veredicto: 'aprobado'|'rechazado'|'dudoso', motivo, correccion? }   (el analista)
 //        o, el formato viejo, { review: 'pendiente'|'aprobado'|'rechazado', caption?, hashtags?, notas? }
@@ -13,6 +14,7 @@ import path from 'node:path';
 import { repo, TERMINALES } from './db.js';
 import { corregirReceta as corregirPorDefecto } from './analista.js';
 import { ajustePorPalabras, aplicarAjuste } from './ajuste.js';
+import { notasDe } from './mirar.js';
 
 // lo que el Estudio no conoce (su esquema es estricto) se saca antes de mandarle la receta
 const META_RECETA = ['explora', 'caption', 'hashtags', 'variables'];
@@ -20,7 +22,9 @@ export const paraEstudio = (receta) => Object.fromEntries(Object.entries(receta 
 const paraAcm = (receta) => Object.fromEntries(Object.entries(receta || {}).filter(([k]) => !['caption', 'hashtags'].includes(k)));
 export const DIAS_ACTUALIDAD = 3;
 // un tema partido viaja al Estudio con sus tramos (se pegan en un solo recorte)
-const tramosDe = (m) => (Array.isArray(m.datos?.tramos) && m.datos.tramos.length > 1 ? { tramos: m.datos.tramos } : {});
+const tramosDe = (m) => ({ ...(Array.isArray(m.datos?.tramos) && m.datos.tramos.length > 1 ? { tramos: m.datos.tramos } : {}), ...(m.datos?.sin_habla ? { visual: true } : {}) });
+// un momento sin habla viaja con `visual: true` y las palabras del tramo solo si las hay
+const pedidoEdicion = (url, palabras, m, receta) => ({ url, ...(palabras.length || !m.datos?.sin_habla ? { palabras } : {}), inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(receta), ...tramosDe(m) });
 const sqliteAIso = (s) => new Date(String(s).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z'));
 
 export const rellenos = {
@@ -30,10 +34,10 @@ export const rellenos = {
 };
 const MAX_RECETAS = 3;
 
-export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegirMomentos, armarRecetas = rellenos.armarRecetas, revisar = rellenos.revisar, corregirReceta = corregirPorDefecto, ajustar = async ({ receta, pedido, momento }) => { const c = ajustePorPalabras(pedido, receta); return { receta: aplicarAjuste(receta, c, momento), entendido: c.entendido }; }, publicUrl = '', dir = '', log = console.log } = {}) {
+export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomentos = rellenos.elegirMomentos, armarRecetas = rellenos.armarRecetas, revisar = rellenos.revisar, corregirReceta = corregirPorDefecto, ajustar = async ({ receta, pedido, momento }) => { const c = ajustePorPalabras(pedido, receta); return { receta: aplicarAjuste(receta, c, momento), entendido: c.entendido }; }, publicUrl = '', dir = '', log = console.log } = {}) {
   const R = repo(db);
   if (dir) fs.mkdirSync(dir, { recursive: true });
-  let andando = false, parar = false, despertar = null, motivoSinMomentos = '';
+  let andando = false, parar = false, despertar = null, motivoSinMomentos = '', notas = [];
 
   // cada cambio de etapa queda en la base y se le avisa a ACM; si ACM no contesta, el trabajo sigue
   async function etapa(t, estado, detalle = '') {
@@ -49,16 +53,39 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     return tr;
   }
 
+  // Etapa «mirando»: nunca deja el crudo en error. Retomado: se reusa lo guardado; reenviado: se reusa el registro del envío anterior
+  // (si cambió «qué buscar», solo se rehace la búsqueda dirigida).
+  async function mirando(t, transcripcion, ctx) {
+    const buscar = ctx.buscar || '', descripcion = ctx.descripcion || '';
+    try {
+      if (t.visual) return t.visual;
+      const previo = R.visualPrevio(t.reel_id, t.id);
+      if (previo && previo.buscar === buscar) { const v = { ...previo, uso: { entrada: 0, salida: 0, llamadas: 0, reusado: true }, notas_momentos: [] }; R.guardarVisual(t.id, v); return v; }
+      await etapa(t, 'mirando');
+      const v = await mirarVideo({ trabajo: t, transcripcion, descripcion, buscar, previo, progreso: (x) => R.estado(t.id, 'mirando', x) });
+      R.guardarVisual(t.id, v);
+      return v;
+    } catch (err) {
+      log(`[trabajo ${t.id}] no pude mirar el video: ${err.message}`);
+      const v = { version: 1, registro: [], fallo: true, motivo_fallo: err.message, buscar, confirmados: [], descartados: [], uso: { entrada: 0, salida: 0, llamadas: 0 }, notas_buscar: buscar ? [`No encontramos: ${buscar} (no se pudo mirar el video).`] : [],
+        notas_mirar: [`No pudimos mirar el video (${err.message.slice(0, 120)}): se siguió solo con la transcripción.`] };
+      try { R.guardarVisual(t.id, v); } catch {}
+      return v;
+    }
+  }
+
   let R_pedidos = { comentarios: [], rechazos: [] }; // lo último que pidió el equipo (para el analista)
-  async function momentos(t, transcripcion, aprendizajes, investigacion = [], publicos = [], pedidos, publicoCrudo = null) {
+  async function momentos(t, transcripcion, aprendizajes, investigacion = [], publicos = [], pedidos, publicoCrudo = null, vis = null, ctx = {}) {
     let ms = R.momentos(t.id);
     if (ms.length) return ms; // retomado: se reusan (el clip_id no cambia)
     await etapa(t, 'buscando_momentos');
-    const res = (await elegirMomentos({ trabajo: t, transcripcion, aprendizajes, investigacion, publicos, pedidos, publicoCrudo })) || [];
+    const res = (await elegirMomentos({ trabajo: t, transcripcion, aprendizajes, investigacion, publicos, pedidos, publicoCrudo, visual: vis, descripcion: ctx.descripcion || '', buscar: ctx.buscar || '' })) || [];
+    if (!Array.isArray(res) && res.notas?.length && vis) { notas.push(...res.notas); R.guardarVisual(t.id, { ...vis, notas_momentos: res.notas }); }
     const elegidos = Array.isArray(res) ? res : res.momentos || [];
     if (!Array.isArray(res) && !elegidos.length && res.motivo) motivoSinMomentos = res.motivo;
     elegidos.forEach((m, i) => {
       const { inicio_s, fin_s, estado, ...datos } = m;
+      if (vis?.uso?.llamadas || vis?.uso?.reusado) datos.mirar_uso = vis.uso; // tokens de Haiku por crudo, para el detalle técnico del Laboratorio
       if (!(Number(fin_s) > Number(inicio_s) && Number(inicio_s) >= 0)) throw new Error(`El momento ${i + 1} tiene tiempos inválidos`);
       // el clip_id lleva el trabajo: reenviar el mismo crudo arma recortes nuevos que no chocan con los del envío anterior
       R.guardarMomento(t.id, i, `c${t.reel_id}-${t.id}-${i + 1}`, Number(inicio_s), Number(fin_s), datos, estado || 'elegido');
@@ -82,7 +109,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
       const m = ms.find((x) => x.id === e.momento_id);
       const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
       try {
-        const res = await estudio.editarRecorte({ url: t.url, palabras, inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(e.receta), ...tramosDe(m) });
+        const res = await estudio.editarRecorte(pedidoEdicion(t.url, palabras, m, e.receta));
         const base = crypto.randomUUID();
         const archivo = await estudio.descargar(res.archivo, path.join(dir, `${base}.mp4`));
         const portada = res.portada ? await estudio.descargar(res.portada, path.join(dir, `${base}.jpg`)).catch(() => '') : '';
@@ -107,7 +134,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
   // vuelve a editar con la receta corregida y deja la edición «editada» con el resultado nuevo
   async function rehacer(t, m, e, receta, transcripcion) {
     const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
-    const res = await estudio.editarRecorte({ url: t.url, palabras, inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(receta), ...tramosDe(m) });
+    const res = await estudio.editarRecorte(pedidoEdicion(t.url, palabras, m, receta));
     const base = crypto.randomUUID();
     const archivo = await estudio.descargar(res.archivo, path.join(dir, `${base}.mp4`));
     const portada = res.portada ? await estudio.descargar(res.portada, path.join(dir, `${base}.jpg`)).catch(() => '') : '';
@@ -171,7 +198,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
     const { e, m } = f, t = { ...f.t, url: url || f.t.url };
     const palabras = (t.transcripcion?.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
     const { receta, entendido } = await ajustar({ receta: e.receta, pedido, momento: m, palabras });
-    const res = await estudio.editarRecorte({ url: t.url, palabras, inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(receta), ...tramosDe(m) });
+    const res = await estudio.editarRecorte(pedidoEdicion(t.url, palabras, m, receta));
     const idx = (db.prepare('SELECT max(idx) AS n FROM ediciones WHERE momento_id = ?').get(m.id)?.n ?? 0) + 1;
     const nid = R.guardarEdicion(t.id, m.id, idx, receta), nueva = R.ediciones(t.id).find((x) => x.id === nid);
     const base = crypto.randomUUID();
@@ -212,10 +239,14 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
       const ctx = acm.contexto ? await acm.contexto(t.project_id, t.reel_id) : { aprendizajes: (await acm.aprendizajes?.(t.project_id)) ?? [] };
       const aprendizajes = ctx.aprendizajes ?? [], investigacion = ctx.investigacion ?? [], publicos = ctx.publicos ?? [], marca = ctx.marca ?? {}, porPublico = ctx.porPublico ?? {}, pedidos = ctx.pedidos ?? { comentarios: [], rechazos: [] }, ejemplosTextos = ctx.ejemplosTextos ?? [];
       R_pedidos = pedidos;
+      notas = [];
       const transcripcion = await transcribir(t);
       t = R.trabajo(id);
-      const ms = await momentos(t, transcripcion, aprendizajes, investigacion, publicos, pedidos, ctx.publicoCrudo ?? null);
-      if (!ms.length) { await etapa(t, 'sin_momentos', motivoSinMomentos || 'No encontramos momentos para recortar en este video'); return R.trabajo(id); }
+      const vis = mirarVideo ? await mirando(t, transcripcion, ctx) : null;
+      if (vis) { t = R.trabajo(id); notas = notasDe(vis); }
+      const ms = await momentos(t, transcripcion, aprendizajes, investigacion, publicos, pedidos, ctx.publicoCrudo ?? null, vis, ctx);
+      const conNotas = (s) => (notas.length ? `${s}. ${notas.join(' ')}` : s).slice(0, 700);
+      if (!ms.length) { await etapa(t, 'sin_momentos', conNotas(motivoSinMomentos || 'No encontramos momentos para recortar en este video')); return R.trabajo(id); }
       await armar(t, ms, transcripcion, aprendizajes, marca, porPublico, pedidos, ejemplosTextos);
       if (!R.ediciones(t.id).length) { await etapa(t, 'sin_momentos', 'Hay momentos pero ninguna receta para editarlos'); return R.trabajo(id); }
       await etapa(t, 'editando', `${R.ediciones(t.id).length} ediciones`);
@@ -224,7 +255,7 @@ export function crearRunner({ db, estudio, acm, elegirMomentos = rellenos.elegir
       await revisarYEntregar(t, ms, transcripcion);
       const eds = R.ediciones(t.id), bien = eds.filter((e) => e.estado === 'entregada').length;
       if (!bien) await etapa(t, 'error', `Ninguna de las ${eds.length} ediciones salió: ${eds.find((e) => e.error)?.error || ''}`.slice(0, 400));
-      else await etapa(t, 'listo', bien < eds.length ? `${bien} de ${eds.length} ediciones` : `${bien} ediciones`);
+      else await etapa(t, 'listo', conNotas(bien < eds.length ? `${bien} de ${eds.length} ediciones` : `${bien} ediciones`));
     } catch (err) {
       log(`[trabajo ${id}] falló: ${err.message}`);
       await etapa(t, 'error', err.message.slice(0, 400));

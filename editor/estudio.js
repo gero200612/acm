@@ -48,6 +48,11 @@ export function crearEstudio({ url, empresa, clave, intervaloMs = 2000, esperaMa
       const { id } = await pedir('POST', '/v1/editar-recorte', pedido);
       return esperar(`/v1/editar-recorte/${id}`, alAvanzar);
     },
+    // mirar el crudo: planillas de cuadros {version, duracion_s, cada_s, planillas:[{ruta, desde_s, hasta_s, tiempos_s}]}
+    async mirar(pedido, alAvanzar) {
+      const { id } = await pedir('POST', '/v1/mirar', pedido);
+      return esperar(`/v1/mirar/${id}`, alAvanzar);
+    },
     // un cuadro (imagen) del Estudio, para que lo mire el analista: {tipo, base64}
     async cuadro(ruta) {
       const r = await fetchFn(resolver(ruta), { headers: headers(), signal: AbortSignal.timeout(60000) });

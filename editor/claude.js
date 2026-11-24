@@ -6,7 +6,7 @@
 // Sin ANTHROPIC_API_KEY falla con un mensaje claro (el trabajo termina en «error», el servicio no se cae).
 import Anthropic from '@anthropic-ai/sdk';
 
-export const MODELOS = { momentos: 'claude-sonnet-5-5', textos: 'claude-haiku-5-5', analista: 'claude-sonnet-5-5' };
+export const MODELOS = { momentos: 'claude-sonnet-5-5', textos: 'claude-haiku-5-5', mirar: 'claude-haiku-5-5', analista: 'claude-sonnet-5-5' };
 
 // Las salidas JSON no aceptan topes numéricos, de largo ni de cantidad, y exigen additionalProperties: false en cada objeto.
 // Se sacan del esquema que viaja; los topes los controla cada llamador al validar lo que vuelve (validarTextos, etc.).
@@ -26,7 +26,7 @@ const CON_RESPALDO = /^claude-(sonnet-5-5|opus-5-5)$/;
 export function crearClaude({ apiKey = process.env.ANTHROPIC_API_KEY, sdk } = {}) {
   let cliente = sdk;
   return {
-    async estructurado({ modelo, system, usuario, herramienta, maxTokens = 8000, esfuerzo = 'medium' }) {
+    async estructurado({ modelo, system, usuario, herramienta, maxTokens = 8000, esfuerzo = 'medium', uso }) {
       if (!cliente) {
         if (!apiKey) throw new Error('Falta ANTHROPIC_API_KEY: sin ella no puedo elegir momentos ni armar las recetas. Cargala en el entorno del editor y reintentá.');
         cliente = new Anthropic({ apiKey });
@@ -42,6 +42,8 @@ export function crearClaude({ apiKey = process.env.ANTHROPIC_API_KEY, sdk } = {}
       const r = CON_RESPALDO.test(modelo)
         ? await cliente.beta.messages.create({ ...pedido, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' })
         : await cliente.messages.create(pedido);
+      // tokens de esta llamada, para quien quiera sumarlos (el costo de mirar por crudo)
+      if (typeof uso === 'function') uso({ modelo, entrada: r.usage?.input_tokens ?? 0, salida: r.usage?.output_tokens ?? 0 });
       if (r.stop_reason === 'refusal') throw new Error(`Claude no quiso responder (${r.stop_details?.category || 'sin categoría'})`);
       if (r.stop_reason === 'max_tokens') throw new Error('La respuesta de Claude quedó cortada (tope de tokens)');
       const texto = (r.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');

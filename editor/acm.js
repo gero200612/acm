@@ -30,7 +30,9 @@ export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn 
         return { aprendizajes: j.aprendizajes || [], investigacion: Array.isArray(j.investigacion) ? j.investigacion : [], publicos: Array.isArray(j.publicos) ? j.publicos : [], marca: j.marca && typeof j.marca === 'object' ? j.marca : {}, porPublico: j.por_publico && typeof j.por_publico === 'object' ? j.por_publico : {},
           // lo que el equipo pidió (comentarios en un segundo y motivos de rechazo) y cómo escribe el dirigente
           pedidos: j.pedidos && typeof j.pedidos === 'object' ? j.pedidos : { comentarios: [], rechazos: [] }, ejemplosTextos: Array.isArray(j.ejemplos_textos) ? j.ejemplos_textos : [],
-          publicoCrudo: j.publico_crudo && typeof j.publico_crudo === 'object' ? j.publico_crudo : null };
+          publicoCrudo: j.publico_crudo && typeof j.publico_crudo === 'object' ? j.publico_crudo : null,
+          // lo que el equipo escribió al subir el crudo: de qué es y qué buscar adentro
+          descripcion: typeof j.descripcion === 'string' ? j.descripcion : '', buscar: typeof j.buscar === 'string' ? j.buscar : '' };
       } catch { return { aprendizajes: [], investigacion: [] }; }
     },
     async aprendizajes(projectId) { return (await this.contexto(projectId)).aprendizajes; },

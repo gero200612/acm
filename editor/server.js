@@ -60,7 +60,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     estudio: crearEstudio({ url: process.env.ESTUDIO_URL, empresa: process.env.ESTUDIO_EMPRESA, clave: process.env.ESTUDIO_CLAVE }),
     acm: crearAcm({ url: process.env.ACM_URL, token: process.env.EDITOR_TOKEN }),
     // Tarea 6: momentos y recetas con Claude (sin ANTHROPIC_API_KEY el trabajo termina en «error» con el motivo). Tarea 7: revisar
-    hooks: crearCriterio({ claude: crearClaude() }), // incluye ajustar (rehacer a pedido)
+    hooks: crearCriterio({ claude: crearClaude(), estudio: crearEstudio({ url: process.env.ESTUDIO_URL, empresa: process.env.ESTUDIO_EMPRESA, clave: process.env.ESTUDIO_CLAVE }) }), // incluye ajustar (rehacer a pedido)
   });
   const srv = app.listen(Number(process.env.PORT || 4000), () => console.log(`Editor en http://localhost:${srv.address().port}`));
   runner.arrancar();
