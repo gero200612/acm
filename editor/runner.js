@@ -24,7 +24,19 @@ export const DIAS_ACTUALIDAD = 3;
 // un tema partido viaja al Estudio con sus tramos (se pegan en un solo recorte)
 const tramosDe = (m) => ({ ...(Array.isArray(m.datos?.tramos) && m.datos.tramos.length > 1 ? { tramos: m.datos.tramos } : {}), ...(m.datos?.sin_habla ? { visual: true } : {}) });
 // un momento sin habla viaja con `visual: true` y las palabras del tramo solo si las hay
-const pedidoEdicion = (url, palabras, m, receta) => ({ url, ...(palabras.length || !m.datos?.sin_habla ? { palabras } : {}), inicio_s: m.inicio_s, fin_s: m.fin_s, receta: paraEstudio(receta), ...tramosDe(m) });
+// Aire al final: un segundo después de la última palabra (Gero: «termina la charla y corta de una»), sin meterse en la palabra
+// siguiente del crudo ni pasarse del video
+export const AIRE_FINAL_S = 1;
+function aireFinal(fin, todas = [], duracion = 0) {
+  const sig = todas.filter((p) => p.inicio_s >= fin - 0.01).reduce((a, p) => Math.min(a, p.inicio_s), Infinity);
+  const tope = Math.min(sig - 0.05, Number(duracion) > 0 ? Number(duracion) : Infinity, fin + AIRE_FINAL_S);
+  return Math.round(Math.max(fin, tope) * 1000) / 1000;
+}
+const pedidoEdicion = (url, palabras, m, receta, todas = [], duracion = 0) => {
+  const habla = !m.datos?.sin_habla, fin = habla ? aireFinal(m.fin_s, todas, duracion) : m.fin_s, tr = tramosDe(m);
+  if (habla && tr.tramos) tr.tramos = tr.tramos.map((x, i, a) => (i === a.length - 1 ? { ...x, fin_s: aireFinal(x.fin_s, todas, duracion) } : x));
+  return { url, ...(palabras.length || !m.datos?.sin_habla ? { palabras } : {}), inicio_s: m.inicio_s, fin_s: fin, receta: paraEstudio(receta), ...tr };
+};
 const sqliteAIso = (s) => new Date(String(s).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z'));
 
 export const rellenos = {
@@ -116,7 +128,7 @@ export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomento
       const m = ms.find((x) => x.id === e.momento_id);
       const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
       try {
-        const res = await estudio.editarRecorte(pedidoEdicion(t.url, palabras, m, e.receta));
+        const res = await estudio.editarRecorte(pedidoEdicion(t.url, palabras, m, e.receta, transcripcion.palabras, t.duracion_s));
         const base = crypto.randomUUID();
         const archivo = await estudio.descargar(res.archivo, path.join(dir, `${base}.mp4`));
         const portada = res.portada ? await estudio.descargar(res.portada, path.join(dir, `${base}.jpg`)).catch(() => '') : '';
@@ -141,7 +153,7 @@ export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomento
   // vuelve a editar con la receta corregida y deja la edición «editada» con el resultado nuevo
   async function rehacer(t, m, e, receta, transcripcion) {
     const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
-    const res = await estudio.editarRecorte(pedidoEdicion(t.url, palabras, m, receta));
+    const res = await estudio.editarRecorte(pedidoEdicion(t.url, palabras, m, receta, transcripcion.palabras, t.duracion_s));
     const base = crypto.randomUUID();
     const archivo = await estudio.descargar(res.archivo, path.join(dir, `${base}.mp4`));
     const portada = res.portada ? await estudio.descargar(res.portada, path.join(dir, `${base}.jpg`)).catch(() => '') : '';
@@ -205,7 +217,7 @@ export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomento
     const { e, m } = f, t = { ...f.t, url: url || f.t.url };
     const palabras = (t.transcripcion?.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
     const { receta, entendido } = await ajustar({ receta: e.receta, pedido, momento: m, palabras });
-    const res = await estudio.editarRecorte(pedidoEdicion(t.url, palabras, m, receta));
+    const res = await estudio.editarRecorte(pedidoEdicion(t.url, palabras, m, receta, t.transcripcion?.palabras, t.duracion_s));
     const idx = (db.prepare('SELECT max(idx) AS n FROM ediciones WHERE momento_id = ?').get(m.id)?.n ?? 0) + 1;
     const nid = R.guardarEdicion(t.id, m.id, idx, receta), nueva = R.ediciones(t.id).find((x) => x.id === nid);
     const base = crypto.randomUUID();

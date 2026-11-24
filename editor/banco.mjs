@@ -159,10 +159,10 @@ const casos = [
       eq(m.est.log.filter((l) => l.startsWith('sin-auth')), [], 'todo pedido al Estudio lleva X-Empresa y Bearer');
       const peds = m.est.pedidos('/v1/editar-recorte');
       eq(peds.map((p) => p.receta.id), ['rapido', 'calmo'], 'recetas pedidas');
-      eq([peds[0].inicio_s, peds[0].fin_s, peds[0].palabras.map((p) => p.texto)], [0, 12, ['hola', 'chau']], 'solo las palabras del momento');
+      eq([peds[0].inicio_s, peds[0].fin_s, peds[0].palabras.map((p) => p.texto)], [0, 13, ['hola', 'chau']], 'solo las palabras del momento, con un segundo de aire al final');
       eq(m.acm.ediciones.length, 2, 'ediciones entregadas');
       const e = m.acm.ediciones[0];
-      yes(/^[0-9a-f-]{36}$/.test(e.edicion_id) && e.edicion_id !== m.acm.ediciones[1].edicion_id, 'edicion_id: un UUID distinto por edición'); eq([e.crudo_id, e.clip_id, e.review, e.caption, e.duration, e.bajado, e.portada_bajada], [42, `c42-${id}-1`, 'aprobado', 'Texto revisado', 12, VIDEO.length, true], 'entrega con archivo bajable');
+      yes(/^[0-9a-f-]{36}$/.test(e.edicion_id) && e.edicion_id !== m.acm.ediciones[1].edicion_id, 'edicion_id: un UUID distinto por edición'); eq([e.crudo_id, e.clip_id, e.review, e.caption, e.duration, e.bajado, e.portada_bajada], [42, `c42-${id}-1`, 'aprobado', 'Texto revisado', 13, VIDEO.length, true], 'entrega con archivo bajable');
       eq(m.acm.ediciones.map((x) => x.clip_id), [`c42-${id}-1`, `c42-${id}-1`], 'las dos versiones comparten clip_id');
       eq(fs.readdirSync(path.join(m.dir, 'entregas')), [], 'los archivos entregados se borran');
       const g = await (await fetch(`${m.srv.base}/trabajos/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } })).json();

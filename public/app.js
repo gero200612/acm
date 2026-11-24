@@ -23,6 +23,7 @@ const ICON = {
   plus: 'M12 5v14M5 12h14',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   x: 'M6 6l12 12M18 6 6 18',
+  phone: 'M8 2.5h8a1.5 1.5 0 0 1 1.5 1.5v16a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V4A1.5 1.5 0 0 1 8 2.5zM11 18.5h2',
   check: 'm5 12 5 5 9-10',
   cal: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
   up: 'M12 16V4m0 0-5 5m5-5 5 5M4 20h16',
@@ -516,7 +517,8 @@ function aprobarView() {
   const prevs = (c) => { const L = c.reels.filter((r) => r.review === 'rechazado'); return L.length ? `<details class="ap-prev"><summary>${L.length === 1 ? 'Una versión anterior rechazada' : `${L.length} versiones anteriores rechazadas`}</summary>${L.map((r) => `<div class="ap-prev-row">${coverOf(r)}<div><b>${esc(r.title || 'Versión')}</b><p class="small muted">${r.review_note ? `«${esc(r.review_note)}»` : 'Sin comentario'}</p></div></div>`).join('')}</details>` : ''; };
   const version = (r, i) => `
       <article class="ap-ed" data-id="${r.id}">
-        <video src="/media/${esc(r.file)}${r.cover ? '' : '#t=0.5'}" ${r.cover ? `poster="/media/${esc(r.cover)}" preload="none"` : 'preload="metadata"'} controls playsinline></video>
+        <video src="/media/${esc(r.file)}${r.cover ? '' : '#t=0.5'}" ${r.cover ? `poster="/media/${esc(r.cover)}" preload="none"` : 'preload="metadata"'} controls controlslist="nofullscreen" playsinline></video>
+        <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="/media/${esc(r.file)}">${icon('phone', 15)} Ver como celular</button>
         ${tcBlock(r)}
         <div class="ap-ed-h"><b>Versión ${i + 1}</b>${r.duration ? `<span class="small muted">${durTxt(r.duration)}</span>` : ''}</div>
         ${r.redo_pedido ? `<p class="ap-redone">${icon('refresh', 14)} Rehecha: pediste «${esc(r.redo_pedido)}»${r.redo_detail ? `<span>${esc(r.redo_detail)}</span>` : ''}</p>` : ''}
@@ -1431,7 +1433,8 @@ function reelForm(r) {
 function crudoInfo(r) {
   const T = crudoTree(r), pid = state.project.id;
   const ed = (e, i) => `<div class="cm-ed">
-      <video src="/media/${esc(e.file)}${e.cover ? '' : '#t=0.5'}" ${e.cover ? `poster="/media/${esc(e.cover)}" preload="none"` : 'preload="metadata"'} controls playsinline></video>
+      <video src="/media/${esc(e.file)}${e.cover ? '' : '#t=0.5'}" ${e.cover ? `poster="/media/${esc(e.cover)}" preload="none"` : 'preload="metadata"'} controls controlslist="nofullscreen" playsinline></video>
+      <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="/media/${esc(e.file)}">${icon('phone', 15)} Ver como celular</button>
       <span class="cm-ed-h"><b>Edición ${i + 1}</b>${revChip(e)}</span><span class="small muted">${esc(e.title)}${e.duration ? ` · ${durTxt(e.duration)}` : ''}</span><a class="cm-go small" href="#/p/${pid}/reel/${e.id}">Ver detalle</a></div>`;
   const block = (head, sub, eds) => `<section class="card cm"><div class="cm-h">${head}${sub ? `<p class="small muted">${sub}</p>` : ''}</div><div class="cm-eds">${eds.map(ed).join('')}</div></section>`;
   const q = r.buscar ? `<p class="small"><b>Qué buscamos:</b> ${esc(r.buscar)}</p>` : '';
@@ -2442,6 +2445,14 @@ document.addEventListener('click', async (e) => {
       case 'move-day': moveDayDialog(el.dataset.day); break;
       case 'camp-new': campDialog(); break;
       case 'up-kind': state.upKind = el.dataset.k; render(); break;
+      case 'ver-cel': { // el video a pantalla completa pero vertical, como en el celular (la pantalla completa del navegador lo deja acostado en la compu)
+        document.querySelectorAll('video').forEach((v) => v.pause());
+        const d = document.createElement('dialog'); d.className = 'cel-dlg';
+        d.innerHTML = `<button class="icon-btn cel-close" data-close aria-label="Cerrar">${icon('x')}</button><div class="cel-frame"><video src="${esc(el.dataset.src)}" controls controlslist="nofullscreen" autoplay playsinline></video></div>`;
+        document.body.append(d); d.addEventListener('close', () => d.remove());
+        d.addEventListener('click', (e) => { if (e.target === d || e.target.closest('[data-close]')) d.close(); });
+        d.showModal(); break;
+      }
       case 'reel-filter': state.reelFilter = el.dataset.k; render(); break;
       case 'camp-edit': campDialog(state.camps.campaigns.find((c) => c.id === id)); break;
       case 'camp-del': if (await confirmBox('Borrar campaña', 'Se borra de ACM. Si ya estaba creada en Meta, allá queda en pausa.')) { await api(`/api/campaigns/${id}`, { method: 'DELETE' }); render(); } break;
