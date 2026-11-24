@@ -6,8 +6,8 @@ Diseño: `docs/superpowers/specs/2026-11-24-crudos-que-se-ven-design.md`. Repos:
 - [x] Ventana de subida con «¿De qué es el video?» y «¿Qué buscamos adentro?»; columnas `descripcion`/`buscar` en reels; las dos rutas de alta las guardan; el editor las recibe; «Tus crudos» muestra la descripción; estado «Mirando el video».
 
 ## Estudio (sincro-agents editor-acm)
-- [ ] Tarea `mirar` (POST/GET /v1/mirar): cuadros cada 2 s, planillas 4×4 ≤1024 px con tiempo impreso, caché de crudos, tiempos_s por cuadro, tope 3 h.
-- [ ] `editar-recorte` con `visual: true`: sin palabras ni cortes de silencio, sonido real adelante y cama baja, música sola si no hay audio, sonido real solo si no hay música.
+- [x] Tarea `mirar` (POST/GET /v1/mirar): cuadros cada 2 s, planillas 4×4 ≤1024 px con tiempo impreso, caché de crudos, tiempos_s por cuadro, tope 3 h. — cambió: crudos de más de 3 h se rechazan (igual que editar-recorte) en vez de mirarse cada 4 s; sincro-agents ebbb0f2, 00d1aaf
+- [x] `editar-recorte` con `visual: true`: sin palabras ni cortes de silencio, sonido real adelante y cama baja, música sola si no hay audio, sonido real solo si no hay música. (sincro-agents 42e302b)
 
 ## Editor (acm/editor)
 - [ ] Etapa `mirando`: registro visual con Haiku (tandas de a una, reintentos, nunca deja el crudo en error), guardado y reusado.
