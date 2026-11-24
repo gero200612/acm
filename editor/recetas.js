@@ -80,7 +80,7 @@ function cierreDeIdea(palabras, tramos, desde, objetivo, disp) {
     acum += t.fin_s - ini;
   });
   const f = fines.find((x) => x >= objetivo - 0.01);
-  return f === undefined ? objetivo : Math.min(disp, f + 0.2);
+  return f === undefined ? objetivo : Math.min(disp + 0.3, f + 0.5); // con aire: el Estudio saca frases enteras si se pasa por décimas
 }
 
 // El texto de un cartel (gancho o portada): de 1 a 3 palabras. Si Haiku escribió una frase, se queda con las palabras clave (sin relleno, las más largas) en su orden.

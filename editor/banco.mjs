@@ -747,7 +747,7 @@ casos.push(
     // el objetivo (70 % de lo disponible) cae a mitad de frase: el largo llega al fin de la frase siguiente
     const objetivo = (momento.fin_s - ad.gancho.desde_s) * 0.7, finesRel = pal.filter((p, k) => p.inicio_s >= ad.gancho.desde_s && finDeFrase(pal, k)).map((p) => p.fin_s - ad.gancho.desde_s);
     const esperado = finesRel.find((x) => x >= objetivo - 0.01);
-    yes(ad.largo_s >= objetivo - 0.05 && Math.abs(ad.largo_s - Math.round((esperado + 0.2) * 10) / 10) <= 0.1, `largo ${ad.largo_s} no cierra la idea (objetivo ${objetivo}, fin de frase ${esperado})`);
+    yes(ad.largo_s >= objetivo - 0.05 && Math.abs(ad.largo_s - Math.round((esperado + 0.5) * 10) / 10) <= 0.1, `largo ${ad.largo_s} no cierra la idea (objetivo ${objetivo}, fin de frase ${esperado})`);
     // carteles de 1 a 3 palabras, en gancho y portada, con la clave de la frase larga
     const n = (t) => t.split(/\s+/).length;
     yes(n(ad.gancho.texto) <= 3 && n(ad.portada.texto) <= 3, `cartel largo: «${ad.gancho.texto}» / «${ad.portada.texto}»`);
