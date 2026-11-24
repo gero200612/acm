@@ -16,5 +16,5 @@ Diseño: `docs/superpowers/specs/2026-11-24-crudos-que-se-ven-design.md`. Repos:
 - [x] Costo de mirar en el detalle del Laboratorio; banco con crudo mudo, «qué buscar» que existe y que no.
 
 ## Cierre
-- [ ] Prueba con un crudo real de calle contra el Estudio local: costo real de mirar y si encontró lo pedido.
+- [x] Prueba con un crudo real de calle contra el Estudio local: costo real de mirar y si encontró lo pedido. — medido 2026-11-24 con 4 reels de recorrida de Posse unidos (3:36, 7 planillas), Haiku 5.5 a USD 0,10/0,50 por M: registro solo 17,6k/6,1k tokens = USD 0,0048 = 0,08/h; con búsqueda real (6 miradas de cerca) USD 0,0127 = 0,21/h escalado lineal desde 3,6 min (pesimista: las miradas de cerca son fijas, ≤8 tramos; con 1 h sería ~0,09/h); búsqueda inexistente sobre registro ya hecho USD 0,0004. Tiempos: Estudio mirar ~13 s, registro Haiku ~30 s, búsqueda con cerca ~60 s (102 s en total). Registro: bien en escena/lugar/ropa, pero sobrediagnostica abrazos (saludos contados como abrazo) y confunde algún sexo/persona. «Abraza»: 5 confirmados (2 dudosos); «un perro con un globo rojo»: «No encontramos», sin inventar.
 - [ ] Push de acm y sincro-agents (editor/Estudio siguen sin levantarse en prod).
