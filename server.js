@@ -357,17 +357,18 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
 // el editor no pudo rehacer una edición pedida: queda el motivo para mostrarlo (y reintentar)
 // Link firmado del crudo para el editor y el Estudio: en R2 es el link de R2; en el disco del servidor, esta ruta con firma y vencimiento
 const firmaCrudo = (id, exp) => crypto.createHmac('sha256', SECRET).update(`crudo:${id}:${exp}`).digest('hex');
+// el nombre del archivo va en el link: ACM puede reusar el número de un crudo borrado y el Estudio guarda los crudos por link
 async function crudoUrl(r, ttlS = 6 * 86400) {
   if (r.storage === 'r2') return getUrl(r.file, ttlS);
   const exp = Math.floor(Date.now() / 1000) + ttlS;
-  return `${PUBLIC_URL}/api/editor/crudo/${r.id}?exp=${exp}&sig=${firmaCrudo(r.id, exp)}`;
+  return `${PUBLIC_URL}/api/editor/crudo/${r.id}/${encodeURIComponent(path.basename(r.file))}?exp=${exp}&sig=${firmaCrudo(r.id, exp)}`;
 }
-app.get('/api/editor/crudo/:id', (req, res) => {
+app.get(['/api/editor/crudo/:id', '/api/editor/crudo/:id/:file'], (req, res) => {
   const id = Number(req.params.id), exp = Number(req.query.exp), sig = String(req.query.sig || '');
   const want = Buffer.from(firmaCrudo(id, exp)), got = Buffer.from(sig);
   if (!(exp > Date.now() / 1000) || got.length !== want.length || !crypto.timingSafeEqual(got, want)) return res.status(403).json({ error: 'Link vencido o inválido' });
   const r = get("SELECT file, storage FROM reels WHERE id = ? AND kind = 'crudo' AND archived_at = ''", id);
-  if (!r || r.storage === 'r2') return res.status(404).end();
+  if (!r || r.storage === 'r2' || (req.params.file && req.params.file !== path.basename(r.file))) return res.status(404).end();
   res.sendFile(path.join(UPLOADS, path.basename(r.file)));
 });
 app.post('/api/editor/rehecho', requireEditor, (req, res) => {

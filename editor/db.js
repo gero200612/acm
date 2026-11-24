@@ -57,7 +57,13 @@ export function repo(db) {
     guardarTranscripcion(id, t) { run('UPDATE trabajos SET transcripcion = ? WHERE id = ?', J(t), id); },
     // el registro visual (etapa «mirando») se guarda con el trabajo; un reenvío del mismo crudo reusa el último que salió bien
     guardarVisual(id, v) { run('UPDATE trabajos SET visual = ? WHERE id = ?', J(v), id); },
-    visualPrevio: (reel_id, excluir) => all('SELECT visual FROM trabajos WHERE reel_id = ? AND id <> ? AND visual IS NOT NULL ORDER BY id DESC', reel_id, excluir).map((r) => P(r.visual)).find((v) => v && !v.fallo) || null,
+    // solo del MISMO video: ACM puede reusar el número de un crudo borrado, así que además del reel_id tienen que coincidir el link (sin la firma) y la duración
+    visualPrevio: (reel_id, excluir) => {
+      const yo = get('SELECT url, duracion_s FROM trabajos WHERE id = ?', excluir), sinFirma = (u) => String(u || '').split('?')[0];
+      return all('SELECT visual, url, duracion_s FROM trabajos WHERE reel_id = ? AND id <> ? AND visual IS NOT NULL ORDER BY id DESC', reel_id, excluir)
+        .filter((r) => !yo || (sinFirma(r.url) === sinFirma(yo.url) && Math.abs((Number(r.duracion_s) || 0) - (Number(yo.duracion_s) || 0)) < 1))
+        .map((r) => P(r.visual)).find((v) => v && !v.fallo) || null;
+    },
     // los momentos se guardan una sola vez: si el trabajo se retoma, se reusan (y con ellos el clip_id)
     momentos: (tid) => all('SELECT * FROM momentos WHERE trabajo_id = ? ORDER BY idx', tid).map((m) => ({ ...m, datos: P(m.datos) || {} })),
     guardarMomento(tid, idx, clip_id, inicio_s, fin_s, datos, estado = 'elegido') {

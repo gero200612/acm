@@ -696,7 +696,7 @@ export function recorridoCases(sb) {
       eq([cp?.kind, cp?.status, cp?.size, cp?.descripcion, cp?.etiqueta], ['crudo', 'en_cola', mp4.length, 'Recorrida', 'Boulogne'], 'el crudo en partes queda entero y en cola');
       // sin R2 el editor recibe un link firmado de ACM que baja el crudo; con la firma tocada, 403
       let jb; for (let i = 0; i < 40 && !(jb = sb.editor?.jobs.find((x) => x.body?.reel_id === cp.id)); i++) await sleep(100);
-      yes(jb && /\/api\/editor\/crudo\/\d+\?exp=\d+&sig=[0-9a-f]{64}$/.test(jb.body.url), `link firmado del crudo local: ${jb?.body?.url}`);
+      yes(jb && /\/api\/editor\/crudo\/\d+\/[\w.-]+\?exp=\d+&sig=[0-9a-f]{64}$/.test(jb.body.url), `link firmado del crudo local: ${jb?.body?.url}`);
       const lk = new URL(jb.body.url), loc = sb.box.base + lk.pathname + lk.search;
       const bajado = await als.exit(() => fetch(loc));
       eq([bajado.status, (await bajado.arrayBuffer()).byteLength], [200, mp4.length], 'el link baja el crudo entero sin sesión');
