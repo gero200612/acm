@@ -10,7 +10,7 @@ import { learningsSummary } from './memory.js';
 export const DEDUPE_HOURS = 6;
 export const MAX_AGE_HOURS = 24;       // un aviso que no se pudo mandar en 24 h ya no sirve: se deja
 export const STALE_EDITOR_HOURS = 24;  // un crudo así de tiempo en una etapa del editor es un aviso
-export const EDITOR_BUSY = ['en_cola', 'transcribiendo', 'buscando_momentos', 'editando', 'revisando'];
+export const EDITOR_BUSY = ['en_cola', 'transcribiendo', 'mirando', 'buscando_momentos', 'editando', 'revisando'];
 
 const pad = (n) => String(n).padStart(2, '0');
 const stamp = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;

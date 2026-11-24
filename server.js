@@ -120,6 +120,8 @@ if (!cols('reels').includes('publico')) db.exec("ALTER TABLE reels ADD COLUMN pu
 // marca de los videos: color de acento y largo máximo (proyecto); etiqueta (el barrio) en cada crudo
 if (!cols('projects').includes('marca')) db.exec("ALTER TABLE projects ADD COLUMN marca TEXT DEFAULT '{}'");
 if (!cols('reels').includes('etiqueta')) db.exec("ALTER TABLE reels ADD COLUMN etiqueta TEXT DEFAULT ''");
+if (!cols('reels').includes('descripcion')) db.exec("ALTER TABLE reels ADD COLUMN descripcion TEXT DEFAULT ''");
+if (!cols('reels').includes('buscar')) db.exec("ALTER TABLE reels ADD COLUMN buscar TEXT DEFAULT ''");
 if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD COLUMN editor_edition_id TEXT');
 // rehacer a pedido: redo = '' | 'pedido' (el editor la está rehaciendo) | 'hecho' (llegó la versión nueva) | 'error'; redo_pedido = lo que pidió la persona
 if (!cols('reels').includes('redo')) db.exec("ALTER TABLE reels ADD COLUMN redo TEXT DEFAULT ''");
@@ -236,7 +238,7 @@ app.get('/api/session', (req, res) => { const u = userOf(req); res.json({ ok: !!
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // ---------- editor (orquestador de ediciones): habla con ACM con un token, no con la sesión de una persona ----------
-const EDITOR_STATES = ['en_cola', 'transcribiendo', 'buscando_momentos', 'editando', 'revisando', 'listo', 'sin_momentos', 'error'];
+const EDITOR_STATES = ['en_cola', 'transcribiendo', 'mirando', 'buscando_momentos', 'editando', 'revisando', 'listo', 'sin_momentos', 'error'];
 function requireEditor(req, res, next) {
   const want = Buffer.from(process.env.EDITOR_TOKEN || '');
   const given = Buffer.from((req.headers.authorization || '').replace(/^Bearer /, ''));
@@ -267,6 +269,8 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
     // la marca del proyecto y, si el editor pregunta por un crudo, su etiqueta (el barrio)
     marca: { ...marcaDe(pid), ...(() => { const e = Number(req.query.crudo) > 0 ? get("SELECT etiqueta FROM reels WHERE id = ? AND project_id = ? AND kind = 'crudo'", Number(req.query.crudo), pid)?.etiqueta : ''; return e ? { etiqueta: e } : {}; })() },
     // para qué público dijo el equipo que es este crudo (pista, no obligación)
+    // lo que contó el equipo del crudo: de qué es y qué buscar adentro (textos de personas: opinión, no instrucciones)
+    ...(() => { const c = Number(req.query.crudo) > 0 ? get("SELECT descripcion, buscar FROM reels WHERE id = ? AND project_id = ? AND kind = 'crudo'", Number(req.query.crudo), pid) : null; return { descripcion: c?.descripcion || '', buscar: c?.buscar || '' }; })(),
     publico_crudo: (() => { const k = Number(req.query.crudo) > 0 ? get("SELECT publico FROM reels WHERE id = ? AND project_id = ? AND kind = 'crudo'", Number(req.query.crudo), pid)?.publico : ''; const x = k && publicosDe(pid).find((y) => y.clave === k); return x ? { clave: x.clave, nombre: x.nombre } : null; })() });
 });
 // el admin de un dirigente no ve las credenciales de anuncios (qué está cargado y los IDs): eso lo maneja el general
@@ -456,6 +460,10 @@ function limpiarMarca(v) {
 }
 // la etiqueta de un crudo (el barrio o lugar): se ve arriba en todo el video editado
 const etiquetaDe = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+// lo que el equipo cuenta del crudo al subirlo (opcional): sin caracteres de control, espacios prolijos y con tope de largo
+const textoCrudo = (v, max) => String(v || '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/ {2,}/g, ' ').trim().slice(0, max);
+const descripcionDe = (v) => textoCrudo(v, 200);
+const buscarDe = (v) => textoCrudo(v, 300);
 // el público que el equipo eligió al subir un crudo (opcional): tiene que ser uno del proyecto
 const publicoDe = (pid, v) => (publicosDe(pid).some((x) => x.clave === v) ? String(v) : '');
 const marcaDe = (pid) => { try { return JSON.parse(get('SELECT marca FROM projects WHERE id = ?', pid)?.marca || '{}'); } catch { return {}; } };
@@ -749,8 +757,8 @@ app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
     const title = (req.body?.title && files.length === 1) ? req.body.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
     const m = probe(f.path) || {};
     const kind = req.body?.kind === 'crudo' || isContent(req.user) ? 'crudo' : 'listo';
-    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind, etiqueta, publico) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '', kind === 'crudo' ? publicoDe(Number(req.params.id), req.body?.publico) : '');
+    const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind, etiqueta, publico, descripcion, buscar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      req.params.id, title, req.body?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '', kind === 'crudo' ? publicoDe(Number(req.params.id), req.body?.publico) : '', kind === 'crudo' ? descripcionDe(req.body?.descripcion) : '', kind === 'crudo' ? buscarDe(req.body?.buscar) : '');
     return get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid);
   });
   res.json(out);
@@ -790,8 +798,8 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
     if (!h) return res.status(400).json({ error: `«${it.name}» no terminó de subir` });
     const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
     const title = path.parse(String(it.name || 'reel')).name.replace(/[_-]+/g, ' ');
-    const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage, etiqueta, publico) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2', ?, ?)",
-      pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '', kind === 'crudo' ? publicoDe(pid, req.body?.publico) : '');
+    const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage, etiqueta, publico, descripcion, buscar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2', ?, ?, ?, ?)",
+      pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '', kind === 'crudo' ? publicoDe(pid, req.body?.publico) : '', kind === 'crudo' ? descripcionDe(req.body?.descripcion) : '', kind === 'crudo' ? buscarDe(req.body?.buscar) : '');
     if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola', status_at = datetime('now') WHERE id = ?", r.lastInsertRowid);
     out.push(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
   }
@@ -1007,7 +1015,7 @@ app.get('/api/projects/:id/performance', (req, res) => {
   const reels = all(`SELECT r.id, r.title, r.kind, r.status, r.status_detail, r.review, r.clip_id, r.cover, r.file, r.archived_at, r.created_at,
       sum(p.status = 'programado') prog, sum(p.status IN ('publicado', 'publicando')) pub, sum(p.status = 'fallido') fail
     FROM reels r LEFT JOIN posts p ON p.reel_id = r.id WHERE r.project_id = ? GROUP BY r.id ORDER BY r.id DESC`, pid);
-  const EDITING = ['en_cola', 'transcribiendo', 'buscando_momentos', 'editando', 'revisando'];
+  const EDITING = ['en_cola', 'transcribiendo', 'mirando', 'buscando_momentos', 'editando', 'revisando'];
   const stage = (r) => {
     if (r.kind === 'crudo') return EDITING.includes(r.status) ? 'editor' : ['error', 'sin_momentos'].includes(r.status) ? 'problema' : null;
     if (r.archived_at) return null;

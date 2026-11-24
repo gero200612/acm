@@ -3,7 +3,7 @@
 Diseño: `docs/superpowers/specs/2026-11-24-crudos-que-se-ven-design.md`. Repos: `acm` (main) y `sincro-agents` (rama `editor-acm`, `estudio/`).
 
 ## ACM (panel)
-- [ ] Ventana de subida con «¿De qué es el video?» y «¿Qué buscamos adentro?»; columnas `descripcion`/`buscar` en reels; las dos rutas de alta las guardan; el editor las recibe; «Tus crudos» muestra la descripción; estado «Mirando el video».
+- [x] Ventana de subida con «¿De qué es el video?» y «¿Qué buscamos adentro?»; columnas `descripcion`/`buscar` en reels; las dos rutas de alta las guardan; el editor las recibe; «Tus crudos» muestra la descripción; estado «Mirando el video».
 
 ## Estudio (sincro-agents editor-acm)
 - [ ] Tarea `mirar` (POST/GET /v1/mirar): cuadros cada 2 s, planillas 4×4 ≤1024 px con tiempo impreso, caché de crudos, tiempos_s por cuadro, tope 3 h.

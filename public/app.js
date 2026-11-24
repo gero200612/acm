@@ -751,14 +751,14 @@ function crudoEstado(r) {
   return ['nodot', CRUDO_ESTADO[r.status] || 'En el editor'];
 }
 // ---------- Subir crudos (lo que ve una sombra): solo la subida y en qué va cada crudo, sin números ----------
-const CRUDO_ESTADO = { en_cola: 'En cola', transcribiendo: 'Transcribiendo', buscando_momentos: 'Buscando momentos', editando: 'Editando', revisando: 'Revisando', listo: 'Ediciones listas', sin_momentos: 'Sin momentos para editar', error: 'Con error' };
+const CRUDO_ESTADO = { en_cola: 'En cola', transcribiendo: 'Transcribiendo', mirando: 'Mirando el video', buscando_momentos: 'Buscando momentos', editando: 'Editando', revisando: 'Revisando', listo: 'Ediciones listas', sin_momentos: 'Sin momentos para editar', error: 'Con error' };
 function crudosView() {
   state.upKind = 'crudo';
   const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
   const fecha = (r) => cuando(new Date(String(r.created_at || '').replace(' ', 'T') + 'Z'));
   const item = (r) => { const [c, t] = crudoEstado(r); return `<li class="cr-item">
       <span class="cr-thumb">${r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : `<video src="/media/${esc(r.file)}#t=1" preload="metadata" muted playsinline></video>`}</span>
-      <div class="cr-body"><b class="cr-title">${esc(r.title)}</b>
+      <div class="cr-body"><b class="cr-title">${esc(r.descripcion || r.title)}</b>
         <span class="cr-meta">${r.etiqueta ? `<span class="chip nodot">${icon('home', 12)} ${esc(r.etiqueta)}</span>` : ''}${r.publico ? `<span class="chip nodot">Para ${esc(pubName(r.publico))}</span>` : ''}<span class="small muted">Subido ${esc(fecha(r))}</span></span>
         <span class="chip ${c} cr-state" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(t)}</span></div></li>`; };
   const list = state.reels.length ? `<ul class="cr-list">${state.reels.map(item).join('')}</ul>` : '<p class="muted cr-empty">Todavía no subiste crudos. Cuando subas uno, acá vas a ver en qué va.</p>';
@@ -2181,24 +2181,26 @@ async function uploadToR2(files) {
     // de a 3 a la vez: más rápido sin saturar la conexión
     const metas = await Promise.all(files.map(videoMeta));
     for (let i = 0; i < files.length; i += 3) await Promise.all(files.slice(i, i + 3).map((f, k) => putOne(f, links[i + k], i + k)));
-    await api(`/api/projects/${pid}/reels/complete`, { method: 'POST', body: { kind, etiqueta: kind === 'crudo' ? state.upEtiqueta || '' : '', publico: kind === 'crudo' ? state.upPublico || '' : '', items: files.map((f, i) => ({ key: links[i].key, name: f.name, ...metas[i] })) } });
+    await api(`/api/projects/${pid}/reels/complete`, { method: 'POST', body: { kind, etiqueta: kind === 'crudo' ? state.upEtiqueta || '' : '', descripcion: kind === 'crudo' ? state.upDescripcion || '' : '', buscar: kind === 'crudo' ? state.upBuscar || '' : '', publico: kind === 'crudo' ? state.upPublico || '' : '', items: files.map((f, i) => ({ key: links[i].key, name: f.name, ...metas[i] })) } });
     toast(`${files.length} ${kind === 'crudo' ? (files.length === 1 ? 'crudo subido' : 'crudos subidos') : (files.length === 1 ? 'reel listo subido' : 'reels listos subidos')}`);
   } catch (err) { fail(err); }
   state.uploads = []; render();
 }
-// Antes de subir crudos: dónde se grabó y para qué público (las dos cosas son opcionales: suman, no traban)
+// Antes de subir crudos: dónde se grabó, para qué público, de qué es y qué buscar (todo opcional: suman, no traban)
 function crudoDatos(files) {
   return new Promise((resolve) => {
     const usados = [...new Set((state.reels || []).map((r) => r.etiqueta).filter(Boolean))].slice(0, 20), P = state.project?.publicos || [];
     const n = files.length, d = openDialog(n === 1 ? 'Antes de subir el video' : `Antes de subir los ${n} videos`, `<form class="form cr-ask" id="cr-ask">
-      <p class="small muted">Las dos preguntas son opcionales: si las completás, el editor hace mejores recortes.</p>
+      <p class="small muted">Todas las preguntas son opcionales: si las completás, el editor hace mejores recortes.</p>
       <label class="field"><span class="cr-lbl">¿Dónde se grabó?</span><input class="input" name="etiqueta" maxlength="30" placeholder="Barrio o lugar, ej.: Beccar" autocomplete="off" list="barrios-ask" value="${esc(state.upEtiqueta || '')}"><span class="hint">Sale como etiqueta en el video.</span></label>
       <datalist id="barrios-ask">${usados.map((b) => `<option value="${esc(b)}">`).join('')}</datalist>
       ${P.length ? `<div class="field"><span class="cr-lbl">¿Para qué público es?</span><div class="cr-pubs">${[['', 'Cualquiera'], ...P.map((x) => [x.clave, x.nombre])].map(([k, l]) => `<label class="aj-net"><input type="radio" name="publico" value="${esc(k)}" ${(state.upPublico || '') === k ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div><span class="hint">El editor prioriza recortes para ese público.</span></div>` : ''}
+      <label class="field"><span class="cr-lbl">¿De qué es el video?</span><input class="input" name="descripcion" maxlength="200" placeholder="Caminando por Beccar, saludando vecinos" autocomplete="off" value="${esc(state.upDescripcion || '')}"><span class="hint">Con una línea alcanza.</span></label>
+      <label class="field"><span class="cr-lbl">¿Qué buscamos adentro?</span><textarea class="input" name="buscar" rows="3" maxlength="300" placeholder="Cuando saluda a la señora del kiosco; si habla de las veredas">${esc(state.upBuscar || '')}</textarea><span class="hint">El editor mira el video y trata de encontrarlo.</span></label>
       <div class="row cr-ask-b"><button type="button" class="btn" data-skip>Subir sin completar</button><button class="btn primary" type="submit">Subir</button></div></form>`);
     let done = false; const fin = (v) => { if (!done) { done = true; resolve(v); } d.close(); };
-    d.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); const f = e.target; fin({ etiqueta: f.etiqueta.value.trim(), publico: f.publico?.value || '' }); });
-    d.querySelector('[data-skip]').addEventListener('click', () => fin({ etiqueta: '', publico: '' }));
+    d.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); const f = e.target; fin({ etiqueta: f.etiqueta.value.trim(), publico: f.publico?.value || '', descripcion: f.descripcion.value.trim(), buscar: f.buscar.value.trim() }); });
+    d.querySelector('[data-skip]').addEventListener('click', () => fin({ etiqueta: '', publico: '', descripcion: '', buscar: '' }));
     d.addEventListener('close', () => { if (!done) { done = true; resolve(null); } }); // cerrar = no subir
     setTimeout(() => d.querySelector('[name=etiqueta]')?.focus(), 50);
   });
@@ -2206,13 +2208,13 @@ function crudoDatos(files) {
 async function uploadReels(files) {
   files = [...files].filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name));
   if (!files.length) return toast('Elegí archivos de video', true);
-  if ((state.upKind || 'listo') === 'crudo') { const x = await crudoDatos(files); if (!x) return; state.upEtiqueta = x.etiqueta; state.upPublico = x.publico; }
+  if ((state.upKind || 'listo') === 'crudo') { const x = await crudoDatos(files); if (!x) return; state.upEtiqueta = x.etiqueta; state.upPublico = x.publico; state.upDescripcion = x.descripcion; state.upBuscar = x.buscar; }
   files = [...files].filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name));
   if (!files.length) return toast('Elegí archivos de video', true);
   const max = state.storage?.max || 1024 ** 3;
   const big = files.find((f) => f.size > max); if (big) return toast(`«${big.name}» pesa más de ${Math.round(max / 1024 ** 3)} GB`, true);
   if (state.storage?.r2) return uploadToR2(files);
-  const fd = new FormData(); fd.append('kind', state.upKind || 'listo'); if ((state.upKind || 'listo') === 'crudo') { fd.append('etiqueta', state.upEtiqueta || ''); fd.append('publico', state.upPublico || ''); } files.forEach((f) => fd.append('files', f));
+  const fd = new FormData(); fd.append('kind', state.upKind || 'listo'); if ((state.upKind || 'listo') === 'crudo') { fd.append('etiqueta', state.upEtiqueta || ''); fd.append('publico', state.upPublico || ''); fd.append('descripcion', state.upDescripcion || ''); fd.append('buscar', state.upBuscar || ''); } files.forEach((f) => fd.append('files', f));
   state.uploads = files; render();
   const x = new XMLHttpRequest();
   x.open('POST', `/api/projects/${state.project.id}/reels`);

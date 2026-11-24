@@ -675,7 +675,14 @@ export function recorridoCases(sb) {
       eq([cj.publico, cj.etiqueta, cx.publico], ['jovenes', 'Beccar', ''], 'el crudo guarda el público elegido (opcional; uno inventado no)');
       eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}?crudo=${cj.id}`)).j?.publico_crudo, { clave: 'jovenes', nombre: 'Jóvenes' }, 'al editor le llega como pista');
       eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}?crudo=${cx.id}`)).j?.publico_crudo, null, 'sin público, nada');
-      for (const x of [cj, cx]) await api('DELETE', `/api/reels/${x.id}`);
+      // descripción y qué buscar: se guardan recortadas y limpias; el editor las recibe
+      const cd = (await api('POST', `/api/projects/${c.p}/reels`, form({ kind: 'crudo', descripcion: `  Caminando\u0007   por Beccar ${'x'.repeat(300)}`, buscar: `  Saluda al kiosco ${'y'.repeat(400)}`, files: vid() }), true)).j[0];
+      eq([cd.descripcion.length, cd.descripcion.startsWith('Caminando por Beccar x'), cd.buscar.length, cd.buscar.startsWith('Saluda al kiosco y')], [200, true, 300, true], 'descripcion y buscar se guardan recortadas y sin control');
+      eq([cj.descripcion, cj.buscar], ['', ''], 'son opcionales');
+      const ed = (await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}?crudo=${cd.id}`)).j;
+      eq([ed.descripcion, ed.buscar], [cd.descripcion, cd.buscar], 'al editor le llegan descripcion y buscar');
+      eq([(await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.descripcion, (await sb.box.editorApi('/api/editor/estado', { reel_id: cd.id, estado: 'mirando', detalle: 'Mirando el video' })).status], ['', 200], 'sin crudo, vacío; estado mirando aceptado');
+      for (const x of [cj, cx, cd]) await api('DELETE', `/api/reels/${x.id}`);
       const acc = (await api('POST', `/api/projects/${c.p}/accounts`, { network: 'youtube' })).j;
       eq((await api('PUT', `/api/accounts/${acc.id}`, { publico: 'chicos' })).status, 400, 'público que no existe');
       eq((await api('PUT', `/api/accounts/${acc.id}`, { publico: 'mayores' })).j?.publico, 'mayores', 'la cuenta le habla a mayores');
