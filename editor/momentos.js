@@ -2,10 +2,43 @@
 import { MODELOS } from './claude.js';
 import { SYSTEM_MOMENTOS, SYSTEM_VISUAL, HERRAMIENTA_MOMENTOS, herramientaMomentos, usuarioMomentos, mmss } from './prompts.js';
 import { normalizarAprendizajes } from './recetas.js';
+import { PAUSA_FRASE_S, cierraFrase, finDeFrase, inicioDeFrase } from './frases.js';
 
 export const MIN_S = 12, MAX_S = 90, MAX_EDITADOS = 15, TOLERANCIA_S = 0.05;
 export const MIN_VISUAL_S = 6, BORDE_S = 0.5, PALABRAS_POR_S_VISUAL = 1 / 3; // menos de 1 palabra cada 3 s = momento visual
 const r1 = (x) => Math.round(x * 10) / 10;
+
+export const EXTENDER_FIN_S = 8, MOVER_INICIO_S = 8;
+export { PAUSA_FRASE_S, cierraFrase, finDeFrase, inicioDeFrase };
+
+// Un reel no empieza ni termina a mitad de una idea. Con tiempos ya clavados a palabras ([ini, fin] = tiempos de palabra):
+// el inicio va al comienzo de frase más cercano (a ±8 s; ante empate, el anterior); el fin se EXTIENDE hasta el final de frase más cercano
+// (+8 s como mucho, sin pasar de `tope`) y, si no hay, se RECORTA hasta el último fin de frase (que deje al menos 3 s). Sin frases a la vista, no toca nada.
+export function ajustarAFrases(ini, fin, palabras, { tope = Infinity, minimo = 3 } = {}) {
+  const ps = [...palabras].sort((a, b) => a.inicio_s - b.inicio_s);
+  const iw = ps.findIndex((p) => Math.abs(p.inicio_s - ini) < 1e-6), fw = ps.findLastIndex((p) => Math.abs(p.fin_s - fin) < 1e-6);
+  if (iw < 0 || fw < 0 || fw < iw) return { inicio_s: ini, fin_s: fin };
+  let a = iw;
+  if (!inicioDeFrase(ps, a)) {
+    let antes = a - 1, despues = a + 1;
+    while (antes >= 1 && !inicioDeFrase(ps, antes)) antes--;
+    while (despues < ps.length && !inicioDeFrase(ps, despues)) despues++;
+    const da = antes >= 1 && inicioDeFrase(ps, antes) ? ini - ps[antes].inicio_s : Infinity, dd = despues < ps.length && despues <= fw ? ps[despues].inicio_s - ini : Infinity;
+    if (Math.min(da, dd) <= MOVER_INICIO_S) a = da <= dd ? antes : despues;
+  }
+  let b = fw;
+  if (!finDeFrase(ps, b)) {
+    let sig = b + 1;
+    while (sig < ps.length && !finDeFrase(ps, sig)) sig++;
+    if (sig < ps.length && ps[sig].fin_s - fin <= EXTENDER_FIN_S && ps[sig].fin_s <= tope) b = sig;
+    else {
+      let ant = b - 1;
+      while (ant > a && !finDeFrase(ps, ant)) ant--;
+      if (ant > a && ps[ant].fin_s - ps[a].inicio_s >= minimo) b = ant;
+    }
+  }
+  return { inicio_s: ps[a].inicio_s, fin_s: ps[b].fin_s };
+}
 
 // → { validos (ordenados por interés, con los tiempos clavados a la palabra), descartados: [{ momento, motivo }] }
 export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_S, publicos = [], visual = false } = {}) {
@@ -39,7 +72,11 @@ export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_
       if (!pIni) { falla = [`empieza a mitad de palabra (${ini} s)`, 'que cortan una palabra']; break; }
       if (!pFin) { falla = [`termina a mitad de palabra (${fin} s)`, 'que cortan una palabra']; break; }
       if (pFin.fin_s <= pIni.inicio_s || (tramos.length && pIni.inicio_s < tramos.at(-1).fin_s)) { falla = ['tramos desordenados o que se pisan', 'con tramos inválidos']; break; }
-      tramos.push({ inicio_s: pIni.inicio_s, fin_s: pFin.fin_s });
+      // la idea entera: empieza donde empieza una frase y termina cuando se cierra (sin pisar el tramo que sigue)
+      const siguiente = pedidos[tramos.length + 1], tope = Number.isFinite(Number(siguiente?.inicio_s)) ? Number(siguiente.inicio_s) : Infinity;
+      const aj = ajustarAFrases(pIni.inicio_s, pFin.fin_s, palabras, { tope: Math.min(tope, pIni.inicio_s + MAX_S) });
+      if (tramos.length && aj.inicio_s < tramos.at(-1).fin_s) { aj.inicio_s = pIni.inicio_s; }
+      tramos.push(aj);
     }
     if (falla) { descartar(...falla); continue; }
     const inicio_s = tramos[0].inicio_s, fin_s = tramos.at(-1).fin_s, dur = tramos.reduce((a, t) => a + (t.fin_s - t.inicio_s), 0);

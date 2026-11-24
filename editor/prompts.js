@@ -5,6 +5,7 @@ export const SYSTEM_MOMENTOS = `Sos editor de video de redes sociales en Argenti
 Un buen momento: se entiende solo, sin contexto; tiene un arranque que atrapa y un cierre; dice algo útil, sorprendente, gracioso o emotivo; dura entre 12 y 90 segundos (lo ideal: 20 a 45).
 Reglas duras:
 - La transcripción viene en líneas «inicio–fin | texto». Cada momento arranca en el inicio de una línea y termina en el fin de una línea, copiando esos números TAL CUAL, sin redondear. Nunca cortes una palabra por la mitad.
+- Un reel NUNCA empieza ni termina a mitad de una idea: el momento arranca al principio de una idea (donde la persona abre una frase o un tema nuevo, nunca en un «y», «pero», «entonces» que continúa lo anterior) y termina cuando la idea se cerró (con el punto, la conclusión o la frase que cierra), jamás en medio de una oración. Si para cerrar la idea hace falta pasar de largo unos segundos, pasate: es preferible un momento un poco más largo que uno cortado.
 - Los momentos no se pisan entre sí.
 - Ordenalos por interés y poné en «interes» un número de 1 (flojo) a 10 (imperdible).
 - «tema»: en pocas palabras de qué trata. «motivo»: por qué funciona como reel.
@@ -107,7 +108,7 @@ export function usuarioMomentos({ palabras = [], investigacion = [], aprendizaje
   return partes.join('\n\n');
 }
 
-export const SYSTEM_TEXTOS = `Sos community manager de redes sociales en Argentina. Escribís en español rioplatense (voseo), natural, sin sonar a publicidad ni a robot, sin emojis de relleno. Para un mismo recorte de video te piden tres versiones DISTINTAS entre sí: cada una con su caption, sus hashtags, el texto del gancho (lo que se lee en pantalla los primeros 3 segundos) y el texto de la portada. Los tres captions tienen que ser claramente diferentes (otro ángulo, otro arranque), no la misma frase reordenada. Captions de hasta 220 caracteres. Hashtags: de 4 a 8, en minúscula, sin espacios, con #, mezclando uno amplio y otros específicos del tema.`;
+export const SYSTEM_TEXTOS = `Sos community manager de redes sociales en Argentina. Escribís en español rioplatense (voseo), natural, sin sonar a publicidad ni a robot, sin emojis de relleno. Para un mismo recorte de video te piden tres versiones DISTINTAS entre sí: cada una con su caption, sus hashtags, el texto del gancho (lo que se lee en pantalla los primeros 3 segundos) y el texto de la portada. El gancho y la portada son CARTELES como los de los reels de @gustavo_posse: de 1 a 3 palabras, no una frase (por ejemplo «OBRAS SIN FIN», «¿Y LA VÍA?», «SIN VENTAS»): la palabra o las dos palabras más fuertes del tema, sin puntuación de relleno ni verbos largos. Nada de oraciones. Los tres captions tienen que ser claramente diferentes (otro ángulo, otro arranque), no la misma frase reordenada. Captions de hasta 220 caracteres. Hashtags: de 4 a 8, en minúscula, sin espacios, con #, mezclando uno amplio y otros específicos del tema.`;
 
 export const HERRAMIENTA_TEXTOS = {
   name: 'registrar_textos',
@@ -121,8 +122,8 @@ export const HERRAMIENTA_TEXTOS = {
           type: 'object',
           properties: {
             caption: { type: 'string' }, hashtags: { type: 'array', items: { type: 'string' } },
-            gancho_texto: { type: 'string', description: 'Máximo 60 caracteres; vacío si la versión no lleva texto de gancho' },
-            portada_texto: { type: 'string', description: 'Máximo 40 caracteres' },
+            gancho_texto: { type: 'string', description: 'De 1 a 3 palabras (un cartel, no una frase); vacío si la versión no lleva texto de gancho' },
+            portada_texto: { type: 'string', description: 'De 1 a 3 palabras (un cartel, no una frase)' },
           },
           required: ['caption', 'hashtags', 'gancho_texto', 'portada_texto'],
         },

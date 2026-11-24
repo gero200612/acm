@@ -2,6 +2,7 @@
 // Claude (Haiku) solo escribe los textos: caption, hashtags, texto del gancho y de la portada.
 import { MODELOS } from './claude.js';
 import { SYSTEM_TEXTOS, HERRAMIENTA_TEXTOS, usuarioTextos } from './prompts.js';
+import { finDeFrase, inicioDeFrase } from './frases.js';
 
 export const OPCIONES = {
   gancho: ['directo', 'pregunta', 'adelanto'],
@@ -61,10 +62,36 @@ export function elegirVariables({ semilla = 0, aprendizajes, estilo } = {}) {
   return [...base, exp];
 }
 
-// Los inicios de oración del momento (palabras tras una pausa o un punto), para el gancho «adelanto»
-function iniciosDeFrase(palabras, momento, pausa = 0.5) {
-  const ps = palabras.filter((p) => p.inicio_s >= momento.inicio_s && p.fin_s <= momento.fin_s + 0.05);
-  return ps.filter((p, i) => i > 0 && (p.inicio_s - ps[i - 1].fin_s >= pausa || /[.?!]$/.test(ps[i - 1].texto))).map((p) => p.inicio_s);
+// Los comienzos de frase del momento (tras un punto o una pausa de 0,5 s), para el gancho «adelanto»: el reel nunca arranca a mitad de una frase
+function iniciosDeFrase(palabras, momento) {
+  const ps = [...palabras].sort((a, b) => a.inicio_s - b.inicio_s);
+  return ps.filter((p, i) => p.inicio_s >= momento.inicio_s - 1e-6 && p.fin_s <= momento.fin_s + 0.05 && i > 0 && inicioDeFrase(ps, i)).map((p) => p.inicio_s);
+}
+
+// Cuánto hay que dejar de largo (en segundos de edición, a partir de `desde`) para cerrar la idea: el primer fin de frase que llega a `objetivo`.
+// Los tramos (tema partido) se cuentan pegados. Sin palabras a la vista devuelve el objetivo tal cual.
+function cierreDeIdea(palabras, tramos, desde, objetivo, disp) {
+  const ps = [...palabras].sort((a, b) => a.inicio_s - b.inicio_s);
+  let acum = 0;
+  const fines = [];
+  tramos.forEach((t, k) => {
+    const ini = k === 0 ? desde : t.inicio_s;
+    ps.forEach((p, i) => { if (p.inicio_s >= ini - 1e-6 && p.fin_s <= t.fin_s + 0.05 && finDeFrase(ps, i)) fines.push(acum + (p.fin_s - ini)); });
+    acum += t.fin_s - ini;
+  });
+  const f = fines.find((x) => x >= objetivo - 0.01);
+  return f === undefined ? objetivo : Math.min(disp, f + 0.2);
+}
+
+// El texto de un cartel (gancho o portada): de 1 a 3 palabras. Si Haiku escribió una frase, se queda con las palabras clave (sin relleno, las más largas) en su orden.
+const RELLENO = new Set('a al algo ante con como cual cuando de del desde donde e el ella ellos en entre es esa ese eso esta este esto la las le les lo los me mi mis muy ni no nos o para pero por que se si sin sobre su sus te tu tus un una uno unos unas y ya hay fue son ser'.split(' '));
+export const MAX_PALABRAS_CARTEL = 3;
+export function cartelCorto(texto, max = MAX_PALABRAS_CARTEL) {
+  const letras = (w) => w.replace(/[^\p{L}\p{N}]/gu, '');
+  const palabras = String(texto || '').split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}¿¡]+|[^\p{L}\p{N}?!]+$/gu, '')).filter((w) => letras(w).length > 0);
+  if (palabras.length <= max) return palabras.join(' ');
+  const todas = palabras.map((w, i) => ({ w, i })), util = todas.filter((x) => !RELLENO.has(letras(x.w).toLowerCase()));
+  return [...(util.length >= max ? util : todas)].sort((a, b) => letras(b.w).length - letras(a.w).length || a.i - b.i).slice(0, max).sort((a, b) => a.i - b.i).map((x) => x.w).join(' ');
 }
 const r1 = (x) => Math.round(x * 10) / 10;
 
@@ -90,16 +117,18 @@ export function construirReceta({ v, momento, palabras = [], textos, marca = {} 
   // nunca menos de 12 s (o el fragmento entero si es más corto): después el Estudio saca los silencios y un reel de 5 s no sirve
   // (un momento visual —sin habla— baja el mínimo a 6 s; el audio real adelante y la música baja la mezcla el Estudio, la receta sigue con el volumen de siempre)
   const minimo = momento.datos?.sin_habla === true ? MIN_LARGO_VISUAL_S : MIN_LARGO_S;
-  const largo_s = r1(Math.min(tope, Math.max(Math.min(minimo, disp), disp * FACTOR_LARGO[v.largo])));
+  // el largo nunca es menor que lo necesario para cerrar la idea: el objetivo se estira hasta el próximo fin de frase
+  const objetivo = Math.max(Math.min(minimo, disp), disp * FACTOR_LARGO[v.largo]);
+  const largo_s = r1(Math.min(tope, Math.max(Math.min(minimo, disp), cierreDeIdea(palabras, tramos || [momento], desde, objetivo, disp))));
   const mr = marcaParaReceta(marca);
   const gancho = { desde_s: desde };
-  const gtxt = String(textos.gancho_texto || '').trim().slice(0, 60);
+  const gtxt = cartelCorto(textos.gancho_texto);
   if (v.gancho !== 'directo' && gtxt) gancho.texto = gtxt;
   return {
     gancho, subtitulos: v.subtitulos,
     musica: v.musica === 'sin' ? null : { clima: v.musica, volumen: VOLUMEN },
-    ritmo: v.ritmo, zoom: v.ritmo === 'rapido',
-    largo_s, portada: { segundo_s: r1(largo_s * POS_PORTADA[v.largo]), texto: String(textos.portada_texto || '').trim().slice(0, 40) || String(momento.datos?.tema || 'Mirá esto').slice(0, 40) },
+    ritmo: v.ritmo, zoom: true, // punch-in siempre: así son los reels de referencia (el Estudio lo aplica en todos)
+    largo_s, portada: { segundo_s: r1(largo_s * POS_PORTADA[v.largo]), texto: cartelCorto(textos.portada_texto) || cartelCorto(momento.datos?.tema) || 'Mirá esto' },
     explora: v.explora,
     ...(Object.keys(mr).length ? { marca: mr } : {}),
     variables: { gancho: v.gancho, subtitulos: v.subtitulos, musica: v.musica, ritmo: v.ritmo, largo: v.largo },

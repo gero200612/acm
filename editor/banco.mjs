@@ -10,9 +10,10 @@ import { crearAcm } from './acm.js';
 import { crearEditor } from './server.js';
 import { crearRunner } from './runner.js';
 import { repo } from './db.js';
-import { validarMomentos, crearElegirMomentos } from './momentos.js';
+import { validarMomentos, crearElegirMomentos, ajustarAFrases } from './momentos.js';
 import { herramientaMomentos, HERRAMIENTA_MOMENTOS, usuarioMomentos, usuarioTextos } from './prompts.js';
-import { crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas, construirReceta } from './recetas.js';
+import { crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas, construirReceta, cartelCorto } from './recetas.js';
+import { finDeFrase, inicioDeFrase } from './frases.js';
 import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
@@ -702,6 +703,60 @@ casos.push(
     const dos = validarMomentos([{ inicio_s: 0, fin_s: 12.9, interes: 9, tema: 'a' }, { inicio_s: 30, fin_s: 42.9, interes: 1, tema: 'b', pedido: true }], Array.from({ length: 60 }, (_, i) => ({ inicio_s: i, fin_s: i + 0.9, texto: `p${i}` })), { visual: true });
     eq(dos.validos.map((x) => x.tema), ['b', 'a'], 'pedido primero');
     eq(dos.validos.map((x) => [x.visual, x.pedido]), [[false, true], [false, false]], 'visual y pedido faltantes valen false');
+  }],
+  // Ensayo con Posse (21/11): cortes a mitad de frase, cartel largo, plano fijo
+  ['Momentos', 'Un momento que termina a mitad de frase se estira hasta el fin de frase (+8 s como mucho) o se recorta al último; el inicio va a un comienzo de frase; pausas de 0,5 s también cuentan', () => {
+    // palabras de 0,5 s con 0,1 s de aire; frases de 10 palabras que cierran con punto (la 10, 20, 30...)
+    const pal = Array.from({ length: 200 }, (_, i) => ({ inicio_s: r(i * 0.6), fin_s: r(i * 0.6 + 0.5), texto: (i + 1) % 10 === 0 ? `p${i}.` : `p${i}` }));
+    function r(x) { return Math.round(x * 100) / 100; }
+    const v = (m, opt) => validarMomentos([{ tema: 't', interes: 5, ...m }], opt?.pal || pal, opt);
+    // empieza en la palabra 20 (comienzo de frase) y termina en la 46 (mitad): se estira hasta la 49 (+1,8 s)
+    let o = v({ inicio_s: pal[20].inicio_s, fin_s: pal[46].fin_s }).validos[0];
+    eq([o.inicio_s, o.fin_s], [pal[20].inicio_s, pal[49].fin_s], 'termina en el punto de la frase');
+    // ya termina en fin de frase: no se toca
+    o = v({ inicio_s: pal[20].inicio_s, fin_s: pal[49].fin_s }).validos[0]; eq(o.fin_s, pal[49].fin_s, 'ya cerraba');
+    // empieza a mitad de frase (palabra 25): va al comienzo de la frase más cercana (la 20 está a 3 s, la 30 a 3 s: gana la anterior)
+    o = v({ inicio_s: pal[25].inicio_s, fin_s: pal[49].fin_s }).validos[0]; eq(o.inicio_s, pal[20].inicio_s, 'comienzo de frase');
+    // sin punto a la vista en 8 s: se recorta al último fin de frase
+    const largas = Array.from({ length: 120 }, (_, i) => ({ inicio_s: r(i * 0.6), fin_s: r(i * 0.6 + 0.5), texto: i === 29 || i === 99 ? `p${i}.` : `p${i}` }));
+    o = v({ inicio_s: largas[30].inicio_s, fin_s: largas[80].fin_s }, { pal: largas }).validos[0];
+    eq(o.inicio_s, largas[30].inicio_s, 'arranca en comienzo de frase'); eq(o.fin_s, largas[80].fin_s, 'con el punto a más de 8 s y sin otro: no se puede recortar a nada, queda');
+    const medio = Array.from({ length: 120 }, (_, i) => ({ inicio_s: r(i * 0.6), fin_s: r(i * 0.6 + 0.5), texto: i === 59 || i === 119 ? `p${i}.` : `p${i}` }));
+    o = v({ inicio_s: medio[30].inicio_s, fin_s: medio[100].fin_s }, { pal: medio }).validos[0];
+    eq(o.fin_s, medio[59].fin_s, 'sin punto a +8 s: recorta al último fin de frase');
+    // una pausa de 0,5 s o más también cierra frase (Whisper sin puntuación)
+    const conPausa = Array.from({ length: 80 }, (_, i) => ({ inicio_s: r(i * 0.6 + Math.floor(i / 10) * 0.7), fin_s: r(i * 0.6 + Math.floor(i / 10) * 0.7 + 0.5), texto: `q${i}` }));
+    yes(finDeFrase(conPausa, 9) && !finDeFrase(conPausa, 8) && inicioDeFrase(conPausa, 10), 'pausa de 1,2 s cierra la frase');
+    o = v({ inicio_s: conPausa[10].inicio_s, fin_s: conPausa[37].fin_s }, { pal: conPausa }).validos[0];
+    eq(o.fin_s, conPausa[39].fin_s, 'estirado hasta la pausa');
+    // sin ninguna frase a la vista (palabras pegadas, sin puntuación): no toca nada
+    eq(ajustarAFrases(PALABRAS[2].inicio_s, PALABRAS[20].fin_s, PALABRAS.slice(0, 30)), { inicio_s: PALABRAS[2].inicio_s, fin_s: PALABRAS[20].fin_s }, 'sin frases no toca');
+    // el fin extendido no pisa el tramo que sigue ni pasa de 90 s
+    const t = validarMomentos([{ tema: 't', interes: 5, inicio_s: pal[20].inicio_s, fin_s: pal[36].fin_s, tramos: [{ inicio_s: pal[20].inicio_s, fin_s: pal[36].fin_s }, { inicio_s: pal[40].inicio_s, fin_s: pal[59].fin_s }] }], pal).validos[0];
+    eq(t.tramos.map((x) => [x.inicio_s, x.fin_s]), [[pal[20].inicio_s, pal[39].fin_s], [pal[40].inicio_s, pal[59].fin_s]], 'tramos: cada uno cierra su frase');
+  }],
+  ['Recetas', 'Gancho «adelanto»: arranca en un comienzo de frase; el largo nunca corta la idea (se estira hasta el fin de frase); el cartel es de 1 a 3 palabras; el punch-in va siempre', () => {
+    const pal = Array.from({ length: 120 }, (_, i) => ({ inicio_s: i * 0.6, fin_s: i * 0.6 + 0.5, texto: (i + 1) % 12 === 0 ? `p${i}.` : `p${i}` })); // frases de 12 palabras (7,2 s)
+    const momento = { inicio_s: 0, fin_s: pal[59].fin_s, datos: { tema: 'Obras en la vía un sábado sin acceso' } };
+    const base = { subtitulos: 'grande', musica: 'sin', ritmo: 'normal', explora: false };
+    const textos = { caption: 'c', hashtags: '#a', gancho_texto: 'Obras en la vía un sábado: sin acceso, sin ventas', portada_texto: 'Obras en la vía un sábado: sin acceso' };
+    const ad = construirReceta({ v: { ...base, gancho: 'adelanto', largo: 'medio' }, momento, palabras: pal, textos });
+    const i = pal.findIndex((p) => Math.abs(p.inicio_s - ad.gancho.desde_s) < 1e-6);
+    yes(i > 0 && inicioDeFrase(pal, i), `desde_s ${ad.gancho.desde_s} no es un comienzo de frase`);
+    yes(ad.gancho.desde_s >= momento.fin_s * 0.2, 'el adelanto salta al menos el 20 %');
+    // el objetivo (70 % de lo disponible) cae a mitad de frase: el largo llega al fin de la frase siguiente
+    const objetivo = (momento.fin_s - ad.gancho.desde_s) * 0.7, finesRel = pal.filter((p, k) => p.inicio_s >= ad.gancho.desde_s && finDeFrase(pal, k)).map((p) => p.fin_s - ad.gancho.desde_s);
+    const esperado = finesRel.find((x) => x >= objetivo - 0.01);
+    yes(ad.largo_s >= objetivo - 0.05 && Math.abs(ad.largo_s - Math.round((esperado + 0.2) * 10) / 10) <= 0.1, `largo ${ad.largo_s} no cierra la idea (objetivo ${objetivo}, fin de frase ${esperado})`);
+    // carteles de 1 a 3 palabras, en gancho y portada, con la clave de la frase larga
+    const n = (t) => t.split(/\s+/).length;
+    yes(n(ad.gancho.texto) <= 3 && n(ad.portada.texto) <= 3, `cartel largo: «${ad.gancho.texto}» / «${ad.portada.texto}»`);
+    eq(ad.gancho.texto, 'sábado acceso ventas', 'palabras clave del gancho');
+    for (const [t, max] of [['Obras', 1], ['Mirá esto', 2], ['La obra que nadie quiere ver hoy en San Isidro', 3], ['', 0]]) yes(cartelCorto(t).split(/\s+/).filter(Boolean).length <= max, `cartelCorto(${t})`);
+    // portada sin texto: sale del tema, también en 3 palabras
+    eq(construirReceta({ v: { ...base, gancho: 'directo', largo: 'completo' }, momento, palabras: pal, textos: { ...textos, portada_texto: '' } }).portada.texto, 'Obras sábado acceso', 'portada del tema');
+    // el punch-in va en todas las recetas, también con ritmo lento
+    eq([ad.zoom, construirReceta({ v: { ...base, gancho: 'directo', largo: 'completo', ritmo: 'lento' }, momento, palabras: pal, textos }).zoom], [true, true], 'zoom siempre');
   }],
   ['Mirar', 'tramosAEstado pasa números de cuadro a segundos reales (tiempos_s) y descarta lo inválido', () => {
     const pl = [{ tiempos_s: [0, 2, 4, 6], hasta_s: 8 }, { tiempos_s: [8, 10], hasta_s: 11 }];
