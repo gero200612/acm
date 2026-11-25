@@ -297,7 +297,14 @@ casos.push(
     eq(validos.map((m) => [m.inicio_s, m.fin_s]), [[0, 12.9], [70, 82.9]], 'quedan');
     eq(descartados.map((d) => d.causa).sort(), ['muy cortos', 'que cortan una palabra', 'solapados'], 'causas');
     eq(validarMomentos([{ inicio_s: 0, fin_s: 94.9, interes: 5 }], PALABRAS).descartados[0].causa, 'muy largos', 'más de 90 s');
-    eq(validarMomentos([mom(1, { fin_s: 19.5 })], PALABRAS).descartados[0].causa, 'que cortan una palabra', 'termina a mitad de palabra');
+    eq(validarMomentos([mom(1, { fin_s: 19.4 })], PALABRAS).descartados[0].causa, 'que cortan una palabra', 'termina a mitad de palabra');
+    eq(validarMomentos([mom(1, { inicio_s: 400, fin_s: 420 })], PALABRAS).descartados[0].causa, 'sin palabras en esos tiempos', 'fuera de la transcripción no es «cortar una palabra»');
+  }],
+  ['Momentos', 'validarMomentos clava tiempos redondeados (±0,3 s) a la palabra más cercana y después ajusta a frase', () => {
+    // palabras 0,9 s cada 1 s; Sonnet redondea: inicio 20,3 (palabra 20) y fin 33,1 (termina la 32, en 32,9)
+    const r = validarMomentos([{ inicio_s: 20.3, fin_s: 33.1, tema: 'redondeado', interes: 5 }, { inicio_s: 69.7, fin_s: 83, tema: 'otro', interes: 4 }], PALABRAS);
+    eq(r.descartados, [], 'no se descarta ninguno');
+    eq(r.validos.map((m) => [m.inicio_s, m.fin_s]), [[20, 32.9], [70, 82.9]], 'clavados a la palabra');
   }],
   ['Momentos', 'Un crudo sin momentos válidos queda sin_momentos con el motivo (y sin habla ni llama a Claude)', async () => {
     const claude = claudeFalso({ momentos: [{ inicio_s: 30, fin_s: 33.9, tema: 'x', interes: 5 }, { inicio_s: 100.5, fin_s: 120, tema: 'y', interes: 4 }] });

@@ -4,8 +4,11 @@ import { SYSTEM_MOMENTOS, SYSTEM_VISUAL, HERRAMIENTA_MOMENTOS, herramientaMoment
 import { normalizarAprendizajes } from './recetas.js';
 import { PAUSA_FRASE_S, cierraFrase, finDeFrase, inicioDeFrase } from './frases.js';
 
-export const MIN_S = 12, MAX_S = 90, MAX_EDITADOS = 15, TOLERANCIA_S = 0.05;
+export const MIN_S = 12, MAX_S = 90, MAX_EDITADOS = 15;
 export const MIN_VISUAL_S = 6, BORDE_S = 0.5, PALABRAS_POR_S_VISUAL = 1 / 3; // menos de 1 palabra cada 3 s = momento visual
+export const SNAP_S = 0.4, SNAP_PAUSA_S = 1.5; // dentro de una palabra se perdona 0,4 s; en una pausa (entre palabras) hasta 1,5 s
+const masCercana = (ps, k, x) => { let mejor = null, d = (ps.some((p) => p.inicio_s < x && x < p.fin_s) ? SNAP_S : SNAP_PAUSA_S) + 1e-9; for (const p of ps) { const e = Math.abs(p[k] - x); if (e < d - 1e-9) { d = e; mejor = p; } } return mejor; };
+const dentroDeUnaPalabra = (ps, t) => ps.some((p) => p.inicio_s < t && t < p.fin_s);
 const r1 = (x) => Math.round(x * 10) / 10;
 
 export const EXTENDER_FIN_S = 8, MOVER_INICIO_S = 8;
@@ -41,9 +44,8 @@ export function ajustarAFrases(ini, fin, palabras, { tope = Infinity, minimo = 3
 }
 
 // → { validos (ordenados por interés, con los tiempos clavados a la palabra), descartados: [{ momento, motivo }] }
-export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_S, publicos = [], visual = false } = {}) {
+export function validarMomentos(propuestos, palabras, { publicos = [], visual = false } = {}) {
   const validos = [], descartados = [];
-  const cerca = (a, b) => Math.abs(a - b) <= tolerancia;
   const ordenados = (Array.isArray(propuestos) ? propuestos : []).map((m, i) => ({ m, i }))
     .sort((a, b) => (b.m?.pedido === true) - (a.m?.pedido === true) || (Number(b.m?.interes) || 0) - (Number(a.m?.interes) || 0) || a.i - b.i);
   for (const { m } of ordenados) {
@@ -68,9 +70,10 @@ export function validarMomentos(propuestos, palabras, { tolerancia = TOLERANCIA_
     for (const tr of sinHabla ? [] : pedidos) {
       const ini = Number(tr?.inicio_s), fin = Number(tr?.fin_s);
       if (!Number.isFinite(ini) || !Number.isFinite(fin) || tr?.inicio_s === null || tr?.fin_s === null) { falla = ['tiempos que no son números', 'con tiempos inválidos']; break; }
-      const pIni = palabras.find((p) => cerca(p.inicio_s, ini)), pFin = [...palabras].reverse().find((p) => cerca(p.fin_s, fin));
-      if (!pIni) { falla = [`empieza a mitad de palabra (${ini} s)`, 'que cortan una palabra']; break; }
-      if (!pFin) { falla = [`termina a mitad de palabra (${fin} s)`, 'que cortan una palabra']; break; }
+      // Sonnet devuelve tiempos redondeados (±0,3 s): se clavan a la palabra MÁS CERCANA (a ±SNAP_S); recién ahí se ajusta a frase
+      const pIni = masCercana(palabras, 'inicio_s', ini), pFin = masCercana(palabras, 'fin_s', fin);
+      if (!pIni) { falla = dentroDeUnaPalabra(palabras, ini) ? [`empieza a mitad de palabra (${ini} s)`, 'que cortan una palabra'] : [`no hay palabras cerca del inicio (${ini} s)`, 'sin palabras en esos tiempos']; break; }
+      if (!pFin) { falla = dentroDeUnaPalabra(palabras, fin) ? [`termina a mitad de palabra (${fin} s)`, 'que cortan una palabra'] : [`no hay palabras cerca del final (${fin} s)`, 'sin palabras en esos tiempos']; break; }
       if (pFin.fin_s <= pIni.inicio_s || (tramos.length && pIni.inicio_s < tramos.at(-1).fin_s)) { falla = ['tramos desordenados o que se pisan', 'con tramos inválidos']; break; }
       // la idea entera: empieza donde empieza una frase y termina cuando se cierra (sin pisar el tramo que sigue)
       const siguiente = pedidos[tramos.length + 1], tope = Number.isFinite(Number(siguiente?.inicio_s)) ? Number(siguiente.inicio_s) : Infinity;
