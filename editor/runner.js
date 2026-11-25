@@ -15,6 +15,7 @@ import { repo, TERMINALES } from './db.js';
 import { corregirReceta as corregirPorDefecto } from './analista.js';
 import { ajustePorPalabras, aplicarAjuste } from './ajuste.js';
 import { notasDe } from './mirar.js';
+import { usoDelTrabajo, resumirUso } from './claude.js';
 
 // lo que el Estudio no conoce (su esquema es estricto) se saca antes de mandarle la receta
 const META_RECETA = ['explora', 'caption', 'hashtags', 'variables'];
@@ -249,8 +250,22 @@ export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomento
     } finally { rehaciendo = false; }
   }
 
-  // procesa un trabajo de punta a punta (o desde donde quedó)
+  // procesa un trabajo con registro de costo: cada llamada a Claude queda anotada y al terminar se guarda la suma (y se acumula si se retoma)
   async function procesar(id) {
+    const llamadas = [];
+    try { return await usoDelTrabajo.run(llamadas, () => procesarTrabajo(id)); }
+    finally {
+      if (llamadas.length) {
+        const previo = R.usoGuardado(id)?.llamadas_detalle || [];
+        const todas = [...previo, ...llamadas], u = { ...resumirUso(todas), llamadas_detalle: todas };
+        R.guardarUso(id, u);
+        console.log(`[trabajo ${id}] costo API: USD ${u.total_usd} en ${u.llamadas} llamadas (${Object.entries(u.por_modelo).map(([m, x]) => `${m}: ${x.llamadas} × USD ${x.usd}`).join(', ')})`);
+      }
+    }
+  }
+
+  // procesa un trabajo de punta a punta (o desde donde quedó)
+  async function procesarTrabajo(id) {
     let t = R.trabajo(id);
     if (!t || TERMINALES.includes(t.estado)) return t;
     try {

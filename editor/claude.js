@@ -5,6 +5,33 @@
 // va como formato de salida JSON (output_config.format), que garantiza la forma de la respuesta.
 // Sin ANTHROPIC_API_KEY falla con un mensaje claro (el trabajo termina en «error», el servicio no se cae).
 import Anthropic from '@anthropic-ai/sdk';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+// Costo de la API por trabajo: el runner abre un registro (usoDelTrabajo.run) y cada llamada anota modelo y tokens ahí.
+// Precios en USD por millón de tokens (lista pública de Anthropic, 2026-11). El pensamiento se cobra como salida (ya viene en output_tokens).
+// Haiku 5.5: lectura/escritura de caché estimadas en 0,1× y 1,25× de la entrada (no están en la tabla).
+export const PRECIOS = {
+  'claude-sonnet-5-5': { entrada: 2, salida: 10, cache_lectura: 0.1, cache_escritura: 2.5 },
+  'claude-sonnet-5': { entrada: 2, salida: 10, cache_lectura: 0.2, cache_escritura: 2.5 },
+  'claude-haiku-5-5': { entrada: 0.1, salida: 0.5, cache_lectura: 0.01, cache_escritura: 0.125 },
+  'claude-opus-5-5': { entrada: 4, salida: 20, cache_lectura: 0.2, cache_escritura: 5 },
+  'claude-opus-4-8': { entrada: 5, salida: 25, cache_lectura: 0.5, cache_escritura: 6.25 },
+};
+export const usoDelTrabajo = new AsyncLocalStorage();
+export function costoUSD(u) {
+  const p = PRECIOS[u.modelo] || PRECIOS['claude-sonnet-5-5'];
+  return (u.entrada * p.entrada + u.salida * p.salida + (u.cache_lectura || 0) * p.cache_lectura + (u.cache_escritura || 0) * p.cache_escritura) / 1e6;
+}
+// suma por modelo de un registro de llamadas: { total_usd, llamadas, por_modelo: { modelo: { llamadas, entrada, salida, usd } } }
+export function resumirUso(lista = []) {
+  const por = {};
+  for (const u of lista) {
+    const m = (por[u.modelo] ||= { llamadas: 0, entrada: 0, salida: 0, cache_lectura: 0, cache_escritura: 0, usd: 0 });
+    m.llamadas++; m.entrada += u.entrada; m.salida += u.salida; m.cache_lectura += u.cache_lectura || 0; m.cache_escritura += u.cache_escritura || 0; m.usd += costoUSD(u);
+  }
+  for (const m of Object.values(por)) m.usd = Math.round(m.usd * 10000) / 10000;
+  return { total_usd: Math.round(Object.values(por).reduce((a, m) => a + m.usd, 0) * 10000) / 10000, llamadas: lista.length, por_modelo: por };
+}
 
 export const MODELOS = { momentos: 'claude-sonnet-5-5', textos: 'claude-haiku-5-5', mirar: 'claude-haiku-5-5', analista: 'claude-sonnet-5-5' };
 
@@ -44,6 +71,8 @@ export function crearClaude({ apiKey = process.env.ANTHROPIC_API_KEY, sdk } = {}
         : await cliente.messages.create(pedido);
       // tokens de esta llamada, para quien quiera sumarlos (el costo de mirar por crudo)
       if (typeof uso === 'function') uso({ modelo, entrada: r.usage?.input_tokens ?? 0, salida: r.usage?.output_tokens ?? 0 });
+      // y al registro del trabajo en curso, con el modelo que respondió de verdad (si hubo respaldo, otro)
+      usoDelTrabajo.getStore()?.push({ modelo: r.model || modelo, entrada: r.usage?.input_tokens ?? 0, salida: r.usage?.output_tokens ?? 0, cache_lectura: r.usage?.cache_read_input_tokens ?? 0, cache_escritura: r.usage?.cache_creation_input_tokens ?? 0 });
       if (r.stop_reason === 'refusal') throw new Error(`Claude no quiso responder (${r.stop_details?.category || 'sin categoría'})`);
       if (r.stop_reason === 'max_tokens') throw new Error('La respuesta de Claude quedó cortada (tope de tokens)');
       const texto = (r.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');

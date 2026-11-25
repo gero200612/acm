@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS ediciones (
   if (!db.prepare('PRAGMA table_info(momentos)').all().some((c) => c.name === 'estado')) db.exec("ALTER TABLE momentos ADD COLUMN estado TEXT NOT NULL DEFAULT 'elegido'");
   if (!db.prepare('PRAGMA table_info(ediciones)').all().some((c) => c.name === 'uuid')) db.exec("ALTER TABLE ediciones ADD COLUMN uuid TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(trabajos)').all().some((c) => c.name === 'visual')) db.exec('ALTER TABLE trabajos ADD COLUMN visual TEXT');
+  if (!db.prepare('PRAGMA table_info(trabajos)').all().some((c) => c.name === 'uso')) db.exec('ALTER TABLE trabajos ADD COLUMN uso TEXT');
   return db;
 }
 
@@ -56,6 +57,9 @@ export function repo(db) {
     estado(id, estado, detalle = '') { run("UPDATE trabajos SET estado = ?, detalle = ?, updated_at = datetime('now') WHERE id = ?", estado, detalle, id); },
     guardarTranscripcion(id, t) { run('UPDATE trabajos SET transcripcion = ? WHERE id = ?', J(t), id); },
     // el registro visual (etapa «mirando») se guarda con el trabajo; un reenvío del mismo crudo reusa el último que salió bien
+    // lo que costó la API en este trabajo (se suma si el trabajo se retoma)
+    guardarUso(id, u) { run('UPDATE trabajos SET uso = ? WHERE id = ?', J(u), id); },
+    usoGuardado: (id) => P(get('SELECT uso FROM trabajos WHERE id = ?', id)?.uso) || null,
     guardarVisual(id, v) { run('UPDATE trabajos SET visual = ? WHERE id = ?', J(v), id); },
     // solo del MISMO video: ACM puede reusar el número de un crudo borrado, así que además del reel_id tienen que coincidir el link (sin la firma) y la duración
     visualPrevio: (reel_id, excluir) => {
