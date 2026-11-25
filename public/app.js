@@ -466,7 +466,7 @@ function projectView(tab) {
   if (isContent()) counts.crudos = state.reels.length;
   const tabs = `<nav class="tabs">${T.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${on === k ? 'active' : ''}">${l}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>`;
   const views = { crudos: crudosView, resumen: resumenView, cuentas: cuentasView, reels: reelsView, calendario: calendarioView, aprobar: aprobarView, pauta: pautaView, campanas: campanasView, memoria: memoriaView, reel: reelDetailView, investigacion: investigacionView, comentarios: comentariosView, ajustes: ajustesView };
-  return tabs + (views[tab] || resumenView)();
+  return tabs + `<div id="ed-band">${edBand()}</div>` + (views[tab] || resumenView)();
 }
 
 
@@ -831,7 +831,7 @@ function crudoCard(r) {
     <div class="cd-body">
       <a class="cd-title" href="${href}">${esc(r.descripcion || r.title)}</a>
       <div class="cd-meta">${r.etiqueta ? `<span class="chip nodot">${icon('home', 12)} ${esc(r.etiqueta)}</span>` : ''}<span class="small muted">Subido ${esc(fecha)}</span></div>
-      <div class="cd-meta"><span class="chip ${st}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(CRUDO_ESTADO[r.status] || 'En el editor')}</span>
+      <div class="cd-meta"><span class="chip ${st} ${edActivo(r) ? 'ed-live' : ''}" data-st="${r.id}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(CRUDO_ESTADO[r.status] || 'En el editor')}${edActivo(r) && r.status_detail ? ` · ${esc(r.status_detail)}` : ''}</span>
         <span class="small"><b>${nTxt(T.moments.length, 'momento', 'momentos')}</b> · <b>${nTxt(T.total, 'edición', 'ediciones')}</b>${ok ? ` · ${nTxt(ok, 'aprobada', 'aprobadas')}` : ''}</span></div>
       ${T.total ? `<div class="cd-eds">${T.moments.flatMap((m) => m.eds).concat(T.otras).slice(0, 9).map((e) => `<a class="cd-ed rv-${e.review}" href="#/p/${state.project.id}/reel/${e.id}" title="${esc(e.title)}">${coverOf(e)}</a>`).join('')}${T.total > 9 ? `<span class="small muted">+${T.total - 9}</span>` : ''}</div>` : ''}
       <div class="row" style="gap:6px"><a class="btn sm" href="${href}">Ver momentos${T.total ? ' y ediciones' : ''}</a></div>
@@ -1485,8 +1485,8 @@ function crudoInfo(r) {
   const top = `<section class="card"><h2 class="h2">${esc(r.descripcion || r.title)}</h2>
     <p class="small muted">${[r.etiqueta ? esc(r.etiqueta) : '', r.publico ? `Para ${esc(pubName(r.publico))}` : '', `subido el ${fmtDate(r.created_at)}`].filter(Boolean).join(' · ')}</p>
     ${r.descripcion && r.title ? `<p class="small muted">Archivo: ${esc(r.title)}</p>` : ''}${q}
-    <p><span class="chip ${r.status === 'error' ? 's-error' : 'nodot'}">${esc(CRUDO_ESTADO[r.status] || 'En el editor')}</span> <span class="small muted">${nTxt(T.moments.length, 'momento', 'momentos')} · ${nTxt(T.total, 'edición', 'ediciones')}</span></p>
-    ${r.status_detail ? `<p class="small cm-detail">${esc(r.status_detail)}</p>` : ''}
+    <p><span class="chip ${r.status === 'error' ? 's-error' : 'nodot'} ${edActivo(r) ? 'ed-live' : ''}" data-st-d="${r.id}">${esc(CRUDO_ESTADO[r.status] || 'En el editor')}</span> <span class="small muted">${nTxt(T.moments.length, 'momento', 'momentos')} · ${nTxt(T.total, 'edición', 'ediciones')}</span></p>
+    <p class="small cm-detail" data-st-det="${r.id}" ${r.status_detail ? '' : 'hidden'}>${esc(r.status_detail || '')}</p>
     <p class="small muted">Un crudo no se publica. Cada edición es un reel aparte que puede ir a otra cuenta de la misma red.</p></section>`;
   const mo = T.moments.map((m, i) => { const x = m.moment, ini = x.inicio_s, fin = x.fin_s, rng = ini != null && fin != null ? ` · ${mmss(ini)}–${mmss(fin)}` : '';
     return block(`<h2 class="h2">Momento ${i + 1}${rng}${x.tema ? ` · ${esc(x.tema)}` : ''}</h2>`, [x.motivo ? esc(x.motivo) : '', x.publico ? `Para ${esc(pubName(x.publico))}` : ''].filter(Boolean).join(' · '), m.eds); }).join('');
@@ -2339,7 +2339,86 @@ async function uploadEnPartes(files) {
 }
 
 // ---------- eventos ----------
+
+// ---------- «El editor está trabajando»: franja + sondeo liviano ----------
+const ED_PASOS = [['transcribiendo', 'Transcribir'], ['mirando', 'Mirar'], ['buscando_momentos', 'Elegir momentos'], ['editando', 'Editar'], ['revisando', 'Revisar']];
+const ED_FINAL = ['listo', 'sin_momentos', 'error'];
+const edActivo = (r) => !!r && !!r.status && !ED_FINAL.includes(r.status);
+const edCrudos = () => (state.reels || []).filter((r) => r.kind === 'crudo' && !r.archived_at && edActivo(r));
+function hace(s) {
+  const t = Date.parse(String(s || '').replace(' ', 'T') + 'Z'); if (!t) return '';
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+  return m < 1 ? 'recién' : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} d`;
+}
+function edBand() {
+  const L = edCrudos(); if (!L.length) return '';
+  return `<section class="ed-band" aria-live="polite">${L.map((r) => {
+    const i = ED_PASOS.findIndex(([k]) => k === r.status), nombre = esc(r.descripcion || r.title || 'Crudo');
+    const t = !isContent() ? `<a href="#/p/${state.project.id}/reel/${r.id}">«${nombre}»</a>` : `«${nombre}»`;
+    const det = r.status_detail ? ` ${esc(r.status_detail)}` : '', cuando = hace(r.status_at);
+    return `<div class="ed-row" data-ed="${r.id}"><span class="ed-pulse" aria-hidden="true"></span>
+      <div class="ed-txt"><b>El editor está trabajando</b> · ${t} · <span class="ed-st">${esc(CRUDO_ESTADO[r.status] || 'En el editor')}${det}</span>${cuando ? ` · <span class="muted">${cuando}</span>` : ''}</div>
+      <ol class="ed-steps">${ED_PASOS.map(([k, l], j) => `<li class="${j < i ? 'done' : j === i ? 'on' : ''}">${l}</li>`).join('')}</ol></div>`;
+  }).join('')}</section>`;
+}
+function edPintar() {
+  const b = $('#ed-band'); if (b) { const h = edBand(); if (b.innerHTML !== h) b.innerHTML = h; }
+  // chips de las tarjetas y del detalle, en el lugar
+  for (const r of state.reels || []) {
+    if (r.kind !== 'crudo') continue;
+    const txt = (CRUDO_ESTADO[r.status] || 'En el editor') + (edActivo(r) && r.status_detail ? ` · ${r.status_detail}` : '');
+    document.querySelectorAll(`[data-st="${r.id}"], [data-st-d="${r.id}"]`).forEach((c) => {
+      if (c.textContent !== (c.hasAttribute('data-st-d') ? CRUDO_ESTADO[r.status] || 'En el editor' : txt)) c.textContent = c.hasAttribute('data-st-d') ? CRUDO_ESTADO[r.status] || 'En el editor' : txt;
+      c.classList.toggle('ed-live', edActivo(r)); c.classList.toggle('s-error', r.status === 'error'); c.classList.toggle('nodot', r.status !== 'error');
+      if (r.status_detail) c.title = r.status_detail; else c.removeAttribute('title');
+    });
+    const d = document.querySelector(`[data-st-det="${r.id}"]`); if (d) { d.textContent = r.status_detail || ''; d.hidden = !r.status_detail; }
+  }
+}
+let edTimer = null, edBusy = false;
+async function edTick() {
+  if (edBusy || document.visibilityState !== 'visible' || !state.authed || !state.project || route().view !== 'project' || !edCrudos().length) return;
+  edBusy = true;
+  const pid = state.project.id;
+  try {
+    const L = await api(`/api/projects/${pid}/editor-estado`);
+    if (!state.project || state.project.id !== pid) return;
+    const fin = [];
+    for (const x of L) {
+      const r = state.reels.find((y) => y.id === x.id); if (!r) continue;
+      const antes = edActivo(r);
+      Object.assign(r, { status: x.status, status_detail: x.status_detail, status_at: x.status_at });
+      if (antes && ED_FINAL.includes(x.status)) fin.push(x);
+    }
+    edPintar();
+    if (fin.length) await edTerminaron(fin, pid);
+  } catch (e) { /* sin red: se reintenta en el próximo ciclo */ } finally { edBusy = false; }
+}
+async function edTerminaron(fin, pid) {
+  const aprueba = !isContent() || isEditor();
+  try {
+    const [p, R] = await Promise.all([api(`/api/projects/${pid}`), api(`/api/projects/${pid}/reels`)]);
+    if (state.project?.id !== pid) return;
+    state.project = p; state.reels = R;
+  } catch {}
+  for (const x of fin) {
+    const nom = `«${x.title}»`;
+    if (x.status === 'listo') toast(`Ediciones listas de ${nom}: ${aprueba ? `${x.pendientes} para aprobar` : nTxt(x.ediciones, 'edición', 'ediciones')}`, false, { label: 'Ver', fn: () => { const h = aprueba ? `#/p/${pid}/aprobar` : isContent() ? `#/p/${pid}/crudos` : `#/p/${pid}/reel/${x.id}`; if (location.hash === h) render(); else location.hash = h; } });
+    else if (x.status === 'sin_momentos') toast(`El editor no encontró momentos para editar en ${nom}${x.status_detail ? `: ${x.status_detail}` : ''}`);
+    else toast(`El editor no pudo con ${nom}${x.status_detail ? `: ${x.status_detail}` : ''}`, true);
+  }
+  // contadores: Para aprobar (pestaña y barra lateral), Subir crudos, tarjetas
+  const n = state.project.review_pending || 0;
+  document.querySelectorAll(`.tabs a[href$="/aprobar"] .count, .side a[href="#/p/${pid}"] .count`).forEach((c) => { c.textContent = n; });
+  for (const x of fin) { const r = state.reels.find((y) => y.id === x.id), c = document.querySelector(`.cd[data-id="${x.id}"]`); if (r && c && !selOn()) { const t = document.createElement('div'); t.innerHTML = crudoCard(r); c.replaceWith(t.firstElementChild); } }
+  edPintar();
+}
+function edArrancar() {
+  if (!edTimer) { edTimer = setInterval(edTick, 8000); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') edTick(); }); }
+}
+
 function afterRender(r) {
+  edArrancar(r);
   if (r.view === 'project' && r.tab === 'comentarios') {
     $('#ar-form').addEventListener('submit', async (e) => {
       e.preventDefault(); const f = e.target, b = f.querySelector('button[type=submit]'); b.disabled = true;

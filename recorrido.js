@@ -679,6 +679,13 @@ export function recorridoCases(sb) {
       eq((await post({ reel_id: 999999, estado: 'listo' })).status, 404, 'crudo inexistente');
       eq((await post({ reel_id: c.crudo, estado: 'listo' })).status, 200, 'listo');
     }],
+    [G('editor'), 'editor-estado: lista en qué va cada crudo, con el avance que avisó el editor', async () => {
+      await sb.box.editorApi('/api/editor/estado', { reel_id: c.crudo, estado: 'transcribiendo', detalle: '35 %' });
+      const x = (await api('GET', `/api/projects/${c.p}/editor-estado`)).j?.find((y) => y.id === c.crudo);
+      eq([x?.status, x?.status_detail, typeof x?.title, !!x?.status_at], ['transcribiendo', '35 %', 'string', true], 'estado, detalle, título y hora');
+      yes(!('views' in x) && !('posts' in x), 'sin números de redes');
+      await sb.box.editorApi('/api/editor/estado', { reel_id: c.crudo, estado: 'listo' });
+    }],
     [G('editor'), 'Públicos: se cargan en el proyecto, le llegan al editor, la edición guarda el de su fragmento, la cuenta toma uno y no se programa en otra de otro público', async () => {
       eq((await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'Mayores', descripcion: '45+' }, { nombre: 'Jóvenes', descripcion: '18 a 35' }] })).j?.publicos?.map((x) => x.clave), ['mayores', 'jovenes'], 'públicos guardados');
       eq((await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'A' }, { nombre: 'a' }] })).status, 400, 'nombres repetidos');

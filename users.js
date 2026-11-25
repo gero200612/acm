@@ -104,6 +104,7 @@ const SOMBRA = [
   ['GET', /^\/api\/(projects|storage|me|session)$/],
   ['GET', /^\/api\/projects\/\d+$/],
   ['GET', /^\/api\/projects\/\d+\/(reels|posts|accounts)$/], // el calendario: solo mirar, sin números
+  ['GET', /^\/api\/projects\/\d+\/editor-estado$/], // en qué va cada crudo
   ['POST', /^\/api\/projects\/\d+\/reels(\/uploads|\/complete|\/partes|\/partes\/fin)?$/],
   ['PUT', /^\/api\/projects\/\d+\/reels\/partes\/[0-9a-f-]{36}$/],
 ];

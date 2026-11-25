@@ -765,6 +765,13 @@ app.get('/api/projects/:id/reels', (req, res) => {
     sum((SELECT count(*) FROM posts p WHERE p.reel_id = reels.id AND p.status = 'publicado') > 0) AS pub FROM reels WHERE project_id = ? AND kind = 'listo' AND source_id IS NOT NULL GROUP BY source_id`, req.params.id).map((x) => [x.id, x]));
   res.json(R.filter((r) => r.kind === 'crudo').map((r) => { const x = ed.get(r.id) || {}; return { ...sombraReel(r), ediciones: x.n || 0, aprobadas: x.ok || 0, pendientes: x.pend || 0, publicadas: x.pub || 0 }; }));
 });
+// en qué va cada crudo del proyecto (liviana, para la franja «El editor está trabajando»): sin números de redes
+app.get('/api/projects/:id/editor-estado', (req, res) => {
+  res.json(all(`SELECT r.id, COALESCE(NULLIF(r.descripcion, ''), r.title) AS title, r.status, r.status_detail, r.status_at,
+    (SELECT count(*) FROM reels e WHERE e.source_id = r.id AND e.kind = 'listo') AS ediciones,
+    (SELECT count(*) FROM reels e WHERE e.source_id = r.id AND e.kind = 'listo' AND e.review = 'pendiente') AS pendientes
+    FROM reels r WHERE r.project_id = ? AND r.kind = 'crudo' AND r.archived_at = '' AND r.status != '' ORDER BY r.id`, req.params.id));
+});
 // alta de un video que ya quedó en el disco del servidor (subida directa o en partes); un crudo queda en cola y va al editor
 function altaLocal(pid, req, b, f) {
   const title = (b?.title && f.unico) ? b.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
