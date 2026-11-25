@@ -474,11 +474,14 @@ function projectView(tab) {
 
 
 // ---------- Para aprobar: cada recorte con sus 3 ediciones lado a lado ----------
+// «karaoke» era un estilo de subtítulo (hoy es el modo karaoke sobre el estilo recuadro): lo guardado con ese nombre se muestra como Recuadro
+const ESTILOS_SUB = { recuadro: 'Recuadro', karaoke: 'Recuadro', placa: 'Placa', minimo: 'Mínimo', frase: 'Frase', grande: 'Grande', chango: 'Chango' };
+const estiloSubtitulo = (x) => ESTILOS_SUB[x] || x;
 function recetaResumen(r) {
   if (!r) return '';
   const v = r.variables || {}, gancho = v.gancho || (r.gancho?.texto ? 'con texto' : 'directo');
   const musica = r.musica === null ? 'sin' : (r.musica?.clima || v.musica || '—');
-  return [['Gancho', gancho + (r.gancho?.texto ? ` «${r.gancho.texto}»` : '')], ['Subtítulos', r.subtitulos || v.subtitulos], ['Música', musica], ['Ritmo', r.ritmo], ['Largo', r.largo_s ? `${Math.round(r.largo_s)} s` : v.largo]]
+  return [['Gancho', gancho + (r.gancho?.texto ? ` «${r.gancho.texto}»` : '')], ['Subtítulos', estiloSubtitulo(r.subtitulos || v.subtitulos) + (r.subtitulos && r.karaoke !== false ? ' · karaoke' : '')], ['Música', musica], ['Ritmo', r.ritmo], ['Largo', r.largo_s ? `${Math.round(r.largo_s)} s` : v.largo]]
     .filter(([, x]) => x).map(([k, x]) => `<li><span>${k}</span><b>${esc(x)}</b></li>`).join('');
 }
 // Comentarios en un segundo exacto: marcas sobre la línea de tiempo, lista (tocar = ir a ese segundo) y un campo que comenta donde está el video.
@@ -568,8 +571,8 @@ const MEM_KINDS = { promover: 'Promover', corte: 'Corte', pausa_total: 'Pausa to
 function memoriaView() {
   const M = state.memory || { decisions: [], comparisons: [], aprendizajes: [], ganadoras: {} };
   const g = M.ganadoras || {};
-  const gan = Object.entries(g).map(([k, v]) => `<li><b>${esc(MEM_VARS[k] || k)}</b>: ${k === 'horario' ? Object.entries(v).map(([n, h]) => `${esc(n)} ${esc(h)}`).join(', ') : esc(v)}</li>`).join('');
-  const rows = (M.aprendizajes || []).map((a) => `<tr><td>${esc(MEM_VARS[a.variable] || a.variable)}</td><td>${esc(a.value)}${a.network ? ` <span class="muted small">(${esc(a.network)})</span>` : ''}</td><td>${fmt(a.wins, 1)} de ${fmt(a.trials, 1)}</td><td>${fmt(a.rate * 100)} %</td></tr>`).join('');
+  const gan = Object.entries(g).map(([k, v]) => `<li><b>${esc(MEM_VARS[k] || k)}</b>: ${k === 'horario' ? Object.entries(v).map(([n, h]) => `${esc(n)} ${esc(h)}`).join(', ') : esc(k === 'subtitulos' ? estiloSubtitulo(v) : v)}</li>`).join('');
+  const rows = (M.aprendizajes || []).map((a) => `<tr><td>${esc(MEM_VARS[a.variable] || a.variable)}</td><td>${esc(a.variable === 'subtitulos' ? estiloSubtitulo(a.value) : a.value)}${a.network ? ` <span class="muted small">(${esc(a.network)})</span>` : ''}</td><td>${fmt(a.wins, 1)} de ${fmt(a.trials, 1)}</td><td>${fmt(a.rate * 100)} %</td></tr>`).join('');
   const cmp = (M.comparisons || []).map((c) => `<article class="card"><div class="card-head"><h3 class="h2">Recorte ${esc(c.clip_id)}</h3><span class="small muted">${esc(String(c.created_at).slice(0, 16))}</span></div>
     <p class="small">Ganó la edición #${c.winner_reel_id} por ${fmt(c.diff, 3)} de puntaje. Receta: ${Object.entries(c.winner_recipe?.variables || {}).map(([k, v]) => `${esc(k)} ${esc(v)}`).join(' · ') || 'sin datos'}</p>
     <p>${esc(c.hypothesis)}</p></article>`).join('');
@@ -1790,16 +1793,16 @@ function publicosCard(p) {
   </section>`;
 }
 // opciones de edición (las mismas del editor): cada público marca las que usa; sin marcar = todas
-const ESTILO = { ritmo: ['Ritmo', { rapido: 'Rápido', normal: 'Normal', lento: 'Lento' }], largo: ['Largo', { corto: 'Corto', medio: 'Medio', completo: 'Completo' }], subtitulos: ['Subtítulos', { karaoke: 'Palabra por palabra', grande: 'Grandes', frase: 'Frase', placa: 'Con placa', minimo: 'Mínimos' }], musica: ['Música', { energico: 'Enérgica', calido: 'Cálida', sin: 'Sin música' }], gancho: ['Arranque', { directo: 'Directo', pregunta: 'Pregunta', adelanto: 'Adelanto' }] };
+const ESTILO = { ritmo: ['Ritmo', { rapido: 'Rápido', normal: 'Normal', lento: 'Lento' }], largo: ['Largo', { corto: 'Corto', medio: 'Medio', completo: 'Completo' }], subtitulos: ['Estilo de subtítulos', { recuadro: 'Recuadro', placa: 'Placa', minimo: 'Mínimo', frase: 'Frase', grande: 'Grande', chango: 'Chango' }], karaoke: ['Modo karaoke (la palabra que se dice se pinta)', { si: 'Con karaoke', no: 'Sin karaoke' }], musica: ['Música', { energico: 'Enérgica', calido: 'Cálida', sin: 'Sin música' }], gancho: ['Arranque', { directo: 'Directo', pregunta: 'Pregunta', adelanto: 'Adelanto' }] };
 // el estilo con el que arranca cada tipo de público (el mismo del servidor); después lo ajustan las aprobaciones de ese público
 const ESTILO_POR_TIPO = {
-  jovenes: { ritmo: ['rapido'], largo: ['corto', 'medio'], subtitulos: ['karaoke', 'grande'], musica: ['energico'], gancho: ['pregunta', 'directo'] },
+  jovenes: { ritmo: ['rapido'], largo: ['corto', 'medio'], subtitulos: ['recuadro', 'chango', 'grande'], musica: ['energico'], gancho: ['pregunta', 'directo'] },
   adultos: { ritmo: ['normal', 'rapido'], largo: ['medio'], subtitulos: ['frase', 'grande'], musica: ['calido', 'energico'], gancho: ['directo', 'adelanto'] },
   mayores: { ritmo: ['normal', 'lento'], largo: ['medio', 'completo'], subtitulos: ['grande', 'frase'], musica: ['calido', 'sin'], gancho: ['directo'] },
 };
 const TIPOS = [['', 'Elegir a mano'], ['jovenes', 'Jóvenes (18 a 34)'], ['adultos', 'Adultos (35 a 54)'], ['mayores', 'Mayores (55 o más)']];
 const pubRow = (x = {}) => `<div class="pub-row"><input class="input" data-pub="nombre" maxlength="40" placeholder="Nombre (ej.: Mayores)" value="${esc(x.nombre || '')}"><select class="input" data-act="pub-tipo" data-pub="tipo" aria-label="Tipo de público">${TIPOS.map(([k, l]) => `<option value="${k}" ${(x.tipo || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select><textarea class="input" data-pub="descripcion" rows="2" maxlength="400" placeholder="A quién le habla, tono y qué fragmentos le sirven">${esc(x.descripcion || '')}</textarea><button type="button" class="icon-btn danger" data-act="pub-del" title="Quitar">${icon('trash', 15)}</button>
-  <details class="pub-estilo"${!x.tipo && Object.keys(x.estilo || {}).length ? ' open' : ''}><summary>Estilo de edición <span class="small muted">(arranca con el del tipo; las aprobaciones de este público eligen lo que más funciona dentro de esto)</span></summary>${Object.entries(ESTILO).map(([d, [l, ops]]) => `<div class="pub-dim" data-dim="${d}"><span>${l}</span>${Object.entries(ops).map(([k, n]) => `<label><input type="checkbox" value="${k}" ${(x.estilo?.[d] || []).includes(k) ? 'checked' : ''}> ${n}</label>`).join('')}</div>`).join('')}</details></div>`;
+  <details class="pub-estilo"${!x.tipo && Object.keys(x.estilo || {}).length ? ' open' : ''}><summary>Estilo de edición <span class="small muted">(arranca con el del tipo; las aprobaciones de este público eligen lo que más funciona dentro de esto)</span></summary>${Object.entries(ESTILO).map(([d, [l, ops]]) => `<div class="pub-dim" data-dim="${d}"><span>${l}</span>${Object.entries(ops).map(([k, n]) => `<label><input type="checkbox" value="${k}" ${((x.estilo?.[d] || []).map((e) => (e === 'karaoke' && d === 'subtitulos' ? 'recuadro' : e))).includes(k) ? 'checked' : ''}> ${n}</label>`).join('')}</div>`).join('')}</details></div>`;
 const pubName = (k) => state.project?.publicos?.find((x) => x.clave === k)?.nombre || k;
 function projectForm(p = {}) {
   return `<form class="form" id="project-form">

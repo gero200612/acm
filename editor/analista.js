@@ -3,7 +3,7 @@ import { textoPedidos } from './prompts.js';
 // y los subtítulos contra lo que se dice. Rechazo = el corredor la rehace UNA vez con la receta corregida (corregirReceta).
 //   revisar({ edicion, tecnica, cuadros: [{tipo, base64}], palabras }) → { veredicto: 'aprobado'|'rechazado'|'dudoso', motivo, correccion? }
 import { MODELOS } from './claude.js';
-import { OPCIONES } from './recetas.js';
+import { OPCIONES, aEstilo } from './recetas.js';
 
 const MIN_CUADROS = 6, MAX_CUADROS = 8;
 
@@ -70,10 +70,12 @@ export function crearAnalista({ claude, modelo = MODELOS.analista } = {}) {
 // La receta corregida para el segundo intento. Siempre cambia algo: si la corrección no cambia nada, rota los subtítulos.
 // `estilo`: el del público del fragmento. La corrección no se sale de él: si el analista pide unos subtítulos que ese público no usa,
 // se toma el otro permitido (los permitidos de alto contraste primero).
-const ALTO_CONTRASTE = ['grande', 'placa', 'frase', 'karaoke', 'minimo'];
+const ALTO_CONTRASTE = ['grande', 'placa', 'frase', 'recuadro', 'chango', 'minimo'];
 export function corregirReceta(receta, rev = {}, estilo) {
+  receta = { ...receta, subtitulos: aEstilo(receta.subtitulos) };
   const c = rev.correccion || {}, n = { ...receta };
-  const permitidos = Array.isArray(estilo?.subtitulos) && estilo.subtitulos.some((x) => OPCIONES.subtitulos.includes(x)) ? estilo.subtitulos.filter((x) => OPCIONES.subtitulos.includes(x)) : OPCIONES.subtitulos;
+  const delPublico = Array.isArray(estilo?.subtitulos) ? [...new Set(estilo.subtitulos.map(aEstilo).filter((x) => OPCIONES.subtitulos.includes(x)))] : [];
+  const permitidos = delPublico.length ? delPublico : OPCIONES.subtitulos;
   const otroPermitido = (actual) => ALTO_CONTRASTE.find((x) => permitidos.includes(x) && x !== actual) || actual;
   if (c.subtitulos && OPCIONES.subtitulos.includes(c.subtitulos)) n.subtitulos = permitidos.includes(c.subtitulos) ? c.subtitulos : otroPermitido(receta.subtitulos);
   if (c.quitar_musica) n.musica = null;

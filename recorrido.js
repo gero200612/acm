@@ -781,6 +781,9 @@ export function recorridoCases(sb) {
       const pt = (await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'Mayores', tipo: 'mayores' }, { nombre: 'Jóvenes', tipo: 'jovenes', estilo: { ritmo: ['normal'] } }] })).j.publicos;
       eq([pt[0].estilo.subtitulos, pt[1].estilo], [['grande', 'frase'], { ritmo: ['normal'] }], 'estilo del tipo, salvo que se toque a mano');
       eq(Object.keys((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.por_publico || {}), ['mayores', 'jovenes'], 'lo aprendido por público');
+      // el karaoke es un modo: estilo «karaoke» guardado de antes vale como recuadro; chango existe; karaoke si/no por público
+      const pk = (await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'Viejo', estilo: { subtitulos: ['karaoke', 'chango', 'inventado'], karaoke: ['no', 'tal vez'] } }, { nombre: 'Tipo', tipo: 'jovenes' }] })).j.publicos;
+      eq([pk[0].estilo, pk[1].estilo.subtitulos], [{ subtitulos: ['recuadro', 'chango'], karaoke: ['no'] }, ['recuadro', 'chango', 'grande']], 'estilo con karaoke como modo y «karaoke» viejo traducido');
     }],
     [G('editor'), 'POST /api/editor/edicion con token crea el reel listo con source_id, clip_id y review pendiente', async () => {
       const b = { crudo_id: c.crudo, clip_id: 'clip-abc', moment: { inicio_s: 1, fin_s: 9 }, recipe: { id: 'rapido' }, review: 'aprobado', edicion_id: "0a1b2c3d-0000-4000-8000-000000000501", caption: 'Un corte', hashtags: 'club, deporte', file_url: `${sb.editor.base}/video.mp4`, cover_url: `${sb.editor.base}/portada.jpg`, duration: 8, expires_at: '2026-12-01 12:00' };

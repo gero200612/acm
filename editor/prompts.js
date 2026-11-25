@@ -124,7 +124,7 @@ export const HERRAMIENTA_TEXTOS = {
             caption: { type: 'string' }, hashtags: { type: 'array', items: { type: 'string' } },
             gancho_texto: { type: 'string', description: 'De 1 a 3 palabras (un cartel, no una frase); vacío si la versión no lleva texto de gancho' },
             portada_texto: { type: 'string', description: 'De 1 a 3 palabras (un cartel, no una frase)' },
-            frase_gancho: { type: 'integer', description: 'Solo si la versión lleva un adelanto (negro o lo mejor primero): el número de la frase elegida de la lista de frases; 0 si no hay ninguna que sirva' },
+            frase_gancho: { type: 'integer', description: 'Solo si la versión lleva un adelanto (lo mejor primero): el número de la frase elegida de la lista de frases; 0 si no hay ninguna que sirva' },
           },
           required: ['caption', 'hashtags', 'gancho_texto', 'portada_texto'],
         },
@@ -135,7 +135,6 @@ export const HERRAMIENTA_TEXTOS = {
 };
 
 const GANCHO_DESC = { directo: 'arranca directo, sin texto de gancho', pregunta: 'el gancho es una pregunta que engancha', adelanto: 'el gancho adelanta lo más fuerte del momento',
-  negro: 'GANCHO NEGRO: antes del video, 2 s de pantalla negra donde se oye una frase fuerte y se lee en grande (elegí la que más pique: un reclamo, una contradicción, lo que dice un vecino; corta y que se entienda sola); sin texto de gancho (gancho_texto vacío)',
   mejor: 'LO MEJOR PRIMERO: antes del video, ~2 s de la mejor parte (video y sonido reales de esa frase; elegí la parte más valiosa o sorprendente del recorte); sin texto de gancho (gancho_texto vacío)',
 };
 

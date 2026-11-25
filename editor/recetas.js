@@ -5,18 +5,23 @@ import { SYSTEM_TEXTOS, HERRAMIENTA_TEXTOS, usuarioTextos } from './prompts.js';
 import { finDeFrase, inicioDeFrase } from './frases.js';
 
 export const OPCIONES = {
-  // directo: arranca como siempre; pregunta/adelanto: cartel arriba (adelanto además salta el comienzo); negro: 1,5 a 3 s de pantalla negra con una frase
+  // directo: arranca como siempre; pregunta/adelanto: cartel arriba (adelanto además salta el comienzo); (el gancho «negro», pantalla negra con la frase, se sacó: lo guardado con ese nombre vale como «mejor»)
   // fuerte de más adelante (se oye y se lee en grande) y después el reel; mejor: ~2 s del video real de esa frase (con su sonido) y después el reel
-  gancho: ['directo', 'pregunta', 'adelanto', 'negro', 'mejor'],
-  subtitulos: ['karaoke', 'placa', 'minimo', 'frase', 'grande'],
+  gancho: ['directo', 'pregunta', 'adelanto', 'mejor'],
+  // Estilos de subtítulo. El karaoke ya no es un estilo sino un modo (`receta.karaoke`): la palabra que se dice se pinta en el momento en que se dice, en cualquier estilo.
+  subtitulos: ['recuadro', 'placa', 'minimo', 'frase', 'grande', 'chango'],
   musica: ['energico', 'calido', 'sin'],
   ritmo: ['rapido', 'normal', 'lento'],
   largo: ['completo', 'medio', 'corto'],
 };
 const DIMS = Object.keys(OPCIONES);
-// Los tipos de gancho que se reparten entre las 3 versiones de cada momento (para medir cuál rinde): uno negro, uno «lo mejor primero» y uno directo
-export const GANCHOS_DE_PRUEBA = ['negro', 'mejor', 'directo'];
-export const GANCHOS_CON_ADELANTO = ['negro', 'mejor'];
+// «karaoke» era un estilo: ahora es el estilo `recuadro` con el karaoke encendido. Lo guardado con el nombre viejo (aprendizajes, estilos de público, recetas pendientes) vale como `recuadro`.
+export const aEstilo = (x) => (x === 'karaoke' ? 'recuadro' : x);
+// El karaoke va encendido siempre, salvo que el estilo del público lo apague (estilo.karaoke = ['no']; con ['si'] o ['si','no'] queda encendido).
+export const karaokeDe = (estilo) => !(Array.isArray(estilo?.karaoke) && estilo.karaoke.length > 0 && !estilo.karaoke.includes('si'));
+// Los tipos de gancho que se reparten entre las 3 versiones de cada momento (para medir cuál rinde): «lo mejor primero» y directo, alternando (2 y 1, o 1 y 2) entre momentos
+export const GANCHOS_DE_PRUEBA = ['mejor', 'directo'];
+export const GANCHOS_CON_ADELANTO = ['mejor'];
 const FACTOR_LARGO = { completo: 1, medio: 0.7, corto: 0.45 };
 const POS_PORTADA = { completo: 0.4, medio: 0.25, corto: 0.1 };
 const VOLUMEN = 0.25;
@@ -29,13 +34,15 @@ export function normalizarAprendizajes(a) {
   for (const o of lista) for (const k of [...DIMS, 'horario']) if (o && typeof o[k] === 'string' && o[k].trim()) out[k] = o[k].trim();
   // el horario viene por red ({instagram: '20:00'}); no sirve para armar recetas, pero el elector de momentos lo lee
   for (const o of lista) if (o && o.horario && typeof o.horario === 'object' && Object.keys(o.horario).length) out.horario = { ...o.horario };
+  if (out.subtitulos) out.subtitulos = aEstilo(out.subtitulos);
+  if (out.gancho === 'negro') out.gancho = 'mejor'; // el gancho negro se sacó
   return out;
 }
 
 // Estilo de un público: por cada dimensión, qué opciones se permiten (vacío o desconocido = todas).
 export function opcionesPermitidas(estilo) {
   const o = {};
-  for (const d of DIMS) { const l = Array.isArray(estilo?.[d]) ? estilo[d].filter((x) => OPCIONES[d].includes(x)) : []; o[d] = l.length ? l : OPCIONES[d]; }
+  for (const d of DIMS) { const l = Array.isArray(estilo?.[d]) ? [...new Set(estilo[d].map((x) => (d === 'subtitulos' ? aEstilo(x) : x)).filter((x) => OPCIONES[d].includes(x)))] : []; o[d] = l.length ? l : OPCIONES[d]; }
   return o;
 }
 
@@ -48,12 +55,16 @@ function ganadoras(a, O = OPCIONES) {
 
 // Las elecciones de las 3 versiones: [{gancho, subtitulos, musica, ritmo, largo, explora}]. `estilo` limita las opciones (el del público del fragmento).
 export function elegirVariables({ semilla = 0, aprendizajes, estilo } = {}) {
+  const karaoke = karaokeDe(estilo);
+  return elegirEstilos({ semilla, aprendizajes, estilo }).map((v) => ({ ...v, karaoke }));
+}
+function elegirEstilos({ semilla = 0, aprendizajes, estilo } = {}) {
   const O = opcionesPermitidas(estilo);
   const elegir = (d, i) => O[d][((i % O[d].length) + O[d].length) % O[d].length];
   const otroDistinto = (d, actual) => { const o = O[d]; const i = o.indexOf(actual); return o[(i + 1) % o.length]; };
   const s = Math.abs(Math.trunc(semilla)) || 0, g = ganadoras(aprendizajes, O), hay = Object.keys(g).length > 0;
   // sin aprendizajes: cada dimensión rota con su propio desfase, así las 3 difieren y, entre momentos, se reparten parejo
-  const rotada = (i) => ({ gancho: elegir('gancho', s + i), subtitulos: elegir('subtitulos', 2 * s + i), musica: elegir('musica', s + i + 1), ritmo: elegir('ritmo', s + i + 1), largo: elegir('largo', s + i + 2) });
+  const rotada = (i) => ({ gancho: elegir('gancho', s + i), subtitulos: elegir('subtitulos', 3 * s + i), musica: elegir('musica', s + i + 1), ritmo: elegir('ritmo', s + i + 1), largo: elegir('largo', s + i + 2) });
   // el reparto de ganchos es fijo (uno de cada tipo) mientras el estilo del público deje usarlos; los aprendizajes no lo pisan: es lo que se está probando
   const probar = GANCHOS_DE_PRUEBA.every((x) => O.gancho.includes(x));
   const gancho = (i) => (probar ? GANCHOS_DE_PRUEBA[(s + i) % GANCHOS_DE_PRUEBA.length] : undefined);
@@ -177,7 +188,7 @@ export function construirReceta({ v, momento, palabras = [], textos, marca = {},
     else tipo = 'directo';
   } else if (tipo !== 'directo' && gtxt) gancho.texto = gtxt;
   return {
-    gancho, subtitulos: v.subtitulos,
+    gancho, subtitulos: v.subtitulos, karaoke: v.karaoke !== false,
     musica: v.musica === 'sin' ? null : { clima: v.musica, volumen: VOLUMEN },
     ritmo: v.ritmo, zoom: false, // sin acercamientos automáticos (el equipo de Posse: «se zumea solo»)
     largo_s, portada: { segundo_s: r1(largo_s * POS_PORTADA[v.largo]), texto: cartelCorto(textos.portada_texto) || cartelCorto(momento.datos?.tema) || 'Mirá esto' },

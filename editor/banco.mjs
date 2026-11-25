@@ -12,7 +12,7 @@ import { crearRunner } from './runner.js';
 import { repo } from './db.js';
 import { validarMomentos, crearElegirMomentos, ajustarAFrases } from './momentos.js';
 import { herramientaMomentos, HERRAMIENTA_MOMENTOS, usuarioMomentos, usuarioTextos } from './prompts.js';
-import { crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas, construirReceta, cartelCorto, frasesCandidatas } from './recetas.js';
+import { OPCIONES, GANCHOS_DE_PRUEBA, crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas, construirReceta, cartelCorto, frasesCandidatas } from './recetas.js';
 import { finDeFrase, inicioDeFrase } from './frases.js';
 import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
@@ -363,17 +363,42 @@ casos.push(
     // repartidas parejo entre las opciones a lo largo de varios momentos
     const cuenta = {};
     for (let k = 0; k < 15; k++) for (const v of elegirVariables({ semilla: k })) cuenta[v.subtitulos] = (cuenta[v.subtitulos] || 0) + 1;
-    eq(Object.values(cuenta).sort(), [9, 9, 9, 9, 9], 'subtítulos parejos en 15 momentos');
+    eq(Object.keys(cuenta).sort(), ['chango', 'frase', 'grande', 'minimo', 'placa', 'recuadro'], 'los 6 estilos, chango incluido');
+    eq(Object.values(cuenta).sort(), [7, 7, 7, 8, 8, 8], 'subtítulos parejos en 15 momentos');
+    // las 3 versiones de un momento nunca repiten estilo de subtítulo
+    for (let k = 0; k < 30; k++) eq(new Set(elegirVariables({ semilla: k }).map((v) => v.subtitulos)).size, 3, `estilos distintos en las 3 versiones (semilla ${k})`);
+    // el karaoke es un modo: va encendido en todas las recetas
+    eq(rs.map((r) => r.karaoke), [true, true, true], 'karaoke encendido');
+    yes(!rs.some((r) => r.subtitulos === 'karaoke'), 'karaoke ya no es un estilo');
   }],
-  ['Recetas', 'Con karaoke ganador, 2 recetas usan karaoke y la tercera explora (explora:true) con otro estilo y al menos 2 variables cambiadas', async () => {
-    const rs = await crearArmarRecetas({ claude: claudeFalso() })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: { subtitulos: 'karaoke' } });
-    eq(rs.filter((r) => r.subtitulos === 'karaoke').length, 2, 'dos con karaoke');
-    const ex = rs.filter((r) => r.explora); eq(ex.length, 1, 'una explora'); yes(ex[0].subtitulos !== 'karaoke', 'otro estilo');
-    const v = elegirVariables({ semilla: 0, aprendizajes: { subtitulos: 'karaoke' } });
+  ['Recetas', 'Con recuadro ganador (o «karaoke» guardado de antes), 2 recetas usan recuadro y la tercera explora (explora:true) con otro estilo y al menos 2 variables cambiadas', async () => {
+    for (const guardado of ['recuadro', 'karaoke']) {
+      const rs = await crearArmarRecetas({ claude: claudeFalso() })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: { subtitulos: guardado } });
+      eq(rs.filter((r) => r.subtitulos === 'recuadro').length, 2, `dos con recuadro (guardado: ${guardado})`);
+      const ex = rs.filter((r) => r.explora); eq(ex.length, 1, 'una explora'); yes(ex[0].subtitulos !== 'recuadro', 'otro estilo');
+    }
+    eq(normalizarAprendizajes([{ subtitulos: 'karaoke', ritmo: 'rapido' }]), { subtitulos: 'recuadro', ritmo: 'rapido' }, 'los aprendizajes con «karaoke» se traducen a recuadro');
+    const v = elegirVariables({ semilla: 0, aprendizajes: { subtitulos: 'recuadro' } });
     eq(['gancho', 'subtitulos', 'musica', 'ritmo', 'largo'].filter((d) => v[2][d] !== v[0][d]).length >= 2, true, 'cambia al menos 2 variables');
     // aprendizajes como lista (el formato de ACM) y vacíos
     eq(elegirVariables({ aprendizajes: [{ subtitulos: 'grande' }] }).filter((x) => x.subtitulos === 'grande').length, 2, 'lista de aprendizajes');
     eq(elegirVariables({ aprendizajes: [] }).some((x) => x.explora), false, 'vacío = sin aprendizajes');
+  }],
+  ['Recetas', 'Karaoke como modo: encendido siempre salvo que el estilo del público lo apague; chango y recuadro llegan a la receta; «karaoke» viejo vale como recuadro en estilo, correcciones y ajustes', async () => {
+    const { ajustePorPalabras, aplicarAjuste } = await import('./ajuste.js');
+    eq(elegirVariables({ semilla: 1 }).map((v) => v.karaoke), [true, true, true], 'sin estilo, con karaoke');
+    eq(elegirVariables({ semilla: 1, estilo: { karaoke: ['si', 'no'] } }).map((v) => v.karaoke), [true, true, true], 'si/no: encendido');
+    eq(elegirVariables({ semilla: 1, estilo: { karaoke: ['no'] } }).map((v) => v.karaoke), [false, false, false], 'el público lo apaga');
+    const rs = await crearArmarRecetas({ claude: claudeFalso() })({ momento: { ...MOM, datos: { publico_estilo: { subtitulos: ['chango', 'placa'], karaoke: ['no'] } } }, transcripcion: { palabras: PALABRAS }, aprendizajes: [] });
+    eq(rs.map((r) => r.karaoke), [false, false, false], 'la receta lleva karaoke:false');
+    yes(rs.every((r) => ['chango', 'placa'].includes(r.subtitulos)) && rs.some((r) => r.subtitulos === 'chango'), 'chango llega a la receta');
+    eq(opcionesPermitidas({ subtitulos: ['karaoke', 'grande'] }).subtitulos, ['recuadro', 'grande'], 'el estilo de público guardado con «karaoke» vale recuadro');
+    const vieja = { subtitulos: 'karaoke', musica: null, ritmo: 'normal', variables: { subtitulos: 'karaoke' } };
+    const cr = corregirReceta(vieja, { correccion: {} }); yes(cr.subtitulos !== 'karaoke' && cr.subtitulos !== 'recuadro', 'la corrección rota desde recuadro');
+    const aj = aplicarAjuste(vieja, ajustePorPalabras('sacá el karaoke', vieja), { inicio_s: 0, fin_s: 40 });
+    eq([aj.karaoke, aj.subtitulos], [false, 'karaoke'], 'sin karaoke no toca el estilo');
+    const aj2 = aplicarAjuste(vieja, { subtitulos: 'karaoke' }, { inicio_s: 0, fin_s: 40 }); eq(aj2.subtitulos, 'recuadro', 'el ajuste traduce karaoke a recuadro');
+    eq(aplicarAjuste(vieja, { subtitulos: 'chango' }, {}).subtitulos, 'chango', 'el ajuste acepta chango');
   }],
   ['Recetas', 'Claude con captions repetidos se reintenta una vez y, si sigue mal, falla con mensaje; sin API key el mensaje es claro', async () => {
     let n = 0;
@@ -400,10 +425,10 @@ casos.push(
     yes(/fragmentos DISTINTOS/.test(usuarioMomentos({ palabras: pal, publicos: PUB })), 'la consigna pide fragmentos distintos por público');
   }],
   ['Recetas', 'El estilo del público limita las opciones: solo ritmo rápido y largo corto; con aprendizajes fuera del estilo no los usa', async () => {
-    const estilo = { ritmo: ['rapido'], largo: ['corto'], subtitulos: ['karaoke', 'grande'], musica: ['inventada'] };
+    const estilo = { ritmo: ['rapido'], largo: ['corto'], subtitulos: ['karaoke', 'grande'], musica: ['inventada'] }; // «karaoke» guardado de antes vale como recuadro
     for (const semilla of [0, 1, 2, 7]) {
       const vs = elegirVariables({ semilla, estilo });
-      yes(vs.every((v) => v.ritmo === 'rapido' && v.largo === 'corto' && ['karaoke', 'grande'].includes(v.subtitulos)), `semilla ${semilla}: ${JSON.stringify(vs)}`);
+      yes(vs.every((v) => v.ritmo === 'rapido' && v.largo === 'corto' && ['recuadro', 'grande'].includes(v.subtitulos)), `semilla ${semilla}: ${JSON.stringify(vs)}`);
       yes(vs.every((v) => ['energico', 'calido', 'sin'].includes(v.musica)), 'una opción desconocida no restringe');
     }
     const conAp = elegirVariables({ semilla: 3, estilo, aprendizajes: { ritmo: 'lento', subtitulos: 'grande' } });
@@ -768,7 +793,7 @@ casos.push(
     // el punch-in va en todas las recetas, también con ritmo lento
     eq([ad.zoom, construirReceta({ v: { ...base, gancho: 'directo', largo: 'completo', ritmo: 'lento' }, momento, palabras: pal, textos }).zoom], [false, false], 'sin zoom por defecto');
   }],
-  ['Recetas', 'Ganchos de prueba: de las 3 recetas una es negro, una lo mejor primero y una directa; la frase es completa, va a variables.gancho y al Estudio; zoom false', async () => {
+  ['Recetas', 'Ganchos de prueba: de las 3 recetas se alternan lo mejor primero y directa (2 y 1, o 1 y 2, nunca las 3 iguales); la frase es completa, va a variables.gancho y al Estudio; zoom false', async () => {
     // frases de 4 palabras (0,5 s cada una, 2,0 s de voz) separadas por pausas de 0,6 s
     const pal = [];
     for (let f = 0; f < 40; f++) for (let k = 0; k < 4; k++) { const t = f * 2.6 + k * 0.5; pal.push({ inicio_s: t, fin_s: t + 0.45, texto: `w${f}x${k}${k === 3 ? '.' : ''}` }); }
@@ -776,7 +801,9 @@ casos.push(
     const claude = claudeFalso();
     for (const semilla of [0, 1, 2, 5]) {
       const rs = await crearArmarRecetas({ claude })({ momento: { ...momento, idx: semilla }, palabras: pal, aprendizajes: [] });
-      eq(rs.map((r) => r.variables.gancho).sort(), ['directo', 'mejor', 'negro'], `un gancho de cada tipo (semilla ${semilla})`);
+      const gs = rs.map((r) => r.variables.gancho);
+      yes(gs.includes('directo') && gs.includes('mejor') && gs.every((g) => ['directo', 'mejor'].includes(g)), `mejor y directo, nunca las 3 iguales ni negro (semilla ${semilla}): ${gs}`);
+      eq(gs.filter((g) => g === 'mejor').length, semilla % 2 === 0 ? 2 : 1, `alterna entre momentos (semilla ${semilla})`);
       for (const r of rs) {
         eq(r.zoom, false, 'zoom false por defecto');
         const ad = r.gancho.adelanto;
@@ -790,13 +817,13 @@ casos.push(
         yes(ad.desde_s >= momento.inicio_s + 3, 'es de más adelante del momento');
       }
       const frases = rs.map((r) => r.gancho.adelanto?.desde_s).filter((x) => x !== undefined);
-      eq(new Set(frases).size, 2, 'cada adelanto usa una frase distinta');
+      eq(new Set(frases).size, frases.length, 'cada adelanto usa una frase distinta');
       // viaja al Estudio con el adelanto y sin lo interno
-      const e = paraEstudio(rs.find((r) => r.variables.gancho === 'negro'));
+      const e = paraEstudio(rs.find((r) => r.variables.gancho === 'mejor'));
       eq([!!e.gancho.adelanto, 'variables' in e, e.zoom], [true, false, false], 'paraEstudio');
     }
     // el prompt lleva la lista de frases y la elección de Claude (frase_gancho) se respeta
-    yes(/Frases completas disponibles/.test(claude.pedidos[0].usuario) && /GANCHO NEGRO/.test(claude.pedidos[0].usuario) && /LO MEJOR PRIMERO/.test(claude.pedidos[0].usuario), 'prompt con frases y tipos');
+    yes(/Frases completas disponibles/.test(claude.pedidos[0].usuario) && !/GANCHO NEGRO/.test(claude.pedidos[0].usuario) && /LO MEJOR PRIMERO/.test(claude.pedidos[0].usuario), 'prompt con frases y tipos');
     const cand = frasesCandidatas(pal, momento);
     const eleg = crearArmarRecetas({ claude: { async estructurado() { return { versiones: [0, 1, 2].map((i) => ({ caption: `c${i}`, hashtags: [`#h${i}`], gancho_texto: 'x', portada_texto: 'y', frase_gancho: 3 + i })) }; } } });
     const rs2 = await eleg({ momento, palabras: pal, aprendizajes: [] });
@@ -815,6 +842,9 @@ casos.push(
     const d = aplicarAjuste(rec, { gancho: 'directo' }, { inicio_s: 10, fin_s: 60 });
     eq([d.gancho.adelanto, d.variables.gancho], [undefined, 'directo'], 'directo saca el adelanto');
     eq(aplicarAjuste(rec, { gancho: 'mejor' }, { inicio_s: 10, fin_s: 60 }).gancho.adelanto.modo, 'mejor', 'cambia el modo');
+    eq(aplicarAjuste({ ...rec, gancho: { desde_s: 10, adelanto: { modo: 'mejor', desde_s: 30, hasta_s: 32 } }, variables: { gancho: 'mejor' } }, { gancho: 'negro' }, { inicio_s: 10, fin_s: 60 }).gancho.adelanto.modo, 'mejor', 'un pedido no puede volver a negro');
+    eq(normalizarAprendizajes({ gancho: 'negro' }).gancho, 'mejor', 'aprendizaje guardado con negro vale como mejor');
+    yes(!OPCIONES.gancho.includes('negro') && !GANCHOS_DE_PRUEBA.includes('negro'), 'negro ya no es opción');
   }],
   ['Mirar', 'tramosAEstado pasa números de cuadro a segundos reales (tiempos_s) y descarta lo inválido', () => {
     const pl = [{ tiempos_s: [0, 2, 4, 6], hasta_s: 8 }, { tiempos_s: [8, 10], hasta_s: 11 }];

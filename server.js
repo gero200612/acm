@@ -562,14 +562,16 @@ const buscarDe = (v) => textoCrudo(v, 300);
 const publicoDe = (pid, v) => (publicosDe(pid).some((x) => x.clave === v) ? String(v) : '');
 const marcaDe = (pid) => { try { return JSON.parse(get('SELECT marca FROM projects WHERE id = ?', pid)?.marca || '{}'); } catch { return {}; } };
 // opciones de edición del editor (editor/recetas.js OPCIONES): un público puede quedarse con algunas
-const OPCIONES_EDICION = { gancho: ['directo', 'pregunta', 'adelanto'], subtitulos: ['karaoke', 'placa', 'minimo', 'frase', 'grande'], musica: ['energico', 'calido', 'sin'], ritmo: ['rapido', 'normal', 'lento'], largo: ['completo', 'medio', 'corto'] };
+const OPCIONES_EDICION = { gancho: ['directo', 'pregunta', 'adelanto'], subtitulos: ['recuadro', 'placa', 'minimo', 'frase', 'grande', 'chango', 'karaoke'], karaoke: ['si', 'no'], musica: ['energico', 'calido', 'sin'], ritmo: ['rapido', 'normal', 'lento'], largo: ['completo', 'medio', 'corto'] };
+// «karaoke» era un estilo de subtítulo: ahora es el modo karaoke (dimensión `karaoke`: si/no, sin marcar = con karaoke) y el estilo se llama `recuadro`. Lo guardado con el nombre viejo sigue valiendo.
+const estiloNuevo = (x) => (x === 'karaoke' ? 'recuadro' : x);
 // Estilo inicial por tipo de público (investigación del 16/11/2026: guías de edición por edad y el estudio de Bertelsmann sobre
 // video político corto). La evidencia es floja: es solo el arranque; después mandan las aprobaciones de cada público.
 //   jóvenes: cortes rápidos, corto, palabra por palabra, música con energía, arranque que pega en el primer segundo; producción limpia, lenguaje simple.
 //   adultos: ritmo medio y estable, largo medio, frase o grande.
 //   mayores: más pausado, largo medio o completo, subtítulos grandes y de alto contraste sin animar, música baja o sin, arranque directo.
 const ESTILO_POR_TIPO = {
-  jovenes: { ritmo: ['rapido'], largo: ['corto', 'medio'], subtitulos: ['karaoke', 'grande'], musica: ['energico'], gancho: ['pregunta', 'directo'] },
+  jovenes: { ritmo: ['rapido'], largo: ['corto', 'medio'], subtitulos: ['recuadro', 'chango', 'grande'], musica: ['energico'], gancho: ['pregunta', 'directo'] },
   adultos: { ritmo: ['normal', 'rapido'], largo: ['medio'], subtitulos: ['frase', 'grande'], musica: ['calido', 'energico'], gancho: ['directo', 'adelanto'] },
   mayores: { ritmo: ['normal', 'lento'], largo: ['medio', 'completo'], subtitulos: ['grande', 'frase'], musica: ['calido', 'sin'], gancho: ['directo'] },
 };
@@ -579,7 +581,7 @@ function limpiarPublicos(v) {
   let l = v; if (typeof l === 'string') { try { l = JSON.parse(l); } catch { return null; } }
   if (!Array.isArray(l) || l.length > 6) return null;
   // estilo: por dimensión de la edición, qué opciones usa este público (las mismas del editor; vacío = todas)
-  const estiloDe = (e) => { const o = {}; for (const [d, ops] of Object.entries(OPCIONES_EDICION)) { const v = Array.isArray(e?.[d]) ? [...new Set(e[d].filter((x) => ops.includes(x)))] : []; if (v.length) o[d] = v; } return o; };
+  const estiloDe = (e) => { const o = {}; for (const [d, ops] of Object.entries(OPCIONES_EDICION)) { const v = Array.isArray(e?.[d]) ? [...new Set(e[d].filter((x) => ops.includes(x)).map((x) => (d === 'subtitulos' ? estiloNuevo(x) : x)))] : []; if (v.length) o[d] = v; } return o; };
   const out = l.map((x) => { const tipo = ESTILO_POR_TIPO[x?.tipo] ? x.tipo : ''; const manual = estiloDe(x?.estilo); return { nombre: String(x?.nombre || '').trim().slice(0, 40), descripcion: String(x?.descripcion || '').trim().slice(0, 400), tipo, estilo: Object.keys(manual).length ? manual : (tipo ? ESTILO_POR_TIPO[tipo] : {}) }; }).filter((x) => x.nombre).map((x) => ({ clave: claveDe(x.nombre), ...x }));
   return new Set(out.map((x) => x.clave)).size === out.length && out.every((x) => x.clave) ? out : null;
 }

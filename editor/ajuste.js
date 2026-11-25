@@ -2,7 +2,7 @@
 // («los subtítulos tapan la cara», «más corto», «sin música»), el pedido se traduce a cambios de la receta y se vuelve a editar.
 // Claude (Haiku) entiende el pedido; el código aplica los cambios y valida los límites. Sin Claude, se entiende lo básico por palabras.
 import { MODELOS } from './claude.js';
-import { OPCIONES, MIN_LARGO_S } from './recetas.js';
+import { OPCIONES, MIN_LARGO_S, aEstilo } from './recetas.js';
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const FACTOR_LARGO = { completo: 1, medio: 0.7, corto: 0.45 };
@@ -10,7 +10,8 @@ const FACTOR_LARGO = { completo: 1, medio: 0.7, corto: 0.45 };
 export const SYSTEM_AJUSTE = `Sos editor de video de redes sociales en Argentina. Una persona del equipo rechazó una edición de un reel y escribió qué cambiaría. Traducí su pedido a cambios concretos de la receta de edición. Cambiá SOLO lo que pide (o lo que se deduce sin dudas); lo demás queda igual.
 Opciones de la receta:
 - gancho (cómo arranca): directo | pregunta | adelanto
-- subtitulos: karaoke (palabra por palabra) | placa (con fondo) | minimo (chicos, abajo) | frase (frase entera) | grande (letras grandes)
+- subtitulos (el estilo): recuadro (mayúsculas con la palabra que suena sobre un recuadro) | placa (con fondo) | minimo (chicos, abajo) | frase (frase entera) | grande (letras grandes) | chango (mayúsculas medianas al medio, con contorno, sin fondo)
+- karaoke (true/false): que la palabra que se dice se pinte en el momento en que se dice; va en cualquier estilo. Solo cambialo si pide sacarlo o ponerlo
 - musica: energico | calido | sin
 - ritmo: rapido (con zoom) | normal | lento
 - largo: completo | medio | corto (o un largo exacto en segundos con largo_s)
@@ -27,6 +28,7 @@ export const HERRAMIENTA_AJUSTE = {
       entendido: { type: 'string' },
       gancho: { type: 'string', enum: OPCIONES.gancho },
       subtitulos: { type: 'string', enum: OPCIONES.subtitulos },
+      karaoke: { type: 'boolean' },
       musica: { type: 'string', enum: OPCIONES.musica },
       ritmo: { type: 'string', enum: OPCIONES.ritmo },
       largo: { type: 'string', enum: OPCIONES.largo },
@@ -48,10 +50,12 @@ export function ajustePorPalabras(pedido, receta = {}) {
   const c = {}, dijo = [];
   if (/sin musica|saca(r|le)? la musica|musica (molesta|fuerte|no va)|no .*musica/.test(t)) { c.musica = 'sin'; dijo.push('sin música'); }
   else if (/musica/.test(t)) { c.musica = receta.musica?.clima === 'energico' ? 'calido' : 'energico'; dijo.push('otra música'); }
+  if (/sin karaoke|saca(r|le)? el karaoke|no .*palabra por palabra/.test(t)) { c.karaoke = false; dijo.push('sin karaoke'); }
+  else if (/karaoke|palabra por palabra/.test(t)) { c.karaoke = true; dijo.push('con karaoke'); }
   if (/subtitul|letras?|texto en pantalla/.test(t)) {
     if (/grande|no se lee|chic/.test(t)) c.subtitulos = 'grande';
     else if (/\btap(a|e|an|en|ando)\b|molest|much/.test(t)) c.subtitulos = 'minimo';
-    else { const o = OPCIONES.subtitulos; c.subtitulos = o[(o.indexOf(receta.subtitulos) + 1) % o.length]; }
+    else { const o = OPCIONES.subtitulos; c.subtitulos = o[(o.indexOf(aEstilo(receta.subtitulos)) + 1) % o.length]; }
     dijo.push(`subtítulos «${c.subtitulos}»`);
   }
   if (/mas corto|muy largo|es largo|acorta|recorta/.test(t)) { c.largo = 'corto'; dijo.push('más corto'); }
@@ -59,7 +63,7 @@ export function ajustePorPalabras(pedido, receta = {}) {
   if (/lento|calma|tranqui/.test(t)) { c.ritmo = 'lento'; dijo.push('ritmo más lento'); }
   else if (/rapido|dinamic|aburr|lento/.test(t)) { c.ritmo = 'rapido'; dijo.push('ritmo más rápido'); }
   if (/zoom/.test(t)) { c.ritmo = c.ritmo || 'normal'; c.quitar_zoom = true; dijo.push('sin zoom'); }
-  return { ...c, entendido: dijo.length ? `Cambio: ${dijo.join(', ')}.` : 'No entendí qué cambiar: se rehace con otros subtítulos.', ...(dijo.length ? {} : { subtitulos: OPCIONES.subtitulos[(OPCIONES.subtitulos.indexOf(receta.subtitulos) + 1) % OPCIONES.subtitulos.length] }) };
+  return { ...c, entendido: dijo.length ? `Cambio: ${dijo.join(', ')}.` : 'No entendí qué cambiar: se rehace con otros subtítulos.', ...(dijo.length ? {} : { subtitulos: OPCIONES.subtitulos[(OPCIONES.subtitulos.indexOf(aEstilo(receta.subtitulos)) + 1) % OPCIONES.subtitulos.length] }) };
 }
 
 // Aplica los cambios a la receta con los límites del Estudio (largo entre 12 s y lo disponible; recortes dentro del momento)
@@ -69,10 +73,11 @@ export function aplicarAjuste(receta, c = {}, momento = {}) {
   const desde0 = n.gancho?.desde_s ?? momento.inicio_s ?? 0, fin = momento.fin_s ?? desde0 + (n.largo_s || 30);
   if (c.gancho && OPCIONES.gancho.includes(c.gancho)) {
     const ad = n.gancho?.adelanto;
-    if (['negro', 'mejor'].includes(c.gancho)) { if (ad) { ad.modo = c.gancho; v.gancho = c.gancho; delete n.gancho.texto; } } // sin una frase elegida no hay adelanto que armar
+    if (c.gancho === 'mejor') { if (ad) { ad.modo = c.gancho; v.gancho = c.gancho; delete n.gancho.texto; } } // sin una frase elegida no hay adelanto que armar
     else { v.gancho = c.gancho; if (n.gancho) delete n.gancho.adelanto; if (c.gancho === 'directo' && n.gancho) delete n.gancho.texto; }
   }
-  if (c.subtitulos && OPCIONES.subtitulos.includes(c.subtitulos)) { n.subtitulos = c.subtitulos; v.subtitulos = c.subtitulos; }
+  if (c.subtitulos && OPCIONES.subtitulos.includes(aEstilo(c.subtitulos))) { n.subtitulos = aEstilo(c.subtitulos); v.subtitulos = n.subtitulos; }
+  if (typeof c.karaoke === 'boolean') n.karaoke = c.karaoke;
   if (c.musica && OPCIONES.musica.includes(c.musica)) { n.musica = c.musica === 'sin' ? null : { clima: c.musica, volumen: n.musica?.volumen ?? 0.25 }; v.musica = c.musica; }
   if (c.ritmo && OPCIONES.ritmo.includes(c.ritmo)) { n.ritmo = c.ritmo; v.ritmo = c.ritmo; }
   if (c.quitar_zoom) n.zoom = false;
@@ -100,7 +105,7 @@ export function crearAjustar({ claude } = {}) {
     let c;
     if (claude) {
       const dicho = palabras.map((p) => p.palabra ?? p.texto ?? '').join(' ').slice(0, 4000);
-      const usuario = `Pedido de la persona: «${String(pedido).slice(0, 2000)}»\n\nReceta actual: ${JSON.stringify({ gancho: receta?.variables?.gancho, subtitulos: receta?.subtitulos, musica: receta?.musica?.clima || 'sin', ritmo: receta?.ritmo, largo_s: receta?.largo_s, caption: receta?.caption, hashtags: receta?.hashtags, gancho_texto: receta?.gancho?.texto, portada_texto: receta?.portada?.texto })}\nEl momento dura ${r1((momento.fin_s ?? 0) - (momento.inicio_s ?? 0))} s.\nLo que se dice: ${dicho}`;
+      const usuario = `Pedido de la persona: «${String(pedido).slice(0, 2000)}»\n\nReceta actual: ${JSON.stringify({ gancho: receta?.variables?.gancho, subtitulos: aEstilo(receta?.subtitulos), karaoke: receta?.karaoke !== false, musica: receta?.musica?.clima || 'sin', ritmo: receta?.ritmo, largo_s: receta?.largo_s, caption: receta?.caption, hashtags: receta?.hashtags, gancho_texto: receta?.gancho?.texto, portada_texto: receta?.portada?.texto })}\nEl momento dura ${r1((momento.fin_s ?? 0) - (momento.inicio_s ?? 0))} s.\nLo que se dice: ${dicho}`;
       try { c = await claude.estructurado({ modelo: MODELOS.textos, system: SYSTEM_AJUSTE, usuario, herramienta: HERRAMIENTA_AJUSTE, maxTokens: 1500, esfuerzo: 'low' }); }
       catch { c = null; }
     }
