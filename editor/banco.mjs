@@ -75,11 +75,11 @@ async function estudioFalso(opc = {}) {
 
 // ACM falso: guarda los avisos y, al recibir una edición, baja el video del link (como hace ACM de verdad)
 async function acmFalso(opc = {}) {
-  const estados = [], ediciones = [], rehechos = [];
+  const estados = [], detalles = [], ediciones = [], rehechos = [];
   const srv = await escuchar(async (req, res) => {
     const b = await cuerpo(req);
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return json(res, 401, { error: 'sin token' });
-    if (req.url === '/api/editor/estado') { const o = JSON.parse(b); estados.push(`${o.reel_id}:${o.estado}`); return json(res, 200, { ok: true }); }
+    if (req.url === '/api/editor/estado') { const o = JSON.parse(b); estados.push(`${o.reel_id}:${o.estado}`); detalles.push(`${o.estado}:${o.detalle || ''}`); return json(res, 200, { ok: true }); }
     if (req.url === '/api/editor/rehecho') { rehechos.push(JSON.parse(b)); return json(res, 200, { ok: true }); }
     if (req.url === '/api/editor/edicion') {
       const o = JSON.parse(b);
@@ -90,7 +90,7 @@ async function acmFalso(opc = {}) {
     if (req.method === 'GET' && req.url.split('?')[0] === '/api/editor/aprendizajes/7') return json(res, 200, { project_id: 7, descripcion: opc.descripcion || '', buscar: opc.buscar || '', aprendizajes: [{ ritmo: 'rapido', horario: { instagram: '20:00' } }], investigacion: ['Candidato X: pide más seguridad'] });
     json(res, 404, {});
   });
-  return { ...srv, estados, ediciones, rehechos };
+  return { ...srv, estados, detalles, ediciones, rehechos };
 }
 
 async function montar({ estudioOpc, hooks, acmOpc } = {}) {
@@ -155,7 +155,10 @@ const casos = [
       const id = (await (await post(m, '/trabajos', TRABAJO)).json()).id;
       const j = await esperarEstado(m, id, ['listo', 'error']);
       eq([j.estado, j.detalle], ['listo', '2 ediciones'], 'estado final');
-      eq(m.acm.estados, ['42:transcribiendo', '42:buscando_momentos', '42:editando', '42:revisando', '42:listo'], 'etapas avisadas a ACM');
+      // «editando» se repite: después de cada edición va el avance («1 de 2 editadas»)
+      eq(m.acm.estados.filter((x, i, a) => x !== a[i - 1]), ['42:transcribiendo', '42:buscando_momentos', '42:editando', '42:revisando', '42:listo'], 'etapas avisadas a ACM');
+      const avance = m.acm.detalles.filter((x) => x.startsWith('editando:'));
+      if (!avance.length || !/^editando:\d+ de \d+ editadas$/.test(avance.at(-1)) || avance.at(-1).split(':')[1].split(' de ')[0] !== avance.at(-1).split(' de ')[1].split(' ')[0]) throw new Error(`el avance de la edición no llegó a ACM: ${JSON.stringify(avance)}`);
       eq(m.est.log.filter((l) => l.startsWith('sin-auth')), [], 'todo pedido al Estudio lleva X-Empresa y Bearer');
       const peds = m.est.pedidos('/v1/editar-recorte');
       eq(peds.map((p) => p.receta.id), ['rapido', 'calmo'], 'recetas pedidas');

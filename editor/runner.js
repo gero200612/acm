@@ -124,7 +124,10 @@ export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomento
     }
   }
 
+  // avisa a ACM cuántas van («12 de 27 editadas»), así la tarjeta del crudo muestra el avance mientras se renderiza
+  const avanceEdicion = (t) => { const eds = R.ediciones(t.id); return `${eds.filter((x) => x.estado !== 'pendiente').length} de ${eds.length} editadas`; };
   async function editar(t, ms, transcripcion) {
+    await etapa(t, 'editando', avanceEdicion(t));
     for (const e of R.ediciones(t.id).filter((x) => x.estado === 'pendiente')) {
       const m = ms.find((x) => x.id === e.momento_id);
       const palabras = (transcripcion.palabras || []).filter((p) => p.fin_s > m.inicio_s && p.inicio_s < m.fin_s);
@@ -135,6 +138,7 @@ export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomento
         const portada = res.portada ? await estudio.descargar(res.portada, path.join(dir, `${base}.jpg`)).catch(() => '') : '';
         R.edicion(e.id, { estado: 'editada', resultado: { ...res, archivo_local: path.basename(archivo), portada_local: portada ? path.basename(portada) : '' } });
       } catch (err) { R.edicion(e.id, { estado: 'fallo', error: err.message }); log(`[trabajo ${t.id}] edición ${e.id} falló: ${err.message}`); }
+      await etapa(t, 'editando', avanceEdicion(t));
     }
   }
 
@@ -283,7 +287,6 @@ export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomento
       if (!ms.length) { await etapa(t, 'sin_momentos', conNotas(motivoSinMomentos || 'No encontramos momentos para recortar en este video')); return R.trabajo(id); }
       await armar(t, ms, transcripcion, aprendizajes, marca, porPublico, pedidos, ejemplosTextos);
       if (!R.ediciones(t.id).length) { await etapa(t, 'sin_momentos', 'Hay momentos pero ninguna receta para editarlos'); return R.trabajo(id); }
-      await etapa(t, 'editando', `${R.ediciones(t.id).length} ediciones`);
       await editar(t, ms, transcripcion);
       await etapa(t, 'revisando');
       await revisarYEntregar(t, ms, transcripcion);
