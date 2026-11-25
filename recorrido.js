@@ -861,7 +861,7 @@ export function recorridoCases(sb) {
         await fetch(up.j[0].url, { method: 'PUT', headers: { 'Content-Type': 'video/mp4' }, body: mp4 });
         await box.api('POST', `/api/projects/${p}/reels/complete`, { kind: 'crudo', items: [{ key: up.j[0].key, name: 'c.mp4', duration: 20 }] });
         let f = []; for (let i = 0; i < 30 && !f.length; i++) { await sleep(200); f = box.sql("SELECT text FROM alerts WHERE kind = 'falla' AND project_id = ?", p); }
-        yes(f.length === 1 && /No se pudo mandar el crudo «c»/.test(f[0].text), `aviso al fallar el envío: ${JSON.stringify(f)}`);
+        yes(f.length === 1 && /No se pudo mandar el crudo «Crudo \d+»/.test(f[0].text), `aviso al fallar el envío: ${JSON.stringify(f)}`);
       } finally { await box.stop(); }
     }],
     [G('editor'), 'Con una edición aprobada que llega en un proyecto automático, GET /plan devuelve lo programado (y no repite si llega de nuevo)', async () => {

@@ -99,6 +99,8 @@ for (const [c, def] of [['ads_creds', "TEXT DEFAULT ''"], ['ads_name', "TEXT DEF
   ['ads_audience_id', "TEXT DEFAULT ''"], ['ads_audience_count', 'INTEGER DEFAULT 0'], ['ads_campaign_id', "TEXT DEFAULT ''"], ['ads_ads', 'INTEGER DEFAULT 0'], ['ads_error', "TEXT DEFAULT ''"], ['ads_at', "TEXT DEFAULT ''"]])
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
 // pauta del ciclo de marketing: estado por red (campaña/lista ya creadas) y redes bloqueadas por rechazo de un anuncio
+// numerador de crudos del proyecto: «Crudo 1», «Crudo 2»… (siempre sube, aunque se borre uno)
+if (!cols('projects').includes('crudo_seq')) db.exec('ALTER TABLE projects ADD COLUMN crudo_seq INTEGER DEFAULT 0');
 for (const [c, def] of [['ads_state', "TEXT DEFAULT ''"], ['ads_blocked', "TEXT DEFAULT ''"]])
   if (!cols('projects').includes(c)) db.exec(`ALTER TABLE projects ADD COLUMN ${c} ${def}`);
 // proyecto de demostración: se ve completo pero no publica ni pauta nada
@@ -772,11 +774,18 @@ app.get('/api/projects/:id/editor-estado', (req, res) => {
     (SELECT count(*) FROM reels e WHERE e.source_id = r.id AND e.kind = 'listo' AND e.review = 'pendiente') AS pendientes
     FROM reels r WHERE r.project_id = ? AND r.kind = 'crudo' AND r.archived_at = '' AND r.status != '' ORDER BY r.id`, req.params.id));
 });
+// el nombre de un crudo nuevo: «Crudo N» (el nombre del archivo de la cámara no dice nada); arranca después del más alto que ya exista
+function nombreCrudo(pid) {
+  const hay = all("SELECT title FROM reels WHERE project_id = ? AND kind = 'crudo'", pid).reduce((m, r) => Math.max(m, Number(/^Crudo (\d+)$/.exec(r.title || '')?.[1] || 0)), 0);
+  const n = Math.max(hay, Number(get('SELECT crudo_seq FROM projects WHERE id = ?', pid)?.crudo_seq || 0)) + 1;
+  run('UPDATE projects SET crudo_seq = ? WHERE id = ?', n, pid);
+  return `Crudo ${n}`;
+}
 // alta de un video que ya quedó en el disco del servidor (subida directa o en partes); un crudo queda en cola y va al editor
 function altaLocal(pid, req, b, f) {
-  const title = (b?.title && f.unico) ? b.title : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
-  const m = probe(f.path) || {};
   const kind = b?.kind === 'crudo' || isContent(req.user) ? 'crudo' : 'listo';
+  const title = (b?.title && f.unico) ? b.title : kind === 'crudo' ? nombreCrudo(Number(pid)) : path.parse(f.originalname).name.replace(/[_-]+/g, ' ');
+  const m = probe(f.path) || {};
   const r = run('INSERT INTO reels (project_id, title, caption, file, original_name, size, duration, width, height, kind, etiqueta, publico, descripcion, buscar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     pid, title, b?.caption || '', f.filename, f.originalname, f.size, m.duration ?? null, m.width ?? null, m.height ?? null, kind, kind === 'crudo' ? etiquetaDe(b?.etiqueta) : '', kind === 'crudo' ? publicoDe(Number(pid), b?.publico) : '', kind === 'crudo' ? descripcionDe(b?.descripcion) : '', kind === 'crudo' ? buscarDe(b?.buscar) : '');
   if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola', status_at = datetime('now') WHERE id = ?", r.lastInsertRowid);
@@ -865,7 +874,7 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
     const h = await r2Head(key);
     if (!h) return res.status(400).json({ error: `«${it.name}» no terminó de subir` });
     const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
-    const title = path.parse(String(it.name || 'reel')).name.replace(/[_-]+/g, ' ');
+    const title = kind === 'crudo' ? nombreCrudo(pid) : path.parse(String(it.name || 'reel')).name.replace(/[_-]+/g, ' ');
     const r = run("INSERT INTO reels (project_id, title, file, original_name, size, duration, width, height, kind, storage, etiqueta, publico, descripcion, buscar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'r2', ?, ?, ?, ?)",
       pid, title, key, String(it.name || ''), h.size, num(it.duration) && Math.round(num(it.duration) * 10) / 10, num(it.width), num(it.height), kind, kind === 'crudo' ? etiquetaDe(req.body?.etiqueta) : '', kind === 'crudo' ? publicoDe(pid, req.body?.publico) : '', kind === 'crudo' ? descripcionDe(req.body?.descripcion) : '', kind === 'crudo' ? buscarDe(req.body?.buscar) : '');
     if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola', status_at = datetime('now') WHERE id = ?", r.lastInsertRowid);

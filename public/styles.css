@@ -1586,6 +1586,9 @@ kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 
 .cd-ed { width: 38px; aspect-ratio: 9/16; border-radius: 6px; overflow: hidden; background: #1b1c20; display: block; }
 .cd-ed img, .cd-ed video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cd .reel-del { position: absolute; right: 8px; top: 8px; }
+.cd-top { position: absolute; top: 12px; right: 52px; } /* el estado del editor, a la izquierda del tacho */
+.cd-body .cd-title { padding-right: 150px; }
+@media (max-width: 560px) { .cd-top { position: static; order: -1; margin-bottom: 4px; } .cd-body .cd-title { padding-right: 0; } }
 .cd-sec { margin: 6px 0 10px; }
 .cm { margin-top: 14px; }
 .cm-h .h2 { margin: 0 0 4px; }

@@ -831,12 +831,11 @@ function crudoCard(r) {
     <div class="cd-body">
       <a class="cd-title" href="${href}">${esc(r.descripcion || r.title)}</a>
       <div class="cd-meta">${r.etiqueta ? `<span class="chip nodot">${icon('home', 12)} ${esc(r.etiqueta)}</span>` : ''}<span class="small muted">Subido ${esc(fecha)}</span></div>
-      <div class="cd-meta"><span class="chip ${st} ${edActivo(r) ? 'ed-live' : ''}" data-st="${r.id}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(CRUDO_ESTADO[r.status] || 'En el editor')}${edActivo(r) && r.status_detail ? ` · ${esc(r.status_detail)}` : ''}</span>
-        <span class="small"><b>${nTxt(T.moments.length, 'momento', 'momentos')}</b> · <b>${nTxt(T.total, 'edición', 'ediciones')}</b>${ok ? ` · ${nTxt(ok, 'aprobada', 'aprobadas')}` : ''}</span></div>
+      <div class="cd-meta"><span class="small"><b>${nTxt(T.moments.length, 'momento', 'momentos')}</b> · <b>${nTxt(T.total, 'edición', 'ediciones')}</b>${ok ? ` · ${nTxt(ok, 'aprobada', 'aprobadas')}` : ''}</span></div>
       ${T.total ? `<div class="cd-eds">${T.moments.flatMap((m) => m.eds).concat(T.otras).slice(0, 9).map((e) => `<a class="cd-ed rv-${e.review}" href="#/p/${state.project.id}/reel/${e.id}" title="${esc(e.title)}">${coverOf(e)}</a>`).join('')}${T.total > 9 ? `<span class="small muted">+${T.total - 9}</span>` : ''}</div>` : ''}
       <div class="row" style="gap:6px"><a class="btn sm" href="${href}">Ver momentos${T.total ? ' y ediciones' : ''}</a></div>
     </div>
-    ${selMark(r)}</article>`;
+    <div class="cd-top"><span class="chip ${st} ${edActivo(r) ? 'ed-live' : ''}" data-st="${r.id}" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(CRUDO_ESTADO[r.status] || 'En el editor')}${edActivo(r) && r.status_detail ? ` · ${esc(r.status_detail)}` : ''}</span></div>${selMark(r)}</article>`;
 }
 // Seleccionar varios: en ese modo cada tarjeta tiene una casilla (y toda la tarjeta marca/desmarca) en vez del tacho.
 const selOn = () => !!state.sel;
