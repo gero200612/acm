@@ -1445,10 +1445,11 @@ function reelDetailView() {
       ${r.archived_at ? `<div class="gone tall">Video borrado del almacenamiento<span>Quedan el texto y las publicaciones. Para volver a usarlo, subilo de nuevo.</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>`}
       <h2 class="h2">${esc(r.title)}</h2>
       <p class="small muted">${reelState(r)[1]} · ${mb(r.size)} · subido el ${fmtDate(r.created_at)}</p>
+      ${r.kind === 'crudo' ? `<div class="rd-form-side">${reelForm(r)}</div>` : ''}
       ${r.kind === 'crudo' || r.archived_at ? '' : `<div class="row" data-id="${r.id}"><button class="btn accent" data-act="distribute" ${state.accounts.length && libres.length && repartible(r) ? '' : 'disabled'}>${libres.length ? 'Repartir en más cuentas' : 'Ya está en todas las redes'}</button></div>`}
     </aside>
     <div class="stack">
-      ${r.kind === 'crudo' ? crudoInfo(r) + reelForm(r) : reelForm(r)}
+      ${r.kind === 'crudo' ? crudoInfo(r) : reelForm(r)}
       ${r.kind === 'crudo' ? '' : `<div class="rd-stats card"><div><b>${P.length}</b><span>cuentas</span></div><div><b>${n('publicado')}</b><span>publicadas</span></div><div><b>${n('programado') + n('publicando')}</b><span>programadas</span></div><div><b>${n('fallido')}</b><span>con error</span></div></div>
       <section class="card"><div class="card-head"><h2 class="h2">Dónde está este reel</h2></div>
         ${P.length ? `<div class="table-wrap"><table class="list rd-table"><thead><tr><th>Cuenta</th><th>Estado</th><th>Cuándo</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Todavía no está en ninguna cuenta. Tocá <b>Repartir</b>.</p>'}
@@ -1481,12 +1482,15 @@ function crudoInfo(r) {
       <span class="cm-ed-h"><b>Edición ${i + 1}</b>${revChip(e)}</span><span class="small muted">${esc(e.title)}${e.duration ? ` · ${durTxt(e.duration)}` : ''}</span><a class="cm-go small" href="#/p/${pid}/reel/${e.id}">Ver detalle</a></div>`;
   const block = (head, sub, eds) => `<section class="card cm"><div class="cm-h">${head}${sub ? `<p class="small muted">${sub}</p>` : ''}</div><div class="cm-eds">${eds.map(ed).join('')}</div></section>`;
   const q = r.buscar ? `<p class="small"><b>Qué buscamos:</b> ${esc(r.buscar)}</p>` : '';
-  const top = `<section class="card"><h2 class="h2">${esc(r.descripcion || r.title)}</h2>
-    <p class="small muted">${[r.etiqueta ? esc(r.etiqueta) : '', r.publico ? `Para ${esc(pubName(r.publico))}` : '', `subido el ${fmtDate(r.created_at)}`].filter(Boolean).join(' · ')}</p>
-    ${r.descripcion && r.title ? `<p class="small muted">Archivo: ${esc(r.title)}</p>` : ''}${q}
-    <p><span class="chip ${r.status === 'error' ? 's-error' : 'nodot'} ${edActivo(r) ? 'ed-live' : ''}" data-st-d="${r.id}">${esc(CRUDO_ESTADO[r.status] || 'En el editor')}</span> <span class="small muted">${nTxt(T.moments.length, 'momento', 'momentos')} · ${nTxt(T.total, 'edición', 'ediciones')}</span></p>
-    <p class="small cm-detail" data-st-det="${r.id}" ${r.status_detail ? '' : 'hidden'}>${esc(r.status_detail || '')}</p>
-    <p class="small muted">Un crudo no se publica. Cada edición es un reel aparte que puede ir a otra cuenta de la misma red.</p></section>`;
+  // arriba: en qué va y lo que el equipo escribió al subirlo (el título y el video ya están a la izquierda)
+  const enCurso = edActivo(r), cuenta = T.total ? `${nTxt(T.moments.length, 'momento', 'momentos')} · ${nTxt(T.total, 'edición', 'ediciones')}` : '';
+  const fila = (k, v) => (v ? `<div class="ci-row"><span>${k}</span><p>${v}</p></div>` : '');
+  const top = `<section class="card ci">
+    <div class="ci-st"><span class="chip ${r.status === 'error' ? 's-error' : 'nodot'} ${enCurso ? 'ed-live' : ''}" data-st-d="${r.id}">${esc(CRUDO_ESTADO[r.status] || 'En el editor')}</span>
+      <span class="small cm-detail" data-st-det="${r.id}" ${r.status_detail ? '' : 'hidden'}>${esc(r.status_detail || '')}</span>
+      ${cuenta ? `<span class="small muted ci-n">${cuenta}</span>` : ''}</div>
+    ${fila('De qué es', esc(r.descripcion || ''))}${fila('Qué buscamos', esc(r.buscar || ''))}${fila('Dónde', esc(r.etiqueta || ''))}${fila('Para', r.publico ? esc(pubName(r.publico)) : '')}
+  </section>`;
   const mo = T.moments.map((m, i) => { const x = m.moment, ini = x.inicio_s, fin = x.fin_s, rng = ini != null && fin != null ? ` · ${mmss(ini)}–${mmss(fin)}` : '';
     return block(`<h2 class="h2">Momento ${i + 1}${rng}${x.tema ? ` · ${esc(x.tema)}` : ''}</h2>`, [x.motivo ? esc(x.motivo) : '', x.publico ? `Para ${esc(pubName(x.publico))}` : ''].filter(Boolean).join(' · '), m.eds); }).join('');
   const ot = T.otras.length ? block('<h2 class="h2">Otras</h2>', 'Ediciones sin momento asignado.', T.otras) : '';

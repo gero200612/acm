@@ -1632,3 +1632,15 @@ kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 
 @keyframes edblink { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .ed-pulse, .chip.ed-live::before { animation: none; } }
 @media (max-width: 560px) { .ed-row { padding: 10px 12px; } .ed-steps { gap: 3px; } .ed-steps li { padding: 2px 7px; font-size: 11px; } }
+
+/* detalle del crudo: el texto va debajo del video (a la izquierda) y arriba a la derecha solo el estado y lo que se escribió al subirlo */
+.rd-form-side { margin-top: 14px; }
+.rd-form-side > .card { border: 0; padding: 0; box-shadow: none; background: transparent; }
+.ci { display: flex; flex-direction: column; gap: 10px; }
+.ci-st { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.ci-st .cm-detail { margin: 0; font-weight: 600; }
+.ci-n { margin-left: auto; }
+.ci-row { display: grid; grid-template-columns: 110px 1fr; gap: 10px; font-size: 14px; }
+.ci-row span { color: var(--muted); }
+.ci-row p { margin: 0; }
+@media (max-width: 560px) { .ci-row { grid-template-columns: 1fr; gap: 2px; } .ci-n { margin-left: 0; } }
