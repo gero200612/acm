@@ -475,15 +475,25 @@ const dropFile = async (r) => {
 const PREVIEW_ARGS = ['-map', '0:v:0', '-map', '0:a:0?', '-vf', "scale=-2:'min(1280,ih)'", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart'];
 const PREVIEW_COLA = []; let previewCorriendo = false;
 const previewNombre = (file) => `${path.parse(file).name}.preview.mp4`;
+// ffmpeg solo con contenedores de video reales: lo subido podría ser una lista HLS/concat con nombre .mp4 que lea archivos del servidor o vaya a la red.
+// Se mira la cabecera, se fuerza ese demuxer y solo se permite leer archivos locales.
+function formatoSeguro(src) {
+  const b = Buffer.alloc(12); const fd = fs.openSync(src, 'r');
+  try { fs.readSync(fd, b, 0, 12, 0); } finally { fs.closeSync(fd); }
+  if (b.toString('latin1', 4, 8) === 'ftyp') return 'mov';
+  if (b.readUInt32BE(0) === 0x1a45dfa3) return 'matroska';
+  return null;
+}
+const entradaSegura = (src, fmt) => ['-protocol_whitelist', 'file', '-f', fmt, '-i', src];
 const correr = (cmd, args) => new Promise((resolve, reject) => {
   const p = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] }); let err = '';
   p.stderr.on('data', (d) => { err = (err + d).slice(-600); });
   p.on('error', reject); p.on('close', (c) => (c === 0 ? resolve(err) : reject(new Error(`${cmd} salió con ${c}: ${err.trim().split('\n').slice(-2).join(' | ')}`))));
 });
 // true si ya es liviano (h264 y menos de 3 Mbps): no hace falta copia
-async function esLiviano(src) {
+async function esLiviano(src, fmt) {
   const out = await new Promise((resolve, reject) => {
-    const p = spawn('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,bit_rate:format=bit_rate', '-of', 'json', src], { stdio: ['ignore', 'pipe', 'ignore'] }); let o = '';
+    const p = spawn('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,bit_rate:format=bit_rate', '-of', 'json', '-protocol_whitelist', 'file', '-f', fmt, src], { stdio: ['ignore', 'pipe', 'ignore'] }); let o = '';
     p.stdout.on('data', (d) => { o += d; }); p.on('error', reject); p.on('close', (c) => (c === 0 ? resolve(o) : reject(new Error(`ffprobe salió con ${c}`))));
   });
   const j = JSON.parse(out || '{}'); const br = Number(j.streams?.[0]?.bit_rate) || Number(j.format?.bit_rate) || 0;
@@ -497,8 +507,10 @@ async function hacerVista(id) {
   try {
     const src = r.storage === 'r2' ? await r2Download(r.file, tmp) : path.join(UPLOADS, path.basename(r.file));
     if (r.storage !== 'r2' && !fs.existsSync(src)) { marcar('-'); return; }
-    if (await esLiviano(src)) { marcar('-'); return; }
-    await correr('nice', ['-n', '15', 'ffmpeg', '-y', '-threads', '2', '-i', src, ...PREVIEW_ARGS, dest]);
+    const fmt = formatoSeguro(src);
+    if (!fmt) { console.error(`vista liviana del reel ${id}: no es MP4/MOV/WebM; queda sin vista`); marcar('-'); return; }
+    if (await esLiviano(src, fmt)) { marcar('-'); return; }
+    await correr('nice', ['-n', '15', 'ffmpeg', '-y', '-threads', '2', ...entradaSegura(src, fmt), ...PREVIEW_ARGS, dest]);
     if (r.storage === 'r2') {
       const size = fs.statSync(dest).size;
       const put = await fetch(await putUrl(nombre, 'video/mp4'), { method: 'PUT', headers: { 'content-type': 'video/mp4', 'content-length': String(size) }, body: fs.createReadStream(dest), duplex: 'half' });
