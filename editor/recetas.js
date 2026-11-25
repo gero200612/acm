@@ -5,13 +5,18 @@ import { SYSTEM_TEXTOS, HERRAMIENTA_TEXTOS, usuarioTextos } from './prompts.js';
 import { finDeFrase, inicioDeFrase } from './frases.js';
 
 export const OPCIONES = {
-  gancho: ['directo', 'pregunta', 'adelanto'],
+  // directo: arranca como siempre; pregunta/adelanto: cartel arriba (adelanto además salta el comienzo); negro: 1,5 a 3 s de pantalla negra con una frase
+  // fuerte de más adelante (se oye y se lee en grande) y después el reel; mejor: ~2 s del video real de esa frase (con su sonido) y después el reel
+  gancho: ['directo', 'pregunta', 'adelanto', 'negro', 'mejor'],
   subtitulos: ['karaoke', 'placa', 'minimo', 'frase', 'grande'],
   musica: ['energico', 'calido', 'sin'],
   ritmo: ['rapido', 'normal', 'lento'],
   largo: ['completo', 'medio', 'corto'],
 };
 const DIMS = Object.keys(OPCIONES);
+// Los tipos de gancho que se reparten entre las 3 versiones de cada momento (para medir cuál rinde): uno negro, uno «lo mejor primero» y uno directo
+export const GANCHOS_DE_PRUEBA = ['negro', 'mejor', 'directo'];
+export const GANCHOS_CON_ADELANTO = ['negro', 'mejor'];
 const FACTOR_LARGO = { completo: 1, medio: 0.7, corto: 0.45 };
 const POS_PORTADA = { completo: 0.4, medio: 0.25, corto: 0.1 };
 const VOLUMEN = 0.25;
@@ -49,13 +54,18 @@ export function elegirVariables({ semilla = 0, aprendizajes, estilo } = {}) {
   const s = Math.abs(Math.trunc(semilla)) || 0, g = ganadoras(aprendizajes, O), hay = Object.keys(g).length > 0;
   // sin aprendizajes: cada dimensión rota con su propio desfase, así las 3 difieren y, entre momentos, se reparten parejo
   const rotada = (i) => ({ gancho: elegir('gancho', s + i), subtitulos: elegir('subtitulos', 2 * s + i), musica: elegir('musica', s + i + 1), ritmo: elegir('ritmo', s + i + 1), largo: elegir('largo', s + i + 2) });
-  if (!hay) return [0, 1, 2].map((i) => ({ ...rotada(i), explora: false }));
-  const base = [0, 1].map((i) => ({ ...rotada(i), ...g, explora: false }));
-  const exp = { ...base[0], explora: true };
+  // el reparto de ganchos es fijo (uno de cada tipo) mientras el estilo del público deje usarlos; los aprendizajes no lo pisan: es lo que se está probando
+  const probar = GANCHOS_DE_PRUEBA.every((x) => O.gancho.includes(x));
+  const gancho = (i) => (probar ? GANCHOS_DE_PRUEBA[(s + i) % GANCHOS_DE_PRUEBA.length] : undefined);
+  const conGancho = (v, i) => (probar ? { ...v, gancho: gancho(i) } : v);
+  if (!hay) return [0, 1, 2].map((i) => ({ ...conGancho(rotada(i), i), explora: false }));
+  const base = [0, 1].map((i) => ({ ...conGancho({ ...rotada(i), ...g }, i), explora: false }));
+  const exp = { ...conGancho(base[0], 2), explora: true };
   // explora: cambia al menos 2 variables respecto de la ganadora (primero las que tienen ganadora)
   let cambios = 0;
   for (const d of [...DIMS.filter((x) => g[x]), ...DIMS.filter((x) => !g[x])]) {
     if (cambios >= 2) break;
+    if (d === 'gancho' && probar) continue; // el gancho ya es distinto en las tres
     if (O[d].length < 2) continue; // con una sola opción permitida no hay qué explorar
     exp[d] = otroDistinto(d, base[0][d]); cambios++;
   }
@@ -96,6 +106,38 @@ export function cartelCorto(texto, max = MAX_PALABRAS_CARTEL) {
   return corto ? corto.join(' ') : ''; // sin un tramo corto, mejor sin cartel que palabras sueltas sin sentido
 }
 const r1 = (x) => Math.round(x * 10) / 10;
+const r3 = (x) => Math.round(x * 1000) / 1000;
+
+// Frases COMPLETAS que sirven de adelanto (negro o lo mejor primero): de 1 a 2,6 s de voz, 3 palabras o más, de más adelante del momento (a 3 s o más de su
+// arranque, para no oírla dos veces seguidas); si no hay, del crudo cerca del momento (hasta 8 s antes o después). Hasta 12, repartidas por el tramo.
+export const FRASE_MIN_S = 1, FRASE_MAX_S = 2.6, MAX_CANDIDATAS = 12;
+export function frasesCandidatas(palabras = [], momento = {}) {
+  const ps = [...palabras].sort((a, b) => a.inicio_s - b.inicio_s), todas = [];
+  let i0 = 0;
+  ps.forEach((_, i) => {
+    if (!finDeFrase(ps, i)) return;
+    const f = ps.slice(i0, i + 1);
+    const ok = inicioDeFrase(ps, i0) && f.length >= 3 && f.every((w) => /\S/.test(w.texto));
+    const dur = ps[i].fin_s - ps[i0].inicio_s;
+    if (ok && dur >= FRASE_MIN_S && dur <= FRASE_MAX_S) todas.push({ desde_s: r3(ps[i0].inicio_s), hasta_s: r3(ps[i].fin_s), texto: f.map((w) => w.texto).join(' ').replace(/[\s.,;:]+$/, '') });
+    i0 = i + 1;
+  });
+  const ini = momento.inicio_s ?? 0, fin = momento.fin_s ?? Infinity;
+  const dentro = todas.filter((c) => c.desde_s >= ini + 3 && c.hasta_s <= fin + 0.05);
+  const cerca = todas.filter((c) => c.hasta_s > ini - 8 && c.desde_s < fin + 8 && !(c.desde_s >= ini - 0.05 && c.desde_s < ini + 3));
+  const lista = dentro.length ? dentro : cerca;
+  if (lista.length <= MAX_CANDIDATAS) return lista;
+  return Array.from({ length: MAX_CANDIDATAS }, (_, k) => lista[Math.round((k * (lista.length - 1)) / (MAX_CANDIDATAS - 1))]);
+}
+
+// La frase de un adelanto: la que eligió Claude (número desde 1 en la lista) si es válida y no la usó otra versión; si no, la más cercana a 2 s de voz
+export function elegirFrase(candidatas, eleccion, usadas = []) {
+  const libres = candidatas.filter((c) => !usadas.includes(c));
+  const pedida = Number.isInteger(Number(eleccion)) && Number(eleccion) >= 1 ? candidatas[Number(eleccion) - 1] : undefined;
+  if (pedida && libres.includes(pedida)) return pedida;
+  const pool = libres.length ? libres : candidatas;
+  return pool.reduce((m, c) => (!m || Math.abs(c.hasta_s - c.desde_s - 2) < Math.abs(m.hasta_s - m.desde_s - 2) ? c : m), undefined);
+}
 
 // La marca del proyecto que viaja al Estudio: color de acento (#RRGGBB). Sin cartel de barrio (Gero, 16/11: «el barrio no tiene que tener un cartel»).
 export function marcaParaReceta(marca = {}) {
@@ -104,7 +146,7 @@ export function marcaParaReceta(marca = {}) {
   return m;
 }
 
-export function construirReceta({ v, momento, palabras = [], textos, marca = {} }) {
+export function construirReceta({ v, momento, palabras = [], textos, marca = {}, frase }) {
   // tema partido: el gancho «adelanto» solo puede arrancar dentro del primer tramo; lo disponible es la suma de los tramos
   const tramos = Array.isArray(momento.datos?.tramos) && momento.datos.tramos.length > 1 ? momento.datos.tramos : null;
   const primero = tramos ? tramos[0] : momento;
@@ -123,17 +165,23 @@ export function construirReceta({ v, momento, palabras = [], textos, marca = {} 
   const objetivo = Math.max(Math.min(minimo, disp), disp * FACTOR_LARGO[v.largo]);
   const largo_s = r1(Math.min(tope, Math.max(Math.min(minimo, disp), cierreDeIdea(palabras, tramos || [momento], desde, objetivo, disp))));
   const mr = marcaParaReceta(marca);
+  let tipo = v.gancho;
   const gancho = { desde_s: desde };
   const gtxt = cartelCorto(textos.gancho_texto);
-  if (v.gancho !== 'directo' && gtxt) gancho.texto = gtxt;
+  if (GANCHOS_CON_ADELANTO.includes(tipo)) {
+    // el reel arranca igual desde el comienzo del momento; la frase de más adelante suena antes. Sin una frase completa que sirva, queda directo.
+    // Sin cartel de texto: en negro el texto grande ya es la frase y en «lo mejor primero» el cartel taparía.
+    if (frase) { gancho.desde_s = momento.inicio_s; gancho.adelanto = { modo: tipo, desde_s: frase.desde_s, hasta_s: frase.hasta_s }; }
+    else tipo = 'directo';
+  } else if (tipo !== 'directo' && gtxt) gancho.texto = gtxt;
   return {
     gancho, subtitulos: v.subtitulos,
     musica: v.musica === 'sin' ? null : { clima: v.musica, volumen: VOLUMEN },
-    ritmo: v.ritmo, zoom: true, // punch-in siempre: así son los reels de referencia (el Estudio lo aplica en todos)
+    ritmo: v.ritmo, zoom: false, // sin acercamientos automáticos (el equipo de Posse: «se zumea solo»)
     largo_s, portada: { segundo_s: r1(largo_s * POS_PORTADA[v.largo]), texto: cartelCorto(textos.portada_texto) || cartelCorto(momento.datos?.tema) || 'Mirá esto' },
     explora: v.explora,
     ...(Object.keys(mr).length ? { marca: mr } : {}),
-    variables: { gancho: v.gancho, subtitulos: v.subtitulos, musica: v.musica, ritmo: v.ritmo, largo: v.largo },
+    variables: { gancho: tipo, subtitulos: v.subtitulos, musica: v.musica, ritmo: v.ritmo, largo: v.largo },
     caption: String(textos.caption || '').trim(), hashtags: textos.hashtags,
   };
 }
@@ -161,10 +209,16 @@ export function crearArmarRecetas({ claude, modelo = MODELOS.textos } = {}) {
     const vars = elegirVariables({ semilla: momento.idx ?? momento.id ?? 0, aprendizajes, estilo: momento.datos?.publico_estilo });
     const tr = Array.isArray(momento.datos?.tramos) && momento.datos.tramos.length > 1 ? momento.datos.tramos : [momento];
     const enMomento = palabras.filter((p) => tr.some((x) => p.fin_s > x.inicio_s && p.inicio_s < x.fin_s));
-    const pedido = { modelo, system: SYSTEM_TEXTOS, herramienta: HERRAMIENTA_TEXTOS, maxTokens: 2000, usuario: usuarioTextos({ momento, texto: enMomento.map((p) => p.texto).join(' ').slice(0, 6000), versiones: vars, pedidos, ejemplos: ejemplosTextos }) };
+    const candidatas = vars.some((v) => GANCHOS_CON_ADELANTO.includes(v.gancho)) ? frasesCandidatas(palabras, momento) : [];
+    const pedido = { modelo, system: SYSTEM_TEXTOS, herramienta: HERRAMIENTA_TEXTOS, maxTokens: 2000, usuario: usuarioTextos({ momento, texto: enMomento.map((p) => p.texto).join(' ').slice(0, 6000), versiones: vars, pedidos, ejemplos: ejemplosTextos, candidatas }) };
     let textos;
     try { textos = validarTextos(await claude.estructurado(pedido)); }
     catch (e) { if (/^Falta ANTHROPIC/.test(e.message)) throw e; textos = validarTextos(await claude.estructurado(pedido)); } // un reintento
-    return vars.map((v, i) => construirReceta({ v, momento, palabras, textos: textos[i], marca }));
+    const usadas = [];
+    return vars.map((v, i) => {
+      const frase = GANCHOS_CON_ADELANTO.includes(v.gancho) && candidatas.length ? elegirFrase(candidatas, textos[i].frase_gancho, usadas) : undefined;
+      if (frase) usadas.push(frase);
+      return construirReceta({ v, momento, palabras, textos: textos[i], marca, frase });
+    });
   };
 }

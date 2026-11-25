@@ -12,7 +12,7 @@ import { crearRunner } from './runner.js';
 import { repo } from './db.js';
 import { validarMomentos, crearElegirMomentos, ajustarAFrases } from './momentos.js';
 import { herramientaMomentos, HERRAMIENTA_MOMENTOS, usuarioMomentos, usuarioTextos } from './prompts.js';
-import { crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas, construirReceta, cartelCorto } from './recetas.js';
+import { crearArmarRecetas, elegirVariables, normalizarAprendizajes, opcionesPermitidas, construirReceta, cartelCorto, frasesCandidatas } from './recetas.js';
 import { finDeFrase, inicioDeFrase } from './frases.js';
 import { crearCriterio } from './criterio.js';
 import { crearClaude } from './claude.js';
@@ -342,7 +342,7 @@ casos.push(
     const claude = claudeFalso();
     const rs = await crearArmarRecetas({ claude })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: [] });
     eq(rs.length, 3, 'tres recetas');
-    yes(difieren(rs, (r) => [r.gancho.texto ?? null, r.gancho.desde_s]), 'gancho');
+    // (el reparto de ganchos —negro, lo mejor primero, directo— se prueba aparte, con frases: acá las palabras no tienen puntuación)
     yes(difieren(rs, (r) => r.subtitulos), 'subtítulos');
     yes(difieren(rs, (r) => [r.musica, r.ritmo]), 'música/ritmo');
     yes(difieren(rs, (r) => [r.largo_s, r.portada.segundo_s]), 'largo/portada');
@@ -735,7 +735,7 @@ casos.push(
     const t = validarMomentos([{ tema: 't', interes: 5, inicio_s: pal[20].inicio_s, fin_s: pal[36].fin_s, tramos: [{ inicio_s: pal[20].inicio_s, fin_s: pal[36].fin_s }, { inicio_s: pal[40].inicio_s, fin_s: pal[59].fin_s }] }], pal).validos[0];
     eq(t.tramos.map((x) => [x.inicio_s, x.fin_s]), [[pal[20].inicio_s, pal[39].fin_s], [pal[40].inicio_s, pal[59].fin_s]], 'tramos: cada uno cierra su frase');
   }],
-  ['Recetas', 'Gancho «adelanto»: arranca en un comienzo de frase; el largo nunca corta la idea (se estira hasta el fin de frase); el cartel es de 1 a 3 palabras; el punch-in va siempre', () => {
+  ['Recetas', 'Gancho «adelanto»: arranca en un comienzo de frase; el largo nunca corta la idea (se estira hasta el fin de frase); el cartel es de 1 a 3 palabras; sin zoom por defecto', () => {
     const pal = Array.from({ length: 120 }, (_, i) => ({ inicio_s: i * 0.6, fin_s: i * 0.6 + 0.5, texto: (i + 1) % 12 === 0 ? `p${i}.` : `p${i}` })); // frases de 12 palabras (7,2 s)
     const momento = { inicio_s: 0, fin_s: pal[59].fin_s, datos: { tema: 'Obras en la vía un sábado sin acceso' } };
     const base = { subtitulos: 'grande', musica: 'sin', ritmo: 'normal', explora: false };
@@ -756,7 +756,55 @@ casos.push(
     // portada sin texto: sale del tema si tiene un tramo corto; si no, el genérico
     eq(construirReceta({ v: { ...base, gancho: 'directo', largo: 'completo' }, momento, palabras: pal, textos: { ...textos, portada_texto: '' } }).portada.texto, 'Mirá esto', 'portada: un tema sin tramo corto no da palabras sueltas, va el genérico');
     // el punch-in va en todas las recetas, también con ritmo lento
-    eq([ad.zoom, construirReceta({ v: { ...base, gancho: 'directo', largo: 'completo', ritmo: 'lento' }, momento, palabras: pal, textos }).zoom], [true, true], 'zoom siempre');
+    eq([ad.zoom, construirReceta({ v: { ...base, gancho: 'directo', largo: 'completo', ritmo: 'lento' }, momento, palabras: pal, textos }).zoom], [false, false], 'sin zoom por defecto');
+  }],
+  ['Recetas', 'Ganchos de prueba: de las 3 recetas una es negro, una lo mejor primero y una directa; la frase es completa, va a variables.gancho y al Estudio; zoom false', async () => {
+    // frases de 4 palabras (0,5 s cada una, 2,0 s de voz) separadas por pausas de 0,6 s
+    const pal = [];
+    for (let f = 0; f < 40; f++) for (let k = 0; k < 4; k++) { const t = f * 2.6 + k * 0.5; pal.push({ inicio_s: t, fin_s: t + 0.45, texto: `w${f}x${k}${k === 3 ? '.' : ''}` }); }
+    const momento = { id: 1, idx: 0, inicio_s: 10.4, fin_s: 52, datos: { tema: 'el asado' } };
+    const claude = claudeFalso();
+    for (const semilla of [0, 1, 2, 5]) {
+      const rs = await crearArmarRecetas({ claude })({ momento: { ...momento, idx: semilla }, palabras: pal, aprendizajes: [] });
+      eq(rs.map((r) => r.variables.gancho).sort(), ['directo', 'mejor', 'negro'], `un gancho de cada tipo (semilla ${semilla})`);
+      for (const r of rs) {
+        eq(r.zoom, false, 'zoom false por defecto');
+        const ad = r.gancho.adelanto;
+        if (r.variables.gancho === 'directo') { yes(!ad, 'directo no lleva adelanto'); continue; }
+        eq(ad.modo, r.variables.gancho, 'el modo es la variable del gancho');
+        yes(!('texto' in r.gancho), 'sin cartel de texto con adelanto');
+        eq(r.gancho.desde_s, momento.inicio_s, 'el reel arranca en el comienzo del momento');
+        const i = pal.findIndex((w) => Math.abs(w.inicio_s - ad.desde_s) < 1e-6), j = pal.findIndex((w) => Math.abs(w.fin_s - ad.hasta_s) < 1e-6);
+        yes(i >= 0 && j > i && inicioDeFrase(pal, i) && finDeFrase(pal, j), `la frase ${ad.desde_s}–${ad.hasta_s} no es una frase completa`);
+        yes(ad.hasta_s - ad.desde_s >= 1 && ad.hasta_s - ad.desde_s <= 2.6, 'dura entre 1 y 2,6 s');
+        yes(ad.desde_s >= momento.inicio_s + 3, 'es de más adelante del momento');
+      }
+      const frases = rs.map((r) => r.gancho.adelanto?.desde_s).filter((x) => x !== undefined);
+      eq(new Set(frases).size, 2, 'cada adelanto usa una frase distinta');
+      // viaja al Estudio con el adelanto y sin lo interno
+      const e = paraEstudio(rs.find((r) => r.variables.gancho === 'negro'));
+      eq([!!e.gancho.adelanto, 'variables' in e, e.zoom], [true, false, false], 'paraEstudio');
+    }
+    // el prompt lleva la lista de frases y la elección de Claude (frase_gancho) se respeta
+    yes(/Frases completas disponibles/.test(claude.pedidos[0].usuario) && /GANCHO NEGRO/.test(claude.pedidos[0].usuario) && /LO MEJOR PRIMERO/.test(claude.pedidos[0].usuario), 'prompt con frases y tipos');
+    const cand = frasesCandidatas(pal, momento);
+    const eleg = crearArmarRecetas({ claude: { async estructurado() { return { versiones: [0, 1, 2].map((i) => ({ caption: `c${i}`, hashtags: [`#h${i}`], gancho_texto: 'x', portada_texto: 'y', frase_gancho: 3 + i })) }; } } });
+    const rs2 = await eleg({ momento, palabras: pal, aprendizajes: [] });
+    const usadas = rs2.map((r) => r.gancho.adelanto?.desde_s).filter((x) => x !== undefined).sort((a, b) => a - b);
+    eq(usadas.length, 2, 'dos adelantos');
+    yes(usadas.every((x) => cand.some((c) => c.desde_s === x)), 'las frases salen de la lista');
+    // sin una frase que sirva (palabras sin puntuación ni pausas) queda directo y la variable lo registra
+    const sin = await crearArmarRecetas({ claude })({ momento: MOM, palabras: PALABRAS, aprendizajes: [] });
+    eq(sin.map((r) => r.variables.gancho), ['directo', 'directo', 'directo'], 'sin frases, todas directas');
+    yes(sin.every((r) => !r.gancho.adelanto), 'sin adelanto');
+  }],
+  ['Ajuste', 'Un ajuste de ritmo rápido ya no prende el zoom; cambiar el gancho a directo saca el adelanto', async () => {
+    const { aplicarAjuste } = await import('./ajuste.js');
+    const rec = { gancho: { desde_s: 10, adelanto: { modo: 'negro', desde_s: 30, hasta_s: 32 } }, subtitulos: 'karaoke', musica: null, ritmo: 'lento', zoom: false, largo_s: 20, portada: { segundo_s: 2, texto: 'x' }, variables: { gancho: 'negro' } };
+    eq(aplicarAjuste(rec, { ritmo: 'rapido' }, { inicio_s: 10, fin_s: 60 }).zoom, false, 'rápido no prende el zoom');
+    const d = aplicarAjuste(rec, { gancho: 'directo' }, { inicio_s: 10, fin_s: 60 });
+    eq([d.gancho.adelanto, d.variables.gancho], [undefined, 'directo'], 'directo saca el adelanto');
+    eq(aplicarAjuste(rec, { gancho: 'mejor' }, { inicio_s: 10, fin_s: 60 }).gancho.adelanto.modo, 'mejor', 'cambia el modo');
   }],
   ['Mirar', 'tramosAEstado pasa números de cuadro a segundos reales (tiempos_s) y descarta lo inválido', () => {
     const pl = [{ tiempos_s: [0, 2, 4, 6], hasta_s: 8 }, { tiempos_s: [8, 10], hasta_s: 11 }];

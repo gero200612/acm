@@ -124,6 +124,7 @@ export const HERRAMIENTA_TEXTOS = {
             caption: { type: 'string' }, hashtags: { type: 'array', items: { type: 'string' } },
             gancho_texto: { type: 'string', description: 'De 1 a 3 palabras (un cartel, no una frase); vacío si la versión no lleva texto de gancho' },
             portada_texto: { type: 'string', description: 'De 1 a 3 palabras (un cartel, no una frase)' },
+            frase_gancho: { type: 'integer', description: 'Solo si la versión lleva un adelanto (negro o lo mejor primero): el número de la frase elegida de la lista de frases; 0 si no hay ninguna que sirva' },
           },
           required: ['caption', 'hashtags', 'gancho_texto', 'portada_texto'],
         },
@@ -133,9 +134,12 @@ export const HERRAMIENTA_TEXTOS = {
   },
 };
 
-const GANCHO_DESC = { directo: 'arranca directo, sin texto de gancho', pregunta: 'el gancho es una pregunta que engancha', adelanto: 'el gancho adelanta lo más fuerte del momento' };
+const GANCHO_DESC = { directo: 'arranca directo, sin texto de gancho', pregunta: 'el gancho es una pregunta que engancha', adelanto: 'el gancho adelanta lo más fuerte del momento',
+  negro: 'GANCHO NEGRO: antes del video, 2 s de pantalla negra donde se oye una frase fuerte y se lee en grande (elegí la que más pique: un reclamo, una contradicción, lo que dice un vecino; corta y que se entienda sola); sin texto de gancho (gancho_texto vacío)',
+  mejor: 'LO MEJOR PRIMERO: antes del video, ~2 s de la mejor parte (video y sonido reales de esa frase; elegí la parte más valiosa o sorprendente del recorte); sin texto de gancho (gancho_texto vacío)',
+};
 
-export function usuarioTextos({ momento, texto, versiones, pedidos, ejemplos = [] }) {
+export function usuarioTextos({ momento, texto, versiones, pedidos, ejemplos = [], candidatas = [] }) {
   const sinHabla = momento.datos?.sin_habla === true;
   const ped = textoPedidos(pedidos);
   const previo = [
@@ -147,5 +151,5 @@ ${sinHabla ? `Este recorte casi no tiene habla: se sostiene por lo que se ve. Es
 ${texto || '(casi sin habla)'}
 
 Versiones a escribir:
-${versiones.map((v, i) => `${i + 1}. ${GANCHO_DESC[v.gancho]}; subtítulos «${v.subtitulos}»; ritmo ${v.ritmo}.`).join('\n')}`;
+${versiones.map((v, i) => `${i + 1}. ${GANCHO_DESC[v.gancho]}; subtítulos «${v.subtitulos}»; ritmo ${v.ritmo}.`).join('\n')}${candidatas.length ? `\n\nFrases completas disponibles para el adelanto (elegí una DISTINTA para cada versión que lleve adelanto y devolvé su número en frase_gancho):\n${candidatas.map((c, i) => `${i + 1}. «${c.texto}» (${(c.hasta_s - c.desde_s).toFixed(1)} s)`).join('\n')}` : ''}`;
 }

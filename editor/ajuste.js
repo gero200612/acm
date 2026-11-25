@@ -67,10 +67,14 @@ export function aplicarAjuste(receta, c = {}, momento = {}) {
   const n = JSON.parse(JSON.stringify(receta || {}));
   const v = { ...(n.variables || {}) };
   const desde0 = n.gancho?.desde_s ?? momento.inicio_s ?? 0, fin = momento.fin_s ?? desde0 + (n.largo_s || 30);
-  if (c.gancho && OPCIONES.gancho.includes(c.gancho)) { v.gancho = c.gancho; if (c.gancho === 'directo' && n.gancho) delete n.gancho.texto; }
+  if (c.gancho && OPCIONES.gancho.includes(c.gancho)) {
+    const ad = n.gancho?.adelanto;
+    if (['negro', 'mejor'].includes(c.gancho)) { if (ad) { ad.modo = c.gancho; v.gancho = c.gancho; delete n.gancho.texto; } } // sin una frase elegida no hay adelanto que armar
+    else { v.gancho = c.gancho; if (n.gancho) delete n.gancho.adelanto; if (c.gancho === 'directo' && n.gancho) delete n.gancho.texto; }
+  }
   if (c.subtitulos && OPCIONES.subtitulos.includes(c.subtitulos)) { n.subtitulos = c.subtitulos; v.subtitulos = c.subtitulos; }
   if (c.musica && OPCIONES.musica.includes(c.musica)) { n.musica = c.musica === 'sin' ? null : { clima: c.musica, volumen: n.musica?.volumen ?? 0.25 }; v.musica = c.musica; }
-  if (c.ritmo && OPCIONES.ritmo.includes(c.ritmo)) { n.ritmo = c.ritmo; n.zoom = c.ritmo === 'rapido'; v.ritmo = c.ritmo; }
+  if (c.ritmo && OPCIONES.ritmo.includes(c.ritmo)) { n.ritmo = c.ritmo; v.ritmo = c.ritmo; }
   if (c.quitar_zoom) n.zoom = false;
   // recortes: se corre el arranque y/o se acorta el final, sin salir del momento
   let desde = desde0;
@@ -84,7 +88,7 @@ export function aplicarAjuste(receta, c = {}, momento = {}) {
   n.largo_s = r1(Math.min(tope, disp, Math.max(Math.min(MIN_LARGO_S, disp), largo)));
   if (n.portada) n.portada = { ...n.portada, segundo_s: r1(Math.min(n.portada.segundo_s ?? 0, n.largo_s - 0.5)) };
   for (const k of ['caption', 'hashtags']) if (typeof c[k] === 'string' && c[k].trim()) n[k] = c[k].trim();
-  if (typeof c.gancho_texto === 'string' && c.gancho_texto.trim() && v.gancho !== 'directo') n.gancho = { ...(n.gancho || {}), texto: c.gancho_texto.trim().slice(0, 60) };
+  if (typeof c.gancho_texto === 'string' && c.gancho_texto.trim() && v.gancho !== 'directo' && !n.gancho?.adelanto) n.gancho = { ...(n.gancho || {}), texto: c.gancho_texto.trim().slice(0, 60) };
   if (typeof c.portada_texto === 'string' && c.portada_texto.trim()) n.portada = { ...(n.portada || {}), texto: c.portada_texto.trim().slice(0, 40) };
   if (Object.keys(v).length) n.variables = v;
   return n;
