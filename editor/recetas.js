@@ -139,10 +139,12 @@ export function elegirFrase(candidatas, eleccion, usadas = []) {
   return pool.reduce((m, c) => (!m || Math.abs(c.hasta_s - c.desde_s - 2) < Math.abs(m.hasta_s - m.desde_s - 2) ? c : m), undefined);
 }
 
-// La marca del proyecto que viaja al Estudio: color de acento (#RRGGBB). Sin cartel de barrio (Gero, 16/11: «el barrio no tiene que tener un cartel»).
+// La marca del proyecto que viaja al Estudio: color de acento y de la letra sobre el recuadro (#RRGGBB) y fuente de los subtítulos. Sin cartel de barrio (Gero, 16/11: «el barrio no tiene que tener un cartel»).
 export function marcaParaReceta(marca = {}) {
   const m = {};
   if (/^#[0-9a-fA-F]{6}$/.test(String(marca.acento || ''))) m.acento = marca.acento;
+  if (/^#[0-9a-fA-F]{6}$/.test(String(marca.texto || ''))) m.texto = marca.texto; // letra de la palabra sobre el recuadro de acento
+  if (marca.fuente === 'bootzy') m.fuente = 'bootzy'; // vacío = la fuente del editor
   return m;
 }
 

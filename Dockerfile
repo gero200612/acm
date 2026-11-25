@@ -1,6 +1,8 @@
 # slim (glibc) y no alpine: el motor del modelo de vectores (onnxruntime) no tiene binarios para musl
 FROM node:24-slim
 WORKDIR /app
+# ffmpeg: la vista liviana de los videos (720p chica) para mirarlos en la app sin trabarse
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production ACM_DATA=/data PORT=3000 ACM_MODELS=/app/models
 COPY package.json package-lock.json ./
 # solo lo de Linux x64 y sin GPU: de ~700 MB a ~60 MB. Sin bajar los binarios de CUDA (no se usan y su descarga

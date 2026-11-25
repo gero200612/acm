@@ -186,6 +186,9 @@ function sideNav(r) {
 const HOME_PUBLICO = false;
 const LD = (n) => `/landing/${n}`;
 // reel vertical de ejemplo (videos libres de Mixkit): arranca solo cuando está en pantalla, ver wireReels
+// los videos se miran con la vista liviana si ya está hecha ('-' = no hace falta); publicar y descargar usan siempre el original
+const vsrc = (r) => `/media/${r.preview && r.preview !== '-' ? r.preview : r.file}`;
+const vsrcP = (x) => vsrc({ file: x.reel_file, preview: x.reel_preview });
 const REEL = (i) => `<video class="reel" src="/landing/r${i}.mp4" poster="/landing/r${i}.jpg" muted loop playsinline preload="none" aria-hidden="true"></video>`;
 function landingView() {
   const words = ['Instagram', 'Facebook', 'TikTok', 'YouTube', 'Edición automática', 'Aprobación del equipo', 'Calendario', 'Grilla del perfil', 'Comentarios por segundo', 'Roles y permisos'];
@@ -441,7 +444,7 @@ function labReels() {
   return `<section class="card">
     <div class="card-head"><div><h2 class="h2">Control técnico de los reels</h2><p class="small muted">Duración, tamaño, proporción y peso de cada video contra lo que pide cada red. Se mide solo al subirlo.</p></div><span class="chip ${okAll === R.length ? 's-conectada' : 's-pausada'}">${okAll} de ${R.length} sirven para las cuatro redes</span></div>
     <div class="table-wrap"><table class="list rv-t"><thead><tr><th>Reel</th><th>Proyecto</th><th class="r">Duración</th><th class="r">Tamaño</th><th class="r">Peso</th>${nets.map((n) => `<th class="c">${netBadge(n)}</th>`).join('')}</tr></thead><tbody>
-      ${R.map((r) => `<tr><td><div class="handle"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted></video><div>${esc(r.title)}<small>${esc(r.original_name || '')}</small></div></div></td>
+      ${R.map((r) => `<tr><td><div class="handle"><video src="${esc(vsrc(r))}#t=0.5" preload="metadata" muted></video><div>${esc(r.title)}<small>${esc(r.original_name || '')}</small></div></div></td>
         <td class="small"><span class="pdot" style="background:${esc(r.color)}"></span>${esc(r.project)}</td>
         <td class="r num">${r.duration != null ? fmt(r.duration, 1) + ' s' : '—'}</td>
         <td class="r num small">${r.width ? `${r.width}×${r.height}` : '—'}</td>
@@ -510,7 +513,7 @@ function clipCtx(c) {
   const r = c.reels.find((x) => x.review === 'pendiente') || c.reels[0] || {}, pub = c.moment?.publico || r.publico;
   return [c.crudo ? `De «${esc(c.crudo)}»` : '', c.barrio ? esc(c.barrio) : '', pub ? `Para ${esc(pubName(pub))}` : '', r.duration ? durTxt(r.duration) : ''].filter(Boolean).join(' · ');
 }
-const coverOf = (r) => (r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video>`);
+const coverOf = (r) => (r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : `<video src="${esc(vsrc(r))}#t=0.5" preload="metadata" muted playsinline></video>`);
 function aprobarView() {
   const p = state.project, R = state.review || { clips: [], rehaciendo: [], pending: 0, review_mode: p.review_mode };
   const auto = R.review_mode === 'auto';
@@ -520,8 +523,8 @@ function aprobarView() {
   const prevs = (c) => { const L = c.reels.filter((r) => r.review === 'rechazado'); return L.length ? `<details class="ap-prev"><summary>${L.length === 1 ? 'Una versión anterior rechazada' : `${L.length} versiones anteriores rechazadas`}</summary>${L.map((r) => `<div class="ap-prev-row">${coverOf(r)}<div><b>${esc(r.title || 'Versión')}</b><p class="small muted">${r.review_note ? `«${esc(r.review_note)}»` : 'Sin comentario'}</p></div></div>`).join('')}</details>` : ''; };
   const version = (r, i) => `
       <article class="ap-ed" data-id="${r.id}">
-        <video src="/media/${esc(r.file)}${r.cover ? '' : '#t=0.5'}" ${r.cover ? `poster="/media/${esc(r.cover)}" preload="none"` : 'preload="metadata"'} controls controlslist="nofullscreen" playsinline></video>
-        <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="/media/${esc(r.file)}" data-cap="${esc(r.caption || '')}">${icon('phone', 15)} Ver como celular</button>
+        <video src="${esc(vsrc(r))}${r.cover ? '' : '#t=0.5'}" ${r.cover ? `poster="/media/${esc(r.cover)}" preload="none"` : 'preload="metadata"'} controls controlslist="nofullscreen" playsinline></video>
+        <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="${esc(vsrc(r))}" data-cap="${esc(r.caption || '')}">${icon('phone', 15)} Ver como celular</button>
         ${tcBlock(r)}
         <div class="ap-ed-h"><b>Versión ${i + 1}</b>${r.duration ? `<span class="small muted">${durTxt(r.duration)}</span>` : ''}</div>
         ${r.redo_pedido ? `<p class="ap-redone">${icon('refresh', 14)} Rehecha: pediste «${esc(r.redo_pedido)}»${r.redo_detail ? `<span>${esc(r.redo_detail)}</span>` : ''}</p>` : ''}
@@ -622,7 +625,7 @@ function perfCard(p) {
     ${P.totals.views ? `<svg class="perf-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Vistas por día"><defs><linearGradient id="pg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--blue)" stop-opacity=".28"/><stop offset="1" stop-color="var(--blue)" stop-opacity="0"/></linearGradient></defs>
       <path d="${line} L${W},${H} L0,${H} Z" fill="url(#pg)"/><path class="perf-line" d="${line}" fill="none" stroke="var(--blue)" stroke-width="2.2" vector-effect="non-scaling-stroke"/></svg>` : `<p class="small muted">Todavía no hay vistas medidas en estos ${P.days} días.</p>`}
     ${P.best.length && P.best.some((x) => x.views > 0) ? `<h3 class="h3 perf-h">Lo que mejor anduvo</h3><div class="perf-best">${P.best.map((x, i) => `<a class="perf-row" href="#/p/${p.id}/reel/${x.reel_id}"><span class="rk">${i + 1}</span>
-      ${x.cover ? `<img src="/media/${esc(x.cover)}" alt="" loading="lazy">` : `<video src="/media/${esc(x.file)}#t=0.8" preload="metadata" muted playsinline></video>`}
+      ${x.cover ? `<img src="/media/${esc(x.cover)}" alt="" loading="lazy">` : `<video src="${esc(vsrc(x))}#t=0.8" preload="metadata" muted playsinline></video>`}
       <span class="tt"><b>${esc(x.title)}</b><span class="small muted">${netBadge(x.network)} ${esc(x.who)} · ${fmtDay(x.at)}</span></span>
       <span class="vv"><b class="num">${fmt(x.views)}</b><span class="mps"><span class="small muted">vistas</span>${x.eng ? mpill('rate', x.eng, fmt(x.eng, 1) + ' %') : ''}</span></span></a>`).join('')}</div>` : ''}
   </section>`;
@@ -646,7 +649,7 @@ function pipelineCard(p) {
   const B = state.perf?.pipeline;
   if (!B) return '';
   const card = (r, st) => `<a class="pl-card" href="#/p/${p.id}/${st === 'aprobar' ? 'aprobar' : 'reel/' + r.id}">
-    ${r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : r.file ? `<video src="/media/${esc(r.file)}#t=0.8" preload="metadata" muted playsinline></video>` : `<span class="pl-ph">${icon('up', 18)}</span>`}
+    ${r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : r.file ? `<video src="${esc(vsrc(r))}#t=0.8" preload="metadata" muted playsinline></video>` : `<span class="pl-ph">${icon('up', 18)}</span>`}
     <span><b>${esc(r.title)}</b><span class="small muted">${st === 'programado' ? `${r.prog} programadas` : st === 'publicado' ? `${r.pub} publicadas${r.prog ? ` · ${r.prog} por salir` : ''}` : esc(r.detail || '')}</span></span></a>`;
   return `<section class="card pl">
     <div class="card-head"><h2 class="h2">Tablero</h2><span class="small muted">En qué etapa está cada reel</span></div>
@@ -701,7 +704,7 @@ function resumenView() {
         : `<p class="muted small">Todavía no hay cuentas.</p><button class="btn sm primary" style="margin-top:10px" data-act="new-account">Agregar cuenta</button>`}
     </section>
     <section class="card"><div class="card-head"><h2 class="h2">Reels</h2><a class="btn sm" href="#/p/${p.id}/reels">Ver todos</a></div>
-      ${state.reels.length ? `<div class="rs-reels">${state.reels.slice(0, 6).map((r) => `<a href="#/p/${p.id}/reels" title="${esc(r.title)}"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted></video><span>${esc(r.title)}</span><em>${r.posts} publ.</em></a>`).join('')}</div>`
+      ${state.reels.length ? `<div class="rs-reels">${state.reels.slice(0, 6).map((r) => `<a href="#/p/${p.id}/reels" title="${esc(r.title)}"><video src="${esc(vsrc(r))}#t=0.5" preload="metadata" muted></video><span>${esc(r.title)}</span><em>${r.posts} publ.</em></a>`).join('')}</div>`
         : `<p class="muted small">Todavía no hay reels.</p><a class="btn sm primary" style="margin-top:10px" href="#/p/${p.id}/reels">Subir reels</a>`}
     </section>
   </div>
@@ -762,7 +765,7 @@ function crudosView() {
   const up = state.uploads.length ? `<div class="up-box"><b>Subiendo ${state.uploads.length} ${state.uploads.length === 1 ? 'archivo' : 'archivos'}…</b><div class="progress"><i id="up-bar"></i></div></div>` : '';
   const fecha = (r) => cuando(new Date(String(r.created_at || '').replace(' ', 'T') + 'Z'));
   const item = (r) => { const [c, t] = crudoEstado(r); return `<li class="cr-item">
-      <span class="cr-thumb">${r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : `<video src="/media/${esc(r.file)}#t=1" preload="metadata" muted playsinline></video>`}</span>
+      <span class="cr-thumb">${r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : `<video src="${esc(vsrc(r))}#t=1" preload="metadata" muted playsinline></video>`}</span>
       <div class="cr-body"><b class="cr-title">${esc(r.descripcion || r.title)}</b>
         <span class="cr-meta">${r.etiqueta ? `<span class="chip nodot">${icon('home', 12)} ${esc(r.etiqueta)}</span>` : ''}${r.publico ? `<span class="chip nodot">Para ${esc(pubName(r.publico))}</span>` : ''}<span class="small muted">Subido ${esc(fecha(r))}</span></span>
         <span class="chip ${c} cr-state" ${r.status_detail ? `title="${esc(r.status_detail)}"` : ''}>${esc(t)}</span></div></li>`; };
@@ -899,7 +902,7 @@ function reelsView() {
   </aside>`;
   const filt = `<div class="kn-chips rl-filter">${[['todos', 'Todos', ALL.length], ['listo', 'Listos', ALL.filter((r) => r.kind !== 'crudo').length], ['crudo', 'Crudos', ALL.filter((r) => r.kind === 'crudo').length]].map(([k, l, n]) => `<button type="button" data-act="reel-filter" data-k="${k}" aria-pressed="${F === k}">${l} <b>${n}</b></button>`).join('')}</div>`;
   const cardListo = (r) => `<article class="reel ${selOn() && state.sel.has(r.id) ? 'sel' : ''}" data-id="${r.id}">
-    <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está">${r.archived_at ? `<div class="gone">Video borrado<span>se publicó hace más de ${state.storage?.retentionDays ?? 7} días</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video>`}<span class="reel-ver">Ver dónde está</span></a>
+    <a class="reel-link" href="#/p/${state.project.id}/reel/${r.id}" title="Ver en qué cuentas está">${r.archived_at ? `<div class="gone">Video borrado<span>se publicó hace más de ${state.storage?.retentionDays ?? 7} días</span></div>` : `<video src="${esc(vsrc(r))}#t=0.5" preload="metadata" muted playsinline></video>`}<span class="reel-ver">Ver dónde está</span></a>
     <div class="body">
       <input class="title" value="${esc(r.title)}" data-act="reel-title" aria-label="Título">
       <div class="meta">${reelChip(r)}<span>${mb(r.size)}</span></div>
@@ -951,7 +954,7 @@ function calendarioView() {
   const who = (x) => x.connected_as || (x.handle ? at(x.handle) : NETS[x.network].name);
   const ev = (x) => week
     ? `<button class="cal-ev wk s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-drag="1"' : ''} title="${esc(x.reel_title)} · ${esc(who(x))}${movable(x) ? ' · arrastrá para cambiar el día' : ''}">
-        <span class="wk-th">${x.reel_cover ? `<img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false">` : `<video src="/media/${esc(x.reel_file)}#t=0.5" preload="metadata" muted playsinline></video>`}</span>
+        <span class="wk-th">${x.reel_cover ? `<img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false">` : `<video src="${esc(vsrcP(x))}#t=0.5" preload="metadata" muted playsinline></video>`}</span>
         <span class="wk-tx"><span class="wk-top"><span class="t">${fmtTime(x.scheduled_at)}</span>${netBadge(x.network)}</span><span class="r">${esc(x.reel_title)}</span><span class="wk-who">${esc(who(x))}</span></span></button>`
     : `<button class="cal-ev s-${x.status} ${movable(x) ? 'can-move' : ''}" data-act="open-post" data-pid="${x.id}" ${movable(x) ? 'data-drag="1"' : ''} title="${esc(x.reel_title)} · ${esc(who(x))}${movable(x) ? ' · arrastrá para cambiar el día' : ''}">${netBadge(x.network)}<span class="t">${fmtTime(x.scheduled_at)}</span><span class="r">${esc(x.reel_title)}</span></button>`;
   return `<section class="card cal ${week ? 'week' : ''}">
@@ -1046,7 +1049,7 @@ function grillaView() {
   const L = S.filter((x) => x.account_id === acc.id && x.status !== 'bloqueado').sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
   const name = acc.connected_as || (acc.handle ? at(acc.handle) : NETS[acc.network].name);
   const tile = (x) => `<button class="gr-tile s-${x.status}" data-act="open-post" data-pid="${x.id}" title="${esc(x.reel_title)}">
-      ${x.reel_cover ? `<img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false">` : `<video src="/media/${esc(x.reel_file)}#t=0.8" preload="metadata" muted playsinline></video>`}
+      ${x.reel_cover ? `<img src="/media/${esc(x.reel_cover)}" alt="" loading="lazy" draggable="false">` : `<video src="${esc(vsrcP(x))}#t=0.8" preload="metadata" muted playsinline></video>`}
       <span class="gr-badge">${x.status === 'publicado' ? icon('check', 12) : x.status === 'fallido' ? '!' : `${fmtDay(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</span>
       <span class="gr-title">${esc(x.reel_title)}</span></button>`;
   return `<section class="card cal">${head}
@@ -1189,7 +1192,7 @@ function postDialog(ids) {
   if (!L.length) return;
   const d = openDialog(L.length === 1 ? 'Publicación' : fmtDate(L[0].scheduled_at), L.map((x) => `
     <div class="pd" data-id="${x.id}">
-      <video src="/media/${esc(x.reel_file)}#t=0.5" preload="metadata" controls playsinline></video>
+      <video src="${esc(vsrcP(x))}#t=0.5" preload="metadata" controls playsinline></video>
       <div class="pd-info"><b>${esc(x.reel_title)}</b>
         <span class="row small pd-acc">${netBadge(x.network)}${esc(x.handle ? at(x.handle) : NETS[x.network].name + ' sin conectar')}</span>
         <span class="pd-when"><span class="chip s-${x.status}">${POST_ST[x.status] || esc(x.status)}</span><span class="small muted">${x.published_at ? `salió el ${fmtDay(x.published_at)} a las ${fmtTime(x.published_at)}` : `${fmtDate(x.scheduled_at)} · ${fmtTime(x.scheduled_at)}`}</span></span>
@@ -1442,7 +1445,7 @@ function reelDetailView() {
   return `<div class="rd">
     <aside class="card rd-side">
       <a class="btn sm rd-back" href="#/p/${p.id}/reels">${icon('left', 16)} Todos los reels</a>
-      ${r.archived_at ? `<div class="gone tall">Video borrado del almacenamiento<span>Quedan el texto y las publicaciones. Para volver a usarlo, subilo de nuevo.</span></div>` : `<video src="/media/${esc(r.file)}#t=0.5" preload="metadata" controls playsinline></video>`}
+      ${r.archived_at ? `<div class="gone tall">Video borrado del almacenamiento<span>Quedan el texto y las publicaciones. Para volver a usarlo, subilo de nuevo.</span></div>` : `<video src="${esc(vsrc(r))}#t=0.5" preload="metadata" controls playsinline></video>`}
       <h2 class="h2">${esc(r.title)}</h2>
       <p class="small muted">${reelState(r)[1]} · ${mb(r.size)} · subido el ${fmtDate(r.created_at)}</p>
       ${r.kind === 'crudo' ? `<div class="rd-form-side">${reelForm(r)}</div>` : ''}
@@ -1477,8 +1480,8 @@ function reelForm(r) {
 function crudoInfo(r) {
   const T = crudoTree(r), pid = state.project.id;
   const ed = (e, i) => `<div class="cm-ed">
-      <video src="/media/${esc(e.file)}${e.cover ? '' : '#t=0.5'}" ${e.cover ? `poster="/media/${esc(e.cover)}" preload="none"` : 'preload="metadata"'} controls controlslist="nofullscreen" playsinline></video>
-      <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="/media/${esc(e.file)}" data-cap="${esc(e.caption || '')}">${icon('phone', 15)} Ver como celular</button>
+      <video src="${esc(vsrc(e))}${e.cover ? '' : '#t=0.5'}" ${e.cover ? `poster="/media/${esc(e.cover)}" preload="none"` : 'preload="metadata"'} controls controlslist="nofullscreen" playsinline></video>
+      <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="${esc(vsrc(e))}" data-cap="${esc(e.caption || '')}">${icon('phone', 15)} Ver como celular</button>
       <span class="cm-ed-h"><b>Edición ${i + 1}</b>${revChip(e)}</span><span class="small muted">${esc(e.title)}${e.duration ? ` · ${durTxt(e.duration)}` : ''}</span><a class="cm-go small" href="#/p/${pid}/reel/${e.id}">Ver detalle</a></div>`;
   const block = (head, sub, eds) => `<section class="card cm"><div class="cm-h">${head}${sub ? `<p class="small muted">${sub}</p>` : ''}</div><div class="cm-eds">${eds.map(ed).join('')}</div></section>`;
   const q = r.buscar ? `<p class="small"><b>Qué buscamos:</b> ${esc(r.buscar)}</p>` : '';
@@ -1527,7 +1530,7 @@ function campanasView() {
           ? `<span class="cg-icons" title="${esc(A.map(accName).join(' · '))}">${A.map((a) => netBadge(a.network)).join('')}</span><span class="small">${A.length === 1 ? esc(accName(A[0])) : `${A.length} cuentas`}</span>`
           : '<span class="small">Todas las de Instagram</span>'; })()}</div>
         <div><span class="lbl">Reels</span>${(() => { const R = c.reels.map((id) => reelById[id]).filter(Boolean); return R.length
-          ? `<span class="cg-thumbs">${R.slice(0, 4).map((r) => `<a href="#/p/${p.id}/reel/${r.id}" title="${esc(r.title)}"><video src="/media/${esc(r.file)}#t=0.5" preload="metadata" muted playsinline></video></a>`).join('')}</span><span class="small">${R.length === 1 ? esc(R[0].title) : `${R.length} reels`}</span>`
+          ? `<span class="cg-thumbs">${R.slice(0, 4).map((r) => `<a href="#/p/${p.id}/reel/${r.id}" title="${esc(r.title)}"><video src="${esc(vsrc(r))}#t=0.5" preload="metadata" muted playsinline></video></a>`).join('')}</span><span class="small">${R.length === 1 ? esc(R[0].title) : `${R.length} reels`}</span>`
           : '<span class="small">Todos los publicados</span>'; })()}</div>
       </div>
       ${c.error ? `<p class="banner err">${esc(c.error)}</p>` : ''}
@@ -1722,9 +1725,16 @@ function ajustesView() {
 // al cambiar un color: la vista previa de la marca y el avatar del proyecto lo muestran en el momento
 function swatchChanged(box) {
   const v = box.querySelector('input[type=hidden]').value, n = box.querySelector('input[type=hidden]').name;
-  if (n === 'acento' && $('#marca-prev')) $('#marca-prev').style.color = v || '';
+  if ((n === 'acento' || n === 'texto') && $('#marca-prev')) pintarMarcaPrev();
   if (n === 'color' && $('#aj-av')) $('#aj-av').style.background = v;
 }
+// la palabra que se dice va sobre un recuadro de acento; la letra es la elegida o, sin elegir, negro o blanco según el fondo
+function pintarMarcaPrev() {
+  const el = $('#marca-prev'); if (!el) return;
+  const ac = $('#marca-card [name=acento]')?.value || '', tx = $('#marca-card [name=texto]')?.value || '';
+  el.style.background = ac; el.style.color = tx || (ac ? letraAuto(ac) : '');
+}
+const letraAuto = (h) => { const n = parseInt(h.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 > 0.6 ? '#000' : '#fff'; };
 // colores para elegir con un toque (y uno a mano)
 const SWATCHES = ['#ff5a1f', '#e5484d', '#f5a524', '#c6e85a', '#30a46c', '#12a594', '#0090ff', '#3e63dd', '#8e4ec6', '#d6409f', '#121316'];
 function swatchPicker(name, value, { none = '' } = {}) {
@@ -1757,12 +1767,14 @@ function projectSettings(p) {
 }
 // Marca de los videos: el color de la palabra clave del subtítulo y el largo máximo, con una vista previa
 function marcaCard(p) {
-  const acento = p.marca?.acento || '', largo = String(p.marca?.largo_max_s ?? '');
+  const acento = p.marca?.acento || '', texto = p.marca?.texto || '', fuente = p.marca?.fuente || '', largo = String(p.marca?.largo_max_s ?? '');
   return `<section class="card" id="marca-card"><div class="card-head"><div><h2 class="h2">Marca de los videos</h2><p class="small muted">Cómo salen las ediciones de este proyecto.</p></div></div>
     <div class="aj-marca">
-      <div class="aj-prev" aria-hidden="true"><span class="aj-prev-sub">VOLVÉ <b id="marca-prev" style="${acento ? `color:${esc(acento)}` : ''}">GUSTAVO</b></span></div>
+      <div class="aj-prev" aria-hidden="true"><span class="aj-prev-sub">VOLVÉ <b id="marca-prev" style="padding:0 .25em;border-radius:.2em;${acento ? `background:${esc(acento)};color:${esc(texto || letraAuto(acento))}` : ''}">GUSTAVO</b></span></div>
       <div class="form">
         <div class="field">Color de la palabra clave${swatchPicker('acento', acento, { none: 'El del editor' })}</div>
+        <div class="field">Letra sobre el recuadro${swatchPicker('texto', texto, { none: 'Automático (negro o blanco)' })}</div>
+        <label class="field">Fuente de los subtítulos<select class="input" name="fuente">${[['', 'La del editor'], ['bootzy', 'Bootzy']].map(([v, t]) => `<option value="${v}" ${fuente === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
         <div class="field">Largo máximo<input type="hidden" id="marca-largo" value="${esc(largo)}"><div class="seg" role="group">${[['', 'Sin tope'], ['30', '30 s'], ['45', '45 s'], ['60', '60 s']].map(([v, l]) => `<button type="button" data-act="aj-largo" data-v="${v}" aria-pressed="${largo === v}">${l}</button>`).join('')}</div><span class="hint">Sin tope, las ediciones llegan hasta 90 s</span></div>
       </div>
     </div>
@@ -1827,7 +1839,7 @@ async function ttVideosDialog(a) {
     const profile = `https://www.tiktok.com/@${encodeURIComponent(String(a.connected_as || a.handle || '').replace(/^@/, ''))}`;
     const day = (iso) => { const d = new Date(iso); return d.getFullYear() === new Date().getFullYear() ? fmtDay(iso) : d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }); };
     const mineCards = mine.map((p) => `<article class="ttv">
-          <div class="ttv-cover"><video src="/media/${esc(p.reel_file)}#t=0.5" preload="metadata" muted playsinline></video></div>
+          <div class="ttv-cover"><video src="${esc(vsrcP(p))}#t=0.5" preload="metadata" muted playsinline></video></div>
           <div class="ttv-body">
             <p class="ttv-title">${esc(p.reel_title || 'Sin título')}</p>
             <p class="small muted ttv-meta">${p.published_at ? `<span>${day(p.published_at)}</span>` : ''}<span class="chip s-pendiente">Privado · salió de ACM</span></p>
@@ -2539,7 +2551,7 @@ document.addEventListener('click', async (e) => {
         const seg = el.closest('.seg'); seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
         (act === 'aj-review' ? el.closest('.field').querySelector('[name=review_mode]') : $('#marca-largo')).value = el.dataset.v; break; }
       case 'marca-save': {
-        const ac = $('#marca-card [name=acento]').value, lg = $('#marca-largo').value; const marca = { ...(ac ? { acento: ac } : {}), ...(lg ? { largo_max_s: Number(lg) } : {}) };
+        const ac = $('#marca-card [name=acento]').value, lg = $('#marca-largo').value; const tx = $('#marca-card [name=texto]').value, fu = $('#marca-card [name=fuente]').value; const marca = { ...(ac ? { acento: ac } : {}), ...(tx ? { texto: tx } : {}), ...(fu ? { fuente: fu } : {}), ...(lg ? { largo_max_s: Number(lg) } : {}) };
         await api(`/api/projects/${state.project.id}`, { method: 'PUT', body: { marca } }); toast('Marca guardada'); render(); break; }
       case 'pub-add': if ($$('#pub-list .pub-row').length >= 6) { toast('Hasta 6 públicos', true); break; } $('#pub-list').insertAdjacentHTML('beforeend', pubRow()); break;
       case 'pub-del': el.closest('.pub-row').remove(); break;

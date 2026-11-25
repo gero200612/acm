@@ -144,7 +144,7 @@ export function mediaAllowed(db, user, file) {
   if (!user) return false;
   if (user.role === 'general') return true;
   // todas las filas que nombran ese archivo tienen que ser de su proyecto (una portada apuntando a un archivo ajeno no abre nada)
-  const ps = [...db.prepare('SELECT project_id AS p FROM reels WHERE file = ? OR cover = ?').all(file, file), ...db.prepare('SELECT id AS p FROM projects WHERE photo = ?').all(file)];
+  const ps = [...db.prepare('SELECT project_id AS p FROM reels WHERE file = ? OR cover = ? OR preview = ?').all(file, file, file), ...db.prepare('SELECT id AS p FROM projects WHERE photo = ?').all(file)];
   return ps.length > 0 && ps.every((r) => r.p === user.project_id);
 }
 // A qué proyectos llega (null = a todos).
@@ -153,7 +153,7 @@ export const scopeOf = (user) => (user.role === 'general' ? null : [user.project
 // Lo que ve el equipo de contenido (sombra o editor) de su proyecto: nada de números (padrón, pauta, cuentas, publicaciones).
 export const sombraProject = (p) => ({ id: p.id, name: p.name, role: p.role, org: p.org, color: p.color, photo: p.photo, review_mode: p.review_mode, review_pending: p.review_pending, kind: p.kind,
   publicos: (Array.isArray(p.publicos) ? p.publicos : []).map(({ clave, nombre }) => ({ clave, nombre })) }); // para elegir el público al subir un crudo
-export const sombraReel = (r) => ({ id: r.id, title: r.title, kind: r.kind, file: r.file, cover: r.cover, size: r.size, duration: r.duration, status: r.status, status_detail: r.status_detail, created_at: r.created_at, source_id: r.source_id, etiqueta: r.etiqueta, publico: r.publico, descripcion: r.descripcion, buscar: r.buscar });
+export const sombraReel = (r) => ({ id: r.id, title: r.title, kind: r.kind, file: r.file, preview: r.preview, cover: r.cover, size: r.size, duration: r.duration, status: r.status, status_detail: r.status_detail, created_at: r.created_at, source_id: r.source_id, etiqueta: r.etiqueta, publico: r.publico, descripcion: r.descripcion, buscar: r.buscar });
 
 // ---------- rutas de usuarios ----------
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

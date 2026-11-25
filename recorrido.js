@@ -1,7 +1,7 @@
 // Recorrido completo del banco de pruebas: levanta una copia aislada de ACM (base temporal, APIs apuntando al simulador,
 // contraseña al azar) y la usa por HTTP como lo haría una persona: login, proyecto, padrón, cuentas, reels, publicación,
 // Meta Ads, trazas e investigación. Nunca toca la base real ni las redes reales; al terminar la copia se borra.
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import net from 'node:net';
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -108,7 +108,7 @@ export async function startSandbox(bases) {
     if (l.status !== 200) throw new Error(`no entró ${email}: ${l.status} ${l.j?.error || ''}`);
     return call;
   };
-  return { api, client, raw, editorApi, editorGet, write, password, stop, base, sql: (q, ...a) => { const d = new DatabaseSync(path.join(data, 'acm.db'), { readOnly: true }); try { return d.prepare(q).all(...a); } finally { d.close(); } }, simLog: () => bases.__log || [] };
+  return { api, client, raw, dataDir: data, editorApi, editorGet, write, password, stop, base, sql: (q, ...a) => { const d = new DatabaseSync(path.join(data, 'acm.db'), { readOnly: true }); try { return d.prepare(q).all(...a); } finally { d.close(); } }, simLog: () => bases.__log || [] };
 }
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -633,6 +633,36 @@ export function recorridoCases(sb) {
       let x; for (let i = 0; i < 20; i++) { await sleep(1000); x = (await api('GET', `/api/projects/${c.p}/posts`)).j.find((y) => y.reel_id === c.r2reel); if (x && !['programado', 'publicando'].includes(x.status)) break; }
       eq(x?.status, 'publicado', `publicar desde R2 (${x?.error})`);
     }],
+    [G('vista liviana'), 'Un video pesado genera su vista liviana, el front la usa y borrar el reel la saca; el liviano no la necesita', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acm-vista-'));
+      try {
+        const gen = (name, args) => { execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=25:duration=1', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-shortest', ...args, path.join(tmp, name)]); return fs.readFileSync(path.join(tmp, name)); };
+        const pesado = gen('pesado.mp4', ['-c:v', 'mpeg4', '-q:v', '2', '-c:a', 'aac']); // no es h264: hay que convertirlo
+        const liviano = gen('liviano.mp4', ['-c:v', 'libx264', '-crf', '40', '-c:a', 'aac']);
+        const up = await api('POST', `/api/projects/${c.p}/reels`, form({ kind: 'listo', files: [[new Blob([pesado], { type: 'video/mp4' }), 'pesado.mp4'], [new Blob([liviano], { type: 'video/mp4' }), 'liviano.mp4']] }), true);
+        eq(up.status, 200, 'subida');
+        const idP = up.j.find((x) => x.original_name === 'pesado.mp4').id, idL = up.j.find((x) => x.original_name === 'liviano.mp4').id;
+        let rp, rl;
+        for (let i = 0; i < 60; i++) { const R = (await api('GET', `/api/projects/${c.p}/reels`)).j; rp = R.find((x) => x.id === idP); rl = R.find((x) => x.id === idL); if (rp.preview && rl.preview) break; await sleep(500); }
+        yes(/\.preview\.mp4$/.test(rp.preview) && rp.preview !== rp.file, `la vista del pesado no se generó (preview=${JSON.stringify(rp.preview)})`);
+        eq(rl.preview, '-', 'el liviano (h264, poco bitrate) no necesita vista');
+        const m = await sb.box.raw(`/media/${rp.preview}`); eq(m.status, 200, 'la vista se sirve');
+        fs.writeFileSync(path.join(tmp, 'vista.mp4'), Buffer.from(await m.arrayBuffer()));
+        const info = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,pix_fmt,height', '-of', 'json', path.join(tmp, 'vista.mp4')]).toString()).streams[0];
+        eq([info.codec_name, info.pix_fmt, info.height], ['h264', 'yuv420p', 360], 'la vista es h264 yuv420p');
+        eq((await sb.box.raw(`/media/${rp.preview}`, false)).status, 401, 'la vista pide sesión');
+        eq((await sb.box.raw(`/media/${rp.file}`)).status, 200, 'el original sigue ahí para publicar y descargar');
+        // el front mira la vista y publica/descarga el original
+        const app = fs.readFileSync(path.join(APP, 'public/app.js'), 'utf8');
+        yes(/const vsrc = /.test(app) && !/<video src="\/media\/\$\{esc\([a-z_.]*file\)\}/.test(app), 'algún <video> del front sigue usando el original');
+        yes(/data-src="\$\{esc\(vsrc\(r\)\)\}"/.test(app), 'ver como celular no usa la vista');
+        const ver = (await sb.box.sql('SELECT preview FROM reels WHERE id = ?', idP))[0]; eq(ver.preview, rp.preview, 'la base guarda la vista');
+        // borrar el reel borra la vista
+        eq((await api('DELETE', `/api/reels/${idP}`)).status, 200, 'borrar el reel');
+        const post = await sb.box.raw(`/media/${rp.preview}`); eq([post.status === 200 && /video/.test(post.headers.get('content-type') || ''), fs.existsSync(path.join(sb.box.dataDir, 'uploads', rp.preview))], [false, false], 'la vista se fue con el reel');
+        await api('DELETE', `/api/reels/${idL}`);
+      } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+    }],
     [G('almacenamiento'), 'La limpieza borra los videos ya publicados y deja la ficha', async () => {
       const r = await api('POST', '/api/maintenance/cleanup', { days: 0 });
       yes(r.status === 200 && r.j.ediciones >= 1, `limpieza: ${JSON.stringify(r.j)}`);
@@ -741,6 +771,12 @@ export function recorridoCases(sb) {
       eq((await api('PUT', `/api/reels/${c.crudo}`, { etiqueta: '  Béccar   ❤️ ' })).status, 200, 'etiqueta del crudo');
       eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}?crudo=${c.crudo}`)).j?.marca, { acento: '#C6E85A', largo_max_s: 60, etiqueta: 'Béccar ❤️' }, 'al editor le llega la marca con la etiqueta');
       eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.marca?.etiqueta, undefined, 'sin crudo, sin etiqueta');
+      // letra sobre el recuadro y fuente de los subtítulos: mismos controles que el color
+      eq((await api('PUT', `/api/projects/${c.p}`, { marca: { acento: '#c6e85a', texto: 'negro' } })).status, 400, 'letra inválida');
+      eq((await api('PUT', `/api/projects/${c.p}`, { marca: { acento: '#c6e85a', fuente: 'comic-sans' } })).status, 400, 'fuente inválida');
+      eq((await api('PUT', `/api/projects/${c.p}`, { marca: { acento: '#c6e85a', texto: '#111111', fuente: 'bootzy', largo_max_s: 60 } })).j?.marca, { acento: '#C6E85A', largo_max_s: 60, texto: '#111111', fuente: 'bootzy' }, 'letra y fuente guardadas');
+      eq((await sb.box.editorGet(`/api/editor/aprendizajes/${c.p}`)).j?.marca, { acento: '#C6E85A', largo_max_s: 60, texto: '#111111', fuente: 'bootzy' }, 'al editor le llegan letra y fuente');
+      eq((await api('PUT', `/api/projects/${c.p}`, { marca: { acento: '#c6e85a', largo_max_s: 60 } })).j?.marca, { acento: '#C6E85A', largo_max_s: 60 }, 'sin letra ni fuente vuelve a lo de siempre');
       // tipo de público: sin estilo a mano arranca con el del tipo; el editor recibe lo aprendido de cada público
       const pt = (await api('PUT', `/api/projects/${c.p}`, { publicos: [{ nombre: 'Mayores', tipo: 'mayores' }, { nombre: 'Jóvenes', tipo: 'jovenes', estilo: { ritmo: ['normal'] } }] })).j.publicos;
       eq([pt[0].estilo.subtitulos, pt[1].estilo], [['grande', 'frase'], { ritmo: ['normal'] }], 'estilo del tipo, salvo que se toque a mano');

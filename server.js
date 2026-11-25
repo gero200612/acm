@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
+import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { readPadron } from './padron.js';
 import { publish, tiktokOptions, tiktokCreator, tiktokVideos } from './publisher.js';
@@ -124,6 +125,8 @@ if (!cols('projects').includes('marca')) db.exec("ALTER TABLE projects ADD COLUM
 if (!cols('reels').includes('etiqueta')) db.exec("ALTER TABLE reels ADD COLUMN etiqueta TEXT DEFAULT ''");
 if (!cols('reels').includes('descripcion')) db.exec("ALTER TABLE reels ADD COLUMN descripcion TEXT DEFAULT ''");
 if (!cols('reels').includes('buscar')) db.exec("ALTER TABLE reels ADD COLUMN buscar TEXT DEFAULT ''");
+// vista liviana para mirar en la app ('' = pendiente, '-' = no hace falta o no se pudo; el original sigue siendo el que se publica)
+if (!cols('reels').includes('preview')) db.exec("ALTER TABLE reels ADD COLUMN preview TEXT DEFAULT ''");
 if (!cols('reels').includes('editor_edition_id')) db.exec('ALTER TABLE reels ADD COLUMN editor_edition_id TEXT');
 // rehacer a pedido: redo = '' | 'pedido' (el editor la está rehaciendo) | 'hecho' (llegó la versión nueva) | 'error'; redo_pedido = lo que pidió la persona
 if (!cols('reels').includes('redo')) db.exec("ALTER TABLE reels ADD COLUMN redo TEXT DEFAULT ''");
@@ -345,6 +348,7 @@ app.post('/api/editor/edicion', requireEditor, async (req, res) => {
     if (cover) fs.rm(path.join(UPLOADS, cover), { force: true }, () => {});
     return res.json(ya);
   }
+  encolarVista(r.lastInsertRowid);
   // una versión rehecha a pedido: la rechazada deja de figurar «rehaciendo» y la nueva sabe qué se pidió y qué entendió el editor
   if (b.rehace_de) {
     const vieja = get('SELECT id, redo_pedido FROM reels WHERE editor_edition_id = ? AND project_id = ?', String(b.rehace_de), crudo.project_id);
@@ -415,8 +419,8 @@ mountShare(app, {
   get, all, run, db, tz: TZ, reviewClip: (...x) => reviewClip(...x),
   sendMedia: async (res, file, next) => {
     const f = path.basename(file);
-    const r = get("SELECT file FROM reels WHERE file = ? AND storage = 'r2'", f);
-    if (r) { try { return res.redirect(302, await getUrl(r.file)); } catch { return res.status(502).end(); } }
+    const r = get("SELECT file FROM reels WHERE (file = ? OR preview = ?) AND storage = 'r2'", f, f);
+    if (r) { try { return res.redirect(302, await getUrl(f)); } catch { return res.status(502).end(); } }
     res.sendFile(path.join(UPLOADS, f), { maxAge: '7d' }, (err) => err && next());
   },
 });
@@ -443,9 +447,9 @@ app.get('/oauth/:network/callback', async (req, res) => {
 });
 // los videos en R2 se ven con un link firmado de una hora; los del disco, directo
 app.get('/media/:file', requireMedia, async (req, res, next) => {
-  const r = get("SELECT file FROM reels WHERE file = ? AND storage = 'r2'", req.params.file);
+  const r = get("SELECT file FROM reels WHERE (file = ? OR preview = ?) AND storage = 'r2'", req.params.file, req.params.file);
   if (!r) return next();
-  try { res.redirect(302, await getUrl(r.file)); } catch { res.status(502).json({ error: 'No pudimos abrir el video en el almacenamiento' }); }
+  try { res.redirect(302, await getUrl(req.params.file)); } catch { res.status(502).json({ error: 'No pudimos abrir el video en el almacenamiento' }); }
 });
 app.use('/media', requireMedia, express.static(UPLOADS, { maxAge: '7d', immutable: true }));
 
@@ -459,7 +463,64 @@ const upload = multer({
 });
 const rmFile = (f) => { if (f) fs.rm(path.join(UPLOADS, path.basename(f)), { force: true }, () => {}); };
 // borra el video de un reel donde esté (disco o R2)
-const dropFile = async (r) => { if (!r?.file) return; if (r.storage === 'r2') await r2Remove(r.file).catch((e) => console.error('R2 borrar:', e.message)); else rmFile(r.file); };
+const dropFile = async (r) => {
+  if (!r?.file) return;
+  const prev = r.preview && r.preview !== '-' ? r.preview : '';
+  if (r.storage === 'r2') { await r2Remove(r.file).catch((e) => console.error('R2 borrar:', e.message)); if (prev) await r2Remove(prev).catch((e) => console.error('R2 borrar vista:', e.message)); }
+  else { rmFile(r.file); rmFile(prev); }
+};
+
+// Vista liviana: los crudos de la cámara (HEVC, ~70 Mbps) y las ediciones (~13 Mbps) no se pueden mirar fluido en el navegador.
+// Un trabajo en segundo plano, de a uno, hace una copia 720p chica (≤ 2,5 Mbps) solo para mirar en la app; para publicar se usa el original.
+const PREVIEW_ARGS = ['-map', '0:v:0', '-map', '0:a:0?', '-vf', "scale=-2:'min(1280,ih)'", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart'];
+const PREVIEW_COLA = []; let previewCorriendo = false;
+const previewNombre = (file) => `${path.parse(file).name}.preview.mp4`;
+const correr = (cmd, args) => new Promise((resolve, reject) => {
+  const p = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] }); let err = '';
+  p.stderr.on('data', (d) => { err = (err + d).slice(-600); });
+  p.on('error', reject); p.on('close', (c) => (c === 0 ? resolve(err) : reject(new Error(`${cmd} salió con ${c}: ${err.trim().split('\n').slice(-2).join(' | ')}`))));
+});
+// true si ya es liviano (h264 y menos de 3 Mbps): no hace falta copia
+async function esLiviano(src) {
+  const out = await new Promise((resolve, reject) => {
+    const p = spawn('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,bit_rate:format=bit_rate', '-of', 'json', src], { stdio: ['ignore', 'pipe', 'ignore'] }); let o = '';
+    p.stdout.on('data', (d) => { o += d; }); p.on('error', reject); p.on('close', (c) => (c === 0 ? resolve(o) : reject(new Error(`ffprobe salió con ${c}`))));
+  });
+  const j = JSON.parse(out || '{}'); const br = Number(j.streams?.[0]?.bit_rate) || Number(j.format?.bit_rate) || 0;
+  return j.streams?.[0]?.codec_name === 'h264' && br > 0 && br < 3e6;
+}
+async function hacerVista(id) {
+  const r = get("SELECT id, file, storage FROM reels WHERE id = ? AND preview = '' AND archived_at = ''", id);
+  if (!r?.file) return;
+  const marcar = (v) => run('UPDATE reels SET preview = ? WHERE id = ?', v, id);
+  const nombre = previewNombre(r.file), dest = path.join(UPLOADS, nombre), tmp = path.join(UPLOADS, `tmp-prev-${id}-${path.basename(r.file)}`);
+  try {
+    const src = r.storage === 'r2' ? await r2Download(r.file, tmp) : path.join(UPLOADS, path.basename(r.file));
+    if (r.storage !== 'r2' && !fs.existsSync(src)) { marcar('-'); return; }
+    if (await esLiviano(src)) { marcar('-'); return; }
+    await correr('nice', ['-n', '15', 'ffmpeg', '-y', '-threads', '2', '-i', src, ...PREVIEW_ARGS, dest]);
+    if (r.storage === 'r2') {
+      const size = fs.statSync(dest).size;
+      const put = await fetch(await putUrl(nombre, 'video/mp4'), { method: 'PUT', headers: { 'content-type': 'video/mp4', 'content-length': String(size) }, body: fs.createReadStream(dest), duplex: 'half' });
+      if (!put.ok) throw new Error(`R2 no aceptó la vista: ${put.status}`);
+      fs.rmSync(dest, { force: true });
+    }
+    // si mientras tanto borraron el reel, la vista sobra
+    if (run("UPDATE reels SET preview = ? WHERE id = ? AND preview = ''", nombre, id).changes === 0) { if (r.storage === 'r2') await r2Remove(nombre).catch(() => {}); else fs.rmSync(dest, { force: true }); }
+  } catch (e) {
+    fs.rmSync(dest, { force: true });
+    if (e.code === 'ENOENT') { console.error('vista liviana: no hay ffmpeg; queda para el próximo arranque'); return; }
+    console.error(`vista liviana del reel ${id}: ${e.message}`); marcar('-'); // sin vista se ve el original, como antes
+  } finally { fs.rmSync(tmp, { force: true }); }
+}
+async function vaciarColaVista() {
+  if (previewCorriendo) return; previewCorriendo = true;
+  try { while (PREVIEW_COLA.length) { const id = PREVIEW_COLA.shift(); try { await hacerVista(id); } catch (e) { console.error('vista liviana:', e.message); } } } finally { previewCorriendo = false; }
+}
+const encolarVista = (id) => { if (process.env.ACM_PREVIEW === 'off' || !id || PREVIEW_COLA.includes(id)) return; PREVIEW_COLA.push(id); setImmediate(vaciarColaVista); };
+const encolarVistas = (rows) => { for (const r of rows || []) if (r?.id) encolarVista(r.id); return rows; };
+// al arrancar se retoman los pendientes
+setTimeout(() => { for (const r of all("SELECT id FROM reels WHERE preview = '' AND archived_at = '' AND file != '' ORDER BY id DESC")) encolarVista(r.id); }, 5000).unref();
 
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
 function update(table, id, data) {
@@ -468,12 +529,15 @@ function update(table, id, data) {
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
 const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode', 'score_weights', 'publicos', 'marca'];
+const FUENTES = ['bootzy']; // vacío = la del editor
 function limpiarMarca(v) {
   let m = v; if (typeof m === 'string') { try { m = JSON.parse(m || '{}'); } catch { return null; } }
   if (!m || typeof m !== 'object') return null;
   const out = {};
   if (m.acento) { if (!/^#[0-9a-fA-F]{6}$/.test(String(m.acento))) return null; out.acento = String(m.acento).toUpperCase(); }
   if (m.largo_max_s !== undefined && m.largo_max_s !== '' && m.largo_max_s !== null) { const n = Math.round(Number(m.largo_max_s)); if (!(n >= 10 && n <= 90)) return null; out.largo_max_s = n; }
+  if (m.texto) { if (!/^#[0-9a-fA-F]{6}$/.test(String(m.texto))) return null; out.texto = String(m.texto).toUpperCase(); }
+  if (m.fuente) { if (!FUENTES.includes(String(m.fuente))) return null; out.fuente = String(m.fuente); }
   return out;
 }
 // la etiqueta de un crudo (el barrio o lugar): se ve arriba en todo el video editado
@@ -617,7 +681,7 @@ app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe' });
   const data = pick(req.body || {}, P_FIELDS);
-  if ('marca' in data) { const m = limpiarMarca(data.marca); if (!m) return res.status(400).json({ error: 'Marca inválida: el color va como #RRGGBB y el largo máximo entre 10 y 90 segundos' }); data.marca = JSON.stringify(m); }
+  if ('marca' in data) { const m = limpiarMarca(data.marca); if (!m) return res.status(400).json({ error: 'Marca inválida: los colores van como #RRGGBB, la fuente es la del editor o Bootzy y el largo máximo entre 10 y 90 segundos' }); data.marca = JSON.stringify(m); }
   if ('publicos' in data) { const l = limpiarPublicos(data.publicos); if (!l) return res.status(400).json({ error: 'Los públicos son hasta 6, cada uno con nombre (sin repetir) y descripción' }); data.publicos = JSON.stringify(l); }
   if ('padron' in data) data.padron = Number(data.padron) || 0;
   if ('demo' in data) data.demo = String(data.demo) === '1' ? 1 : 0;
@@ -632,7 +696,7 @@ app.delete('/api/projects/:id', (req, res) => {
   // con anuncios corriendo, borrar el proyecto los dejaría gastando sin nadie que los controle
   const vivos = get("SELECT count(*) n FROM promotions WHERE project_id = ? AND status IN ('activa', 'pendiente')", p.id).n;
   if (vivos) return res.status(409).json({ error: `El proyecto tiene ${vivos} ${vivos === 1 ? 'anuncio activo' : 'anuncios activos'}: pausá la pauta primero (apagá las redes o dejá el presupuesto en 0 y esperá al próximo ciclo).` });
-  all('SELECT file, storage FROM reels WHERE project_id = ?', p.id).forEach((r) => dropFile(r));
+  all('SELECT file, storage, preview FROM reels WHERE project_id = ?', p.id).forEach((r) => dropFile(r));
   rmFile(p.photo);
   run('DELETE FROM projects WHERE id = ?', p.id);
   res.json({ ok: true });
@@ -797,7 +861,7 @@ app.post('/api/projects/:id/reels', upload.array('files', 30), (req, res) => {
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No llegó ningún video' });
   const out = files.map((f) => altaLocal(req.params.id, req, req.body, { ...f, unico: files.length === 1 }));
-  res.json(out);
+  res.json(out); encolarVistas(out);
   alEditor(out);
 });
 // Subida en partes (sin R2): el proxy de adelante corta los pedidos largos, así que un video grande viaja en pedazos de hasta 16 MB.
@@ -838,7 +902,7 @@ app.post('/api/projects/:id/reels/partes/fin', (req, res) => {
     fs.renameSync(u.path, path.join(UPLOADS, u.filename)); PARTES.delete(id);
     return altaLocal(pid, req, req.body, { filename: u.filename, originalname: u.name, size: u.size, path: path.join(UPLOADS, u.filename), unico: ids.length === 1 });
   });
-  res.json(out);
+  res.json(out); encolarVistas(out);
   alEditor(out);
 });// «#uno dos,#tres» → «#uno #dos #tres» (sin repetidos)
 const tags = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((t) => t.replace(/^#+/, '').trim()).filter(Boolean).map((t) => '#' + t))].join(' ');
@@ -880,7 +944,7 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
     if (kind === 'crudo') run("UPDATE reels SET status = 'en_cola', status_at = datetime('now') WHERE id = ?", r.lastInsertRowid);
     out.push(get('SELECT *, 0 AS posts FROM reels WHERE id = ?', r.lastInsertRowid));
   }
-  res.json(out);
+  res.json(out); encolarVistas(out);
   // un crudo recién subido va al editor; sin EDITOR_URL queda en cola y listo
   for (const r of out) if (r.kind === 'crudo') sendToEditor(r).catch((e) => console.error('editor:', e.message));
 });
@@ -997,10 +1061,10 @@ app.get('/api/projects/:id/plan', (req, res) => {
     WHERE p.project_id = ? AND r.kind = 'listo' AND r.clip_id IS NOT NULL AND substr(p.scheduled_at, 1, 10) = ? ORDER BY p.scheduled_at, p.id`, req.params.id, day));
 });
 // la sombra (equipo de contenido) ve solo lo que pinta el calendario: sin errores de la red, opciones, intentos ni IDs externos
-const SOMBRA_POST = ['id', 'project_id', 'reel_id', 'account_id', 'scheduled_at', 'published_at', 'status', 'reel_title', 'reel_file', 'reel_cover', 'network', 'handle', 'connected_as', 'external_url', 'network_video_id'];
+const SOMBRA_POST = ['id', 'project_id', 'reel_id', 'account_id', 'scheduled_at', 'published_at', 'status', 'reel_title', 'reel_file', 'reel_preview', 'reel_cover', 'network', 'handle', 'connected_as', 'external_url', 'network_video_id'];
 app.get('/api/projects/:id/posts', (req, res) => {
   const L = all(`
-  SELECT p.*, r.title AS reel_title, r.file AS reel_file, r.cover AS reel_cover, a.network, a.handle, a.connected_as
+  SELECT p.*, r.title AS reel_title, r.file AS reel_file, r.preview AS reel_preview, r.cover AS reel_cover, a.network, a.handle, a.connected_as
   FROM posts p JOIN reels r ON r.id = p.reel_id JOIN accounts a ON a.id = p.account_id
   WHERE p.project_id = ? ORDER BY p.scheduled_at`, req.params.id);
   res.json(isContent(req.user) ? L.map((x) => Object.fromEntries(SOMBRA_POST.map((k) => [k, x[k]]))) : L);
@@ -1089,7 +1153,7 @@ app.get('/api/projects/:id/performance', (req, res) => {
   if (!get('SELECT 1 FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe el proyecto' });
   const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
   const since = localNow(-days * 24 * 60).slice(0, 10), prevSince = localNow(-2 * days * 24 * 60).slice(0, 10);
-  const pub = (from, to) => all(`SELECT p.id, p.reel_id, COALESCE(p.published_at, p.scheduled_at) AS at, p.external_url, a.network, a.handle, a.connected_as, r.title, r.cover, r.file,
+  const pub = (from, to) => all(`SELECT p.id, p.reel_id, COALESCE(p.published_at, p.scheduled_at) AS at, p.external_url, a.network, a.handle, a.connected_as, r.title, r.cover, r.file, r.preview,
       COALESCE(m.views, m.reach, 0) AS views, COALESCE(m.likes, 0) AS likes, COALESCE(m.comments, 0) AS comments, COALESCE(m.shares, 0) AS shares
     FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id
     LEFT JOIN post_metrics m ON m.id = (SELECT max(id) FROM post_metrics WHERE post_id = p.id)
@@ -1101,10 +1165,10 @@ app.get('/api/projects/:id/performance', (req, res) => {
   const series = Array.from({ length: days }, (_, i) => { const d = localNow(-(days - 1 - i) * 24 * 60).slice(0, 10); return { day: d, views: daily[d] || 0 }; });
   const best = [...cur].sort((a, b) => b.views - a.views).slice(0, 5).map((x) => ({
     id: x.id, reel_id: x.reel_id, title: x.title, network: x.network, who: x.connected_as || (x.handle ? '@' + x.handle : ''), at: x.at, views: x.views, likes: x.likes,
-    eng: x.views ? Math.round(((x.likes + x.comments + x.shares) / x.views) * 1000) / 10 : null, cover: x.cover, file: x.file, url: /^https?:\/\//i.test(x.external_url || '') ? x.external_url : '',
+    eng: x.views ? Math.round(((x.likes + x.comments + x.shares) / x.views) * 1000) / 10 : null, cover: x.cover, file: x.file, preview: x.preview, url: /^https?:\/\//i.test(x.external_url || '') ? x.external_url : '',
   }));
   // etapas de los reels
-  const reels = all(`SELECT r.id, r.title, r.kind, r.status, r.status_detail, r.review, r.clip_id, r.cover, r.file, r.archived_at, r.created_at,
+  const reels = all(`SELECT r.id, r.title, r.kind, r.status, r.status_detail, r.review, r.clip_id, r.cover, r.file, r.preview, r.archived_at, r.created_at,
       sum(p.status = 'programado') prog, sum(p.status IN ('publicado', 'publicando')) pub, sum(p.status = 'fallido') fail
     FROM reels r LEFT JOIN posts p ON p.reel_id = r.id WHERE r.project_id = ? GROUP BY r.id ORDER BY r.id DESC`, pid);
   const EDITING = ['en_cola', 'transcribiendo', 'mirando', 'buscando_momentos', 'editando', 'revisando'];
@@ -1120,7 +1184,7 @@ app.get('/api/projects/:id/performance', (req, res) => {
   };
   const pipeline = { editor: [], aprobar: [], listo: [], programado: [], publicado: [], problema: [] };
   const vistos = new Set(); // «Para aprobar» cuenta recortes (como la pestaña), no versiones
-  for (const r of reels) { const st = stage(r); if (st === 'aprobar') { if (vistos.has(r.clip_id)) continue; vistos.add(r.clip_id); } if (st) pipeline[st].push({ id: r.id, title: r.title, kind: r.kind, detail: r.status_detail || (r.kind === 'crudo' ? r.status : ''), cover: r.cover, file: r.kind === 'listo' ? r.file : '', prog: r.prog || 0, pub: r.pub || 0 }); }
+  for (const r of reels) { const st = stage(r); if (st === 'aprobar') { if (vistos.has(r.clip_id)) continue; vistos.add(r.clip_id); } if (st) pipeline[st].push({ id: r.id, title: r.title, kind: r.kind, detail: r.status_detail || (r.kind === 'crudo' ? r.status : ''), cover: r.cover, file: r.kind === 'listo' ? r.file : '', preview: r.kind === 'listo' ? r.preview : '', prog: r.prog || 0, pub: r.pub || 0 }); }
   res.json({ days, totals: tot(cur), previous: tot(prev), series, best, pipeline });
 });
 // Lo que mejor les funcionó a las cuentas investigadas: publicaciones con 2× o más las interacciones normales de su cuenta.
@@ -1490,7 +1554,7 @@ const parseJson = (v) => { try { return v ? JSON.parse(v) : null; } catch { retu
 app.get('/api/projects/:id/review', (req, res) => {
   const p = get('SELECT id, review_mode FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe el proyecto' });
-  const reels = all(`SELECT r.id, r.title, r.caption, r.hashtags, r.file, r.cover, r.duration, r.clip_id, r.moment, r.recipe, r.review, r.review_note, r.created_at, r.publico,
+  const reels = all(`SELECT r.id, r.title, r.caption, r.hashtags, r.file, r.preview, r.cover, r.duration, r.clip_id, r.moment, r.recipe, r.review, r.review_note, r.created_at, r.publico,
     r.redo, r.redo_pedido, r.redo_detail, c.title AS crudo_title, c.etiqueta AS crudo_etiqueta
     FROM reels r LEFT JOIN reels c ON c.id = r.source_id WHERE r.project_id = ? AND r.kind = 'listo' AND r.clip_id IS NOT NULL ORDER BY r.id`, p.id);
   const clips = new Map();

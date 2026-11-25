@@ -135,13 +135,13 @@ export function mountShare(app, d) {
     const l = await open(req, res); if (!l?.id) return;
     run("UPDATE share_links SET last_seen_at = datetime('now') WHERE id = ?", l.id);
     const p = get('SELECT id, name, role, org, color, photo, election_date, propaganda_until FROM projects WHERE id = ?', l.project_id);
-    const reels = all("SELECT id, caption, hashtags, file, cover, duration, clip_id, moment, review, created_at FROM reels WHERE project_id = ? AND kind = 'listo' AND clip_id IS NOT NULL ORDER BY id", p.id);
+    const reels = all("SELECT id, caption, hashtags, file, preview, cover, duration, clip_id, moment, review, created_at FROM reels WHERE project_id = ? AND kind = 'listo' AND clip_id IS NOT NULL ORDER BY id", p.id);
     const clips = new Map();
     for (const r of reels) { if (!clips.has(r.clip_id)) clips.set(r.clip_id, []); clips.get(r.clip_id).push(r); }
     const notes = commentsOf(db, reels.map((r) => r.id));
     const pending = [...clips.entries()].filter(([, rs]) => rs.some((r) => r.review === 'pendiente')).map(([clip_id, rs]) => ({
       clip_id, tema: parse(rs[0].moment)?.tema || '',
-      reels: rs.map((r) => ({ id: r.id, caption: r.caption, hashtags: r.hashtags, duration: r.duration, review: r.review, video: `/s/${l.token}/media/${r.file}`, cover: r.cover ? `/s/${l.token}/media/${r.cover}` : '', comments: (notes[r.id] || []).map((c) => ({ id: c.id, at_s: c.at_s, text: c.text, author: c.author })) })),
+      reels: rs.map((r) => ({ id: r.id, caption: r.caption, hashtags: r.hashtags, duration: r.duration, review: r.review, video: `/s/${l.token}/media/${r.preview && r.preview !== '-' ? r.preview : r.file}`, cover: r.cover ? `/s/${l.token}/media/${r.cover}` : '', comments: (notes[r.id] || []).map((c) => ({ id: c.id, at_s: c.at_s, text: c.text, author: c.author })) })),
     }));
     const upcoming = l.calendar ? all(`SELECT p.id, p.scheduled_at, p.status, a.network, a.handle, a.connected_as, r.title
       FROM posts p JOIN accounts a ON a.id = p.account_id JOIN reels r ON r.id = p.reel_id
@@ -191,7 +191,7 @@ export function mountShare(app, d) {
     const l = get("SELECT * FROM share_links WHERE token = ? AND revoked_at = ''", String(req.params.token || ''));
     if (!l || (l.expires_at && new Date(l.expires_at.replace(' ', 'T') + 'Z') < new Date())) return res.status(404).end();
     const f = String(req.params.file || '');
-    const mine = get('SELECT 1 FROM reels WHERE project_id = ? AND (file = ? OR cover = ?)', l.project_id, f, f) || get('SELECT 1 FROM projects WHERE id = ? AND photo = ?', l.project_id, f);
+    const mine = get('SELECT 1 FROM reels WHERE project_id = ? AND (file = ? OR cover = ? OR preview = ?)', l.project_id, f, f, f) || get('SELECT 1 FROM projects WHERE id = ? AND photo = ?', l.project_id, f);
     if (!mine) return res.status(404).end();
     sendMedia(res, f, next);
   });
