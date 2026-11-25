@@ -2349,8 +2349,10 @@ function hace(s) {
   const m = Math.max(0, Math.round((Date.now() - t) / 60000));
   return m < 1 ? 'recién' : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} d`;
 }
+// Gero (24/11) pidió sacar la franja: el estado ya se ve en la tarjeta del crudo y se actualiza sola; queda el sondeo y el aviso al terminar
+const FRANJA_EDITOR = false;
 function edBand() {
-  const L = edCrudos(); if (!L.length) return '';
+  const L = edCrudos(); if (!FRANJA_EDITOR || !L.length) return '';
   return `<section class="ed-band" aria-live="polite">${L.map((r) => {
     const i = ED_PASOS.findIndex(([k]) => k === r.status), nombre = esc(r.descripcion || r.title || 'Crudo');
     const t = !isContent() ? `<a href="#/p/${state.project.id}/reel/${r.id}">«${nombre}»</a>` : `«${nombre}»`;
