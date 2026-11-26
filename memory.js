@@ -6,7 +6,7 @@ import { score, weightsOf } from './metrics.js';
 export const MIN_DATA_HOURS = 48;   // cada hermana necesita al menos 48 h desde que se publicó
 export const MIN_TRIALS = 5;        // una variable gana con 5 intentos (ponderados) o más
 export const OWNER_WEIGHT = 3;      // la opinión del dueño pesa 3×
-export const VARIABLES = ['gancho', 'subtitulos', 'musica', 'ritmo', 'largo'];
+export const VARIABLES = ['gancho', 'subtitulos', 'musica', 'ritmo', 'largo', 'transicion', 'karaoke'];
 const MODEL = process.env.ACM_MEMORY_MODEL || 'claude-sonnet-5-5';
 
 export function initMemory(db) {
@@ -24,7 +24,7 @@ const nowLocal = () => { const d = new Date(); return `${d.getFullYear()}-${pad(
 // las variables de una receta (el editor las manda en recipe.variables; si faltan, se leen de los campos sueltos)
 export function recipeVars(recipe) {
   const r = recipe || {}, v = r.variables || {}, out = {};
-  const fallback = { subtitulos: r.subtitulos, musica: r.musica === null ? 'sin' : r.musica?.clima, ritmo: r.ritmo };
+  const fallback = { subtitulos: r.subtitulos, musica: r.musica === null ? 'sin' : r.musica?.clima, ritmo: r.ritmo, transicion: r.transicion, karaoke: typeof r.karaoke === 'boolean' ? (r.karaoke ? 'con' : 'sin') : undefined };
   for (const k of VARIABLES) { const x = v[k] ?? fallback[k]; if (typeof x === 'string' && x) out[k] = x; }
   return out;
 }
@@ -81,9 +81,10 @@ export function learningsSummary(db, projectId) {
 }
 
 // --- hipótesis ---
+const NOMBRE_VARIABLE = { transicion: 'transición' };
 function plainHypothesis({ winner, others }) {
   const dif = [];
-  for (const o of others) for (const k of VARIABLES) if (winner.vars[k] && o.vars[k] && winner.vars[k] !== o.vars[k]) dif.push(`${k} «${winner.vars[k]}» en vez de «${o.vars[k]}»`);
+  for (const o of others) for (const k of VARIABLES) if (winner.vars[k] && o.vars[k] && winner.vars[k] !== o.vars[k]) dif.push(`${NOMBRE_VARIABLE[k] || k} «${winner.vars[k]}» en vez de «${o.vars[k]}»`);
   const lista = [...new Set(dif)];
   const nums = others.map((o) => o.score.toFixed(2)).join(' y ');
   return `La versión ${winner.n} ganó con un puntaje de ${winner.score.toFixed(2)} contra ${nums}.`

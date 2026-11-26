@@ -30,7 +30,7 @@ import { tiktokAdapter } from './ads-tiktok.js';
 import { googleAdapter } from './ads-google.js';
 import { buildAdapters } from './ads-factory.js';
 import { textosPropios } from './memory.js';
-import { initMemory, compareSiblings, winningVariables, memoryCycle } from './memory.js';
+import { initMemory, compareSiblings, winningVariables, memoryCycle, recipeVars, VARIABLES } from './memory.js';
 import { flushAlerts, alert as alert_, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR, weeklyReport } from './notify.js';
 import { startSandbox, startFakeEditor, recorridoCases } from './recorrido.js';
 
@@ -216,6 +216,20 @@ function cases(video, sim) {
       eq(winningVariables(d, 1, { publico: 'adultos' }), {}, 'un público sin datos');
       const v = new DatabaseSync(':memory:'); v.exec('CREATE TABLE learnings (id INTEGER PRIMARY KEY, project_id INTEGER, variable TEXT, value TEXT, network TEXT, wins REAL, trials REAL, origin TEXT)');
       eq(winningVariables(v, 1, { publico: 'jovenes' }), {}, 'base vieja');
+    }],
+    ['Memoria', 'Transición y karaoke son variables: recipeVars las lee de variables o de los campos sueltos (karaoke true→con, false→sin) y winningVariables las devuelve', async () => {
+      yes(VARIABLES.includes('transicion') && VARIABLES.includes('karaoke'), 'VARIABLES las trae');
+      eq(recipeVars({ variables: { transicion: 'glitch', karaoke: 'sin' }, transicion: 'zoom', karaoke: true }), { transicion: 'glitch', karaoke: 'sin' }, 'variables manda');
+      eq(recipeVars({ transicion: 'destello', karaoke: true, subtitulos: 'grande', ritmo: 'normal', musica: null }), { subtitulos: 'grande', musica: 'sin', ritmo: 'normal', transicion: 'destello', karaoke: 'con' }, 'campos sueltos, karaoke true es con');
+      eq(recipeVars({ karaoke: false }).karaoke, 'sin', 'karaoke false es sin');
+      eq(recipeVars({ ritmo: 'normal' }).karaoke, undefined, 'sin el campo no se inventa');
+      const f = memFixture(); const d = f.d;
+      const L = (variable, value, wins, trials = 1) => d.prepare("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (1, ?, ?, NULL, ?, ?, 'comparacion')").run(variable, value, wins, trials);
+      for (let i = 0; i < 5; i++) { L('transicion', 'destello', i < 4 ? 1 : 0); L('transicion', 'seco', 0); L('karaoke', 'sin', 1); L('karaoke', 'con', i < 1 ? 1 : 0); }
+      const w = winningVariables(d, 1);
+      eq([w.transicion, w.karaoke], ['destello', 'sin'], 'ganadoras con transición y karaoke');
+      for (let i = 0; i < 4; i++) L('transicion', 'glitch', 1);
+      eq(winningVariables(d, 1).transicion, 'destello', 'glitch con 4 intentos no entra');
     }],
     ['Memoria', 'Un 👎 de Gero cuenta 3×; winningVariables no devuelve nada con menos de 5 intentos, elige la mayor tasa y no mezcla proyectos', async () => {
       const f = memFixture(); const d = f.d;

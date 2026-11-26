@@ -13,6 +13,8 @@ export const OPCIONES = {
   musica: ['energico', 'calido', 'sin'],
   ritmo: ['rapido', 'normal', 'lento'],
   largo: ['completo', 'medio', 'corto'],
+  // Transición en cada corte interno del reel (donde se sacan pausas y entre tramos de un tema partido), con su sonido bajo la voz; el Estudio pone como mucho una cada 2,5 s. seco = corte a secas
+  transicion: ['seco', 'zoom', 'destello', 'barrido', 'glitch'],
 };
 const DIMS = Object.keys(OPCIONES);
 // «karaoke» era un estilo: ahora es el estilo `recuadro` con el karaoke encendido. Lo guardado con el nombre viejo (aprendizajes, estilos de público, recetas pendientes) vale como `recuadro`.
@@ -31,7 +33,8 @@ export const MIN_LARGO_S = 12, MIN_LARGO_VISUAL_S = 6; // un momento sin habla p
 export function normalizarAprendizajes(a) {
   const lista = Array.isArray(a) ? a : a && typeof a === 'object' ? [a] : [];
   const out = {};
-  for (const o of lista) for (const k of [...DIMS, 'horario']) if (o && typeof o[k] === 'string' && o[k].trim()) out[k] = o[k].trim();
+  for (const o of lista) for (const k of [...DIMS, 'horario', 'karaoke']) if (o && typeof o[k] === 'string' && o[k].trim()) out[k] = o[k].trim();
+  if (out.karaoke && !['con', 'sin'].includes(out.karaoke)) delete out.karaoke; // el karaoke aprendido es con o sin; no es una dimensión de OPCIONES
   // el horario viene por red ({instagram: '20:00'}); no sirve para armar recetas, pero el elector de momentos lo lee
   for (const o of lista) if (o && o.horario && typeof o.horario === 'object' && Object.keys(o.horario).length) out.horario = { ...o.horario };
   if (out.subtitulos) out.subtitulos = aEstilo(out.subtitulos);
@@ -53,18 +56,25 @@ function ganadoras(a, O = OPCIONES) {
   return g;
 }
 
-// Las elecciones de las 3 versiones: [{gancho, subtitulos, musica, ritmo, largo, explora}]. `estilo` limita las opciones (el del público del fragmento).
+// El estilo del público deja apagar el karaoke (estilo.karaoke trae 'no'; con solo ['si'] queda siempre encendido)
+const puedeSinKaraoke = (estilo) => !(Array.isArray(estilo?.karaoke) && estilo.karaoke.length > 0 && !estilo.karaoke.includes('no'));
+// Las elecciones de las 3 versiones: [{gancho, subtitulos, musica, ritmo, largo, transicion, karaoke, explora}]. `estilo` limita las opciones (el del público del fragmento).
+// Karaoke: el del estilo del público; si lo aprendido dice que ganó «sin» y el estilo deja apagarlo, las 2 versiones que siguen a la ganadora van sin karaoke
+// y la tercera (la que explora) queda como el estilo manda: no se apaga el karaoke para explorar.
 export function elegirVariables({ semilla = 0, aprendizajes, estilo } = {}) {
   const karaoke = karaokeDe(estilo);
-  return elegirEstilos({ semilla, aprendizajes, estilo }).map((v) => ({ ...v, karaoke }));
+  const sin = karaoke && puedeSinKaraoke(estilo) && normalizarAprendizajes(aprendizajes).karaoke === 'sin';
+  return elegirEstilos({ semilla, aprendizajes, estilo }).map((v) => ({ ...v, karaoke: sin && !v.explora ? false : karaoke }));
 }
 function elegirEstilos({ semilla = 0, aprendizajes, estilo } = {}) {
   const O = opcionesPermitidas(estilo);
   const elegir = (d, i) => O[d][((i % O[d].length) + O[d].length) % O[d].length];
   const otroDistinto = (d, actual) => { const o = O[d]; const i = o.indexOf(actual); return o[(i + 1) % o.length]; };
-  const s = Math.abs(Math.trunc(semilla)) || 0, g = ganadoras(aprendizajes, O), hay = Object.keys(g).length > 0;
+  const s = Math.abs(Math.trunc(semilla)) || 0, g = ganadoras(aprendizajes, O);
+  // el karaoke ganador «sin» también cuenta como algo aprendido (hay una ganadora que seguir y una versión que explora)
+  const hay = Object.keys(g).length > 0 || (karaokeDe(estilo) && puedeSinKaraoke(estilo) && normalizarAprendizajes(aprendizajes).karaoke === 'sin');
   // sin aprendizajes: cada dimensión rota con su propio desfase, así las 3 difieren y, entre momentos, se reparten parejo
-  const rotada = (i) => ({ gancho: elegir('gancho', s + i), subtitulos: elegir('subtitulos', 3 * s + i), musica: elegir('musica', s + i + 1), ritmo: elegir('ritmo', s + i + 1), largo: elegir('largo', s + i + 2) });
+  const rotada = (i) => ({ gancho: elegir('gancho', s + i), subtitulos: elegir('subtitulos', 3 * s + i), musica: elegir('musica', s + i + 1), ritmo: elegir('ritmo', s + i + 1), largo: elegir('largo', s + i + 2), transicion: elegir('transicion', s + i + 3) });
   // el reparto de ganchos es fijo (uno de cada tipo) mientras el estilo del público deje usarlos; los aprendizajes no lo pisan: es lo que se está probando
   const probar = GANCHOS_DE_PRUEBA.every((x) => O.gancho.includes(x));
   const gancho = (i) => (probar ? GANCHOS_DE_PRUEBA[(s + i) % GANCHOS_DE_PRUEBA.length] : undefined);
@@ -194,7 +204,8 @@ export function construirReceta({ v, momento, palabras = [], textos, marca = {},
     largo_s, portada: { segundo_s: r1(largo_s * POS_PORTADA[v.largo]), texto: cartelCorto(textos.portada_texto) || cartelCorto(momento.datos?.tema) || 'Mirá esto' },
     explora: v.explora,
     ...(Object.keys(mr).length ? { marca: mr } : {}),
-    variables: { gancho: tipo, subtitulos: v.subtitulos, musica: v.musica, ritmo: v.ritmo, largo: v.largo },
+    ...(v.transicion ? { transicion: v.transicion } : {}),
+    variables: { gancho: tipo, subtitulos: v.subtitulos, musica: v.musica, ritmo: v.ritmo, largo: v.largo, ...(v.transicion ? { transicion: v.transicion } : {}), karaoke: v.karaoke !== false ? 'con' : 'sin' },
     caption: String(textos.caption || '').trim(), hashtags: textos.hashtags,
   };
 }

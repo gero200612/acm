@@ -562,7 +562,7 @@ const buscarDe = (v) => textoCrudo(v, 300);
 const publicoDe = (pid, v) => (publicosDe(pid).some((x) => x.clave === v) ? String(v) : '');
 const marcaDe = (pid) => { try { return JSON.parse(get('SELECT marca FROM projects WHERE id = ?', pid)?.marca || '{}'); } catch { return {}; } };
 // opciones de edición del editor (editor/recetas.js OPCIONES): un público puede quedarse con algunas
-const OPCIONES_EDICION = { gancho: ['directo', 'pregunta', 'adelanto'], subtitulos: ['recuadro', 'placa', 'minimo', 'frase', 'grande', 'chango', 'karaoke'], karaoke: ['si', 'no'], musica: ['energico', 'calido', 'sin'], ritmo: ['rapido', 'normal', 'lento'], largo: ['completo', 'medio', 'corto'] };
+const OPCIONES_EDICION = { gancho: ['directo', 'pregunta', 'adelanto'], subtitulos: ['recuadro', 'placa', 'minimo', 'frase', 'grande', 'chango', 'karaoke'], karaoke: ['si', 'no'], musica: ['energico', 'calido', 'sin'], ritmo: ['rapido', 'normal', 'lento'], largo: ['completo', 'medio', 'corto'], transicion: ['seco', 'zoom', 'destello', 'barrido', 'glitch'] };
 // «karaoke» era un estilo de subtítulo: ahora es el modo karaoke (dimensión `karaoke`: si/no, sin marcar = con karaoke) y el estilo se llama `recuadro`. Lo guardado con el nombre viejo sigue valiendo.
 const estiloNuevo = (x) => (x === 'karaoke' ? 'recuadro' : x);
 // Estilo inicial por tipo de público (investigación del 16/11/2026: guías de edición por edad y el estudio de Bertelsmann sobre

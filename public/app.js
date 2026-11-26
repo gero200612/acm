@@ -477,11 +477,16 @@ function projectView(tab) {
 // «karaoke» era un estilo de subtítulo (hoy es el modo karaoke sobre el estilo recuadro): lo guardado con ese nombre se muestra como Recuadro
 const ESTILOS_SUB = { recuadro: 'Recuadro', karaoke: 'Recuadro', placa: 'Placa', minimo: 'Mínimo', frase: 'Frase', grande: 'Grande', chango: 'Chango' };
 const estiloSubtitulo = (x) => ESTILOS_SUB[x] || x;
+// transiciones de los cortes (efecto + sonido) y karaoke (con/sin) con nombre legible, para el resumen de receta y la memoria
+const NOMBRE_TRANSICION = { seco: 'Seco', zoom: 'Zoom', destello: 'Destello', barrido: 'Barrido', glitch: 'Glitch' };
+const NOMBRE_KARAOKE = { con: 'Con karaoke', sin: 'Sin karaoke' };
+// el valor de una variable aprendida, legible (estilo de subtítulos, transición, karaoke; lo demás tal cual)
+const valorDeVariable = (variable, v) => (variable === 'subtitulos' ? estiloSubtitulo(v) : variable === 'transicion' ? NOMBRE_TRANSICION[v] || v : variable === 'karaoke' ? NOMBRE_KARAOKE[v] || v : v);
 function recetaResumen(r) {
   if (!r) return '';
   const v = r.variables || {}, gancho = v.gancho || (r.gancho?.texto ? 'con texto' : 'directo');
   const musica = r.musica === null ? 'sin' : (r.musica?.clima || v.musica || '—');
-  return [['Gancho', gancho + (r.gancho?.texto ? ` «${r.gancho.texto}»` : '')], ['Subtítulos', estiloSubtitulo(r.subtitulos || v.subtitulos) + (r.subtitulos && r.karaoke !== false ? ' · karaoke' : '')], ['Música', musica], ['Ritmo', r.ritmo], ['Largo', r.largo_s ? `${Math.round(r.largo_s)} s` : v.largo]]
+  return [['Gancho', gancho + (r.gancho?.texto ? ` «${r.gancho.texto}»` : '')], ['Subtítulos', estiloSubtitulo(r.subtitulos || v.subtitulos) + (r.subtitulos && r.karaoke !== false ? ' · karaoke' : '')], ['Música', musica], ['Ritmo', r.ritmo], ['Transición', (r.transicion || v.transicion) && (NOMBRE_TRANSICION[r.transicion || v.transicion] || r.transicion || v.transicion)], ['Largo', r.largo_s ? `${Math.round(r.largo_s)} s` : v.largo]]
     .filter(([, x]) => x).map(([k, x]) => `<li><span>${k}</span><b>${esc(x)}</b></li>`).join('');
 }
 // Comentarios en un segundo exacto: marcas sobre la línea de tiempo, lista (tocar = ir a ese segundo) y un campo que comenta donde está el video.
@@ -566,15 +571,15 @@ function apSync(box) {
 }
 
 // ---------- Memoria: lo que el proyecto va aprendiendo ----------
-const MEM_VARS = { gancho: 'Gancho', subtitulos: 'Subtítulos', musica: 'Música', ritmo: 'Ritmo', largo: 'Largo', horario: 'Horario' };
+const MEM_VARS = { gancho: 'Gancho', subtitulos: 'Subtítulos', musica: 'Música', ritmo: 'Ritmo', largo: 'Largo', horario: 'Horario', transicion: 'Transiciones', karaoke: 'Karaoke' };
 const MEM_KINDS = { promover: 'Promover', corte: 'Corte', pausa_total: 'Pausa total', rechazo: 'Rechazo', espera: 'Espera', mover: 'Mover plata' };
 function memoriaView() {
   const M = state.memory || { decisions: [], comparisons: [], aprendizajes: [], ganadoras: {} };
   const g = M.ganadoras || {};
-  const gan = Object.entries(g).map(([k, v]) => `<li><b>${esc(MEM_VARS[k] || k)}</b>: ${k === 'horario' ? Object.entries(v).map(([n, h]) => `${esc(n)} ${esc(h)}`).join(', ') : esc(k === 'subtitulos' ? estiloSubtitulo(v) : v)}</li>`).join('');
-  const rows = (M.aprendizajes || []).map((a) => `<tr><td>${esc(MEM_VARS[a.variable] || a.variable)}</td><td>${esc(a.variable === 'subtitulos' ? estiloSubtitulo(a.value) : a.value)}${a.network ? ` <span class="muted small">(${esc(a.network)})</span>` : ''}</td><td>${fmt(a.wins, 1)} de ${fmt(a.trials, 1)}</td><td>${fmt(a.rate * 100)} %</td></tr>`).join('');
+  const gan = Object.entries(g).map(([k, v]) => `<li><b>${esc(MEM_VARS[k] || k)}</b>: ${k === 'horario' ? Object.entries(v).map(([n, h]) => `${esc(n)} ${esc(h)}`).join(', ') : esc(valorDeVariable(k, v))}</li>`).join('');
+  const rows = (M.aprendizajes || []).map((a) => `<tr><td>${esc(MEM_VARS[a.variable] || a.variable)}</td><td>${esc(valorDeVariable(a.variable, a.value))}${a.network ? ` <span class="muted small">(${esc(a.network)})</span>` : ''}</td><td>${fmt(a.wins, 1)} de ${fmt(a.trials, 1)}</td><td>${fmt(a.rate * 100)} %</td></tr>`).join('');
   const cmp = (M.comparisons || []).map((c) => `<article class="card"><div class="card-head"><h3 class="h2">Recorte ${esc(c.clip_id)}</h3><span class="small muted">${esc(String(c.created_at).slice(0, 16))}</span></div>
-    <p class="small">Ganó la edición #${c.winner_reel_id} por ${fmt(c.diff, 3)} de puntaje. Receta: ${Object.entries(c.winner_recipe?.variables || {}).map(([k, v]) => `${esc(k)} ${esc(v)}`).join(' · ') || 'sin datos'}</p>
+    <p class="small">Ganó la edición #${c.winner_reel_id} por ${fmt(c.diff, 3)} de puntaje. Receta: ${Object.entries(c.winner_recipe?.variables || {}).map(([k, v]) => `${esc(MEM_VARS[k] || k)} ${esc(valorDeVariable(k, v))}`).join(' · ') || 'sin datos'}</p>
     <p>${esc(c.hypothesis)}</p></article>`).join('');
   const dec = (M.decisions || []).map((d) => `<tr><td class="small muted">${esc(d.at)}</td><td>${esc(MEM_KINDS[d.kind] || d.kind)}</td><td>${esc(d.target)}</td><td>${esc(d.reason)}</td></tr>`).join('');
   return `<div class="ap">
@@ -1793,7 +1798,7 @@ function publicosCard(p) {
   </section>`;
 }
 // opciones de edición (las mismas del editor): cada público marca las que usa; sin marcar = todas
-const ESTILO = { ritmo: ['Ritmo', { rapido: 'Rápido', normal: 'Normal', lento: 'Lento' }], largo: ['Largo', { corto: 'Corto', medio: 'Medio', completo: 'Completo' }], subtitulos: ['Estilo de subtítulos', { recuadro: 'Recuadro', placa: 'Placa', minimo: 'Mínimo', frase: 'Frase', grande: 'Grande', chango: 'Chango' }], karaoke: ['Modo karaoke (la palabra que se dice se pinta)', { si: 'Con karaoke', no: 'Sin karaoke' }], musica: ['Música', { energico: 'Enérgica', calido: 'Cálida', sin: 'Sin música' }], gancho: ['Arranque', { directo: 'Directo', pregunta: 'Pregunta', adelanto: 'Adelanto' }] };
+const ESTILO = { ritmo: ['Ritmo', { rapido: 'Rápido', normal: 'Normal', lento: 'Lento' }], largo: ['Largo', { corto: 'Corto', medio: 'Medio', completo: 'Completo' }], subtitulos: ['Estilo de subtítulos', { recuadro: 'Recuadro', placa: 'Placa', minimo: 'Mínimo', frase: 'Frase', grande: 'Grande', chango: 'Chango' }], karaoke: ['Modo karaoke (la palabra que se dice se pinta)', { si: 'Con karaoke', no: 'Sin karaoke' }], musica: ['Música', { energico: 'Enérgica', calido: 'Cálida', sin: 'Sin música' }], gancho: ['Arranque', { directo: 'Directo', pregunta: 'Pregunta', adelanto: 'Adelanto' }], transicion: ['Transiciones (efecto y sonido en los cortes)', { seco: 'Seco', zoom: 'Zoom', destello: 'Destello', barrido: 'Barrido', glitch: 'Glitch' }] };
 // el estilo con el que arranca cada tipo de público (el mismo del servidor); después lo ajustan las aprobaciones de ese público
 const ESTILO_POR_TIPO = {
   jovenes: { ritmo: ['rapido'], largo: ['corto', 'medio'], subtitulos: ['recuadro', 'chango', 'grande'], musica: ['energico'], gancho: ['pregunta', 'directo'] },

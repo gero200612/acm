@@ -435,6 +435,76 @@ casos.push(
     yes(conAp.every((v) => v.ritmo === 'rapido') && conAp[0].subtitulos === 'grande', `aprendizaje permitido sí, prohibido no: ${JSON.stringify(conAp)}`);
     eq(opcionesPermitidas({}).ritmo, ['rapido', 'normal', 'lento'], 'sin estilo, todas');
   }],
+  ['Recetas', 'Transiciones: 5 opciones; las 3 versiones de un momento difieren y se reparten parejo entre momentos; la receta lleva transicion y variables.transicion/karaoke; paraEstudio la manda sin variables', async () => {
+    eq(OPCIONES.transicion, ['seco', 'zoom', 'destello', 'barrido', 'glitch'], 'las 5 transiciones');
+    const cuenta = {};
+    for (let k = 0; k < 30; k++) {
+      const vs = elegirVariables({ semilla: k });
+      eq(new Set(vs.map((v) => v.transicion)).size, 3, `transiciones distintas en las 3 versiones (semilla ${k})`);
+      for (const v of vs) cuenta[v.transicion] = (cuenta[v.transicion] || 0) + 1;
+    }
+    eq(Object.values(cuenta), [18, 18, 18, 18, 18], 'parejas en 30 momentos (5 transiciones × 18)');
+    const rs = await crearArmarRecetas({ claude: claudeFalso() })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: [] });
+    for (const r of rs) {
+      yes(OPCIONES.transicion.includes(r.transicion), 'receta.transicion válida');
+      eq([r.variables.transicion, r.variables.karaoke], [r.transicion, 'con'], 'variables.transicion y variables.karaoke');
+    }
+    eq(new Set(rs.map((r) => r.transicion)).size, 3, 'tres recetas, tres transiciones');
+    const e = paraEstudio(rs[0]);
+    eq([e.transicion, e.karaoke, 'variables' in e], [rs[0].transicion, true, false], 'al Estudio: transicion y karaoke sí, variables no');
+    const conSin = await crearArmarRecetas({ claude: claudeFalso() })({ momento: { ...MOM, datos: { publico_estilo: { karaoke: ['no'] } } }, transcripcion: { palabras: PALABRAS }, aprendizajes: [] });
+    eq(conSin.map((r) => [r.karaoke, r.variables.karaoke]), [[false, 'sin'], [false, 'sin'], [false, 'sin']], 'karaoke apagado por el público: karaoke:false y variables.karaoke «sin»');
+  }],
+  ['Recetas', 'Transiciones: el estilo del público las limita, los aprendizajes mandan dentro del estilo y lo aprendido de karaoke «sin» apaga 2 versiones (nunca la que explora)', async () => {
+    const estilo = { transicion: ['seco', 'destello'] };
+    for (let k = 0; k < 12; k++) yes(elegirVariables({ semilla: k, estilo }).every((v) => ['seco', 'destello'].includes(v.transicion)), `semilla ${k}: solo las del público`);
+    eq(opcionesPermitidas({ transicion: ['cubo', 'glitch'] }).transicion, ['glitch'], 'una inventada no pasa');
+    eq(opcionesPermitidas({}).transicion, OPCIONES.transicion, 'sin estilo, todas');
+    const g = elegirVariables({ semilla: 2, aprendizajes: { transicion: 'barrido' } });
+    eq(g.filter((v) => v.transicion === 'barrido').length >= 2, true, 'la ganadora va en las 2 que la siguen');
+    eq(elegirVariables({ semilla: 2, aprendizajes: { transicion: 'barrido' }, estilo }).some((v) => v.transicion === 'barrido'), false, 'una ganadora fuera del estilo no se usa');
+    eq(normalizarAprendizajes([{ karaoke: 'sin', transicion: 'glitch' }]), { transicion: 'glitch', karaoke: 'sin' }, 'los aprendizajes traen karaoke y transicion');
+    eq(normalizarAprendizajes({ karaoke: 'quizas' }), {}, 'karaoke solo con o sin');
+    const k = elegirVariables({ semilla: 0, aprendizajes: { karaoke: 'sin' } });
+    eq(k.map((v) => [v.karaoke, v.explora]), [[false, false], [false, false], [true, true]], 'karaoke «sin»: 2 sin karaoke y la tercera (explora) como manda el estilo');
+    eq(elegirVariables({ semilla: 0, aprendizajes: { karaoke: 'con' } }).map((v) => v.karaoke), [true, true, true], 'karaoke «con» no cambia nada');
+    eq(elegirVariables({ semilla: 0, aprendizajes: { karaoke: 'sin' }, estilo: { karaoke: ['si'] } }).map((v) => v.karaoke), [true, true, true], 'el público solo con karaoke: no se apaga');
+    eq(elegirVariables({ semilla: 0, aprendizajes: { karaoke: 'sin' }, estilo: { karaoke: ['si', 'no'] } }).map((v) => v.karaoke), [false, false, true], 'si/no: se apaga en las 2');
+    eq(elegirVariables({ semilla: 0, estilo: { karaoke: ['no'] } }).map((v) => v.karaoke), [false, false, false], 'el público lo apaga: las 3 sin karaoke');
+    // el karaoke «sin» llega a la receta
+    const rs = await crearArmarRecetas({ claude: claudeFalso() })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: [{ karaoke: 'sin' }] });
+    eq(rs.map((r) => [r.karaoke, r.variables.karaoke]), [[false, 'sin'], [false, 'sin'], [true, 'con']], 'receta.karaoke y variables.karaoke');
+  }],
+  ['Ajuste', 'Rehacer entiende transiciones: «sin transiciones», «con zoom», «ponele destello», barrido, glitch, y «sin zoom» saca la transición zoom si es la que hay', async () => {
+    const { ajustePorPalabras, aplicarAjuste } = await import('./ajuste.js');
+    const rec = { subtitulos: 'grande', karaoke: true, musica: null, ritmo: 'normal', zoom: false, largo_s: 30, transicion: 'glitch', gancho: { desde_s: 0 }, variables: { transicion: 'glitch', karaoke: 'con' } };
+    const mo = { inicio_s: 0, fin_s: 60 };
+    const caso = (pedido, esperado, receta = rec) => eq(ajustePorPalabras(pedido, receta).transicion, esperado, pedido);
+    caso('Sin transiciones, por favor', 'seco');
+    caso('sacá las transiciones que molestan', 'seco');
+    caso('cortes secos', 'seco');
+    caso('con zoom', 'zoom');
+    caso('ponele zoom en los cortes', 'zoom');
+    caso('quiero transición tipo zoom', 'zoom');
+    caso('ponele destello', 'destello');
+    caso('un flash en cada corte', 'destello');
+    caso('con barrido', 'barrido');
+    caso('más glitch', 'glitch');
+    caso('agregale transiciones', 'zoom', { ...rec, transicion: 'glitch' }); // la que sigue a glitch en la rotación
+    caso('ponele transiciones', 'destello', { ...rec, transicion: 'zoom' });
+    caso('hacelo más corto', undefined);
+    eq(ajustePorPalabras('sin zoom', { ...rec, transicion: 'zoom' }).transicion, 'seco', 'sin zoom con la transición zoom: se saca la transición');
+    const sz = ajustePorPalabras('sin zoom', rec);
+    eq([sz.transicion, sz.quitar_zoom], [undefined, true], 'sin zoom sin transición zoom: el acercamiento automático');
+    const a = aplicarAjuste(rec, { transicion: 'destello' }, mo);
+    eq([a.transicion, a.variables.transicion], ['destello', 'destello'], 'aplicarAjuste cambia receta y variables');
+    eq(aplicarAjuste(rec, { transicion: 'cubo' }, mo).transicion, 'glitch', 'una transición inventada no pasa');
+    const k = aplicarAjuste(rec, { karaoke: false }, mo);
+    eq([k.karaoke, k.variables.karaoke], [false, 'sin'], 'sin karaoke actualiza variables.karaoke');
+    eq(aplicarAjuste(k, { karaoke: true }, mo).variables.karaoke, 'con', 'con karaoke');
+    eq(corregirReceta(rec, { correccion: { quitar_transicion: true } }).transicion, 'seco', 'el analista puede pedir sacarla');
+    eq(corregirReceta(rec, { correccion: { quitar_transicion: true } }).variables.transicion, 'seco', 'y queda en variables');
+  }],
   ['Recetas', 'Marca del proyecto: la receta lleva acento y etiqueta válidos, respeta el largo máximo y sin marca no agrega nada', async () => {
     const v = { gancho: 'directo', subtitulos: 'grande', musica: 'sin', ritmo: 'normal', largo: 'completo', explora: false };
     const momento = { inicio_s: 0, fin_s: 85, datos: { tema: 'x' } };

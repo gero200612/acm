@@ -12,6 +12,7 @@ Opciones de la receta:
 - gancho (cómo arranca): directo | pregunta | adelanto
 - subtitulos (el estilo): recuadro (mayúsculas con la palabra que suena sobre un recuadro) | placa (con fondo) | minimo (chicos, abajo) | frase (frase entera) | grande (letras grandes) | chango (mayúsculas medianas al medio, con contorno, sin fondo)
 - karaoke (true/false): que la palabra que se dice se pinte en el momento en que se dice; va en cualquier estilo. Solo cambialo si pide sacarlo o ponerlo
+- transicion (efecto en cada corte interno del reel, con su sonido): seco (sin efecto) | zoom (cambio de plano, como otra cámara) | destello (flash blanco) | barrido (el cuadro entra de costado) | glitch (corrimiento de colores). «Sin transiciones» o «cortes secos» es seco
 - musica: energico | calido | sin
 - ritmo: rapido (con zoom) | normal | lento
 - largo: completo | medio | corto (o un largo exacto en segundos con largo_s)
@@ -29,6 +30,7 @@ export const HERRAMIENTA_AJUSTE = {
       gancho: { type: 'string', enum: OPCIONES.gancho },
       subtitulos: { type: 'string', enum: OPCIONES.subtitulos },
       karaoke: { type: 'boolean' },
+      transicion: { type: 'string', enum: OPCIONES.transicion },
       musica: { type: 'string', enum: OPCIONES.musica },
       ritmo: { type: 'string', enum: OPCIONES.ritmo },
       largo: { type: 'string', enum: OPCIONES.largo },
@@ -62,7 +64,18 @@ export function ajustePorPalabras(pedido, receta = {}) {
   else if (/mas largo|muy corto|completo/.test(t)) { c.largo = 'completo'; dijo.push('más largo'); }
   if (/lento|calma|tranqui/.test(t)) { c.ritmo = 'lento'; dijo.push('ritmo más lento'); }
   else if (/rapido|dinamic|aburr|lento/.test(t)) { c.ritmo = 'rapido'; dijo.push('ritmo más rápido'); }
-  if (/zoom/.test(t)) { c.ritmo = c.ritmo || 'normal'; c.quitar_zoom = true; dijo.push('sin zoom'); }
+  // transiciones de los cortes: «sin transiciones», «con zoom», «ponele destello», «más glitch»…
+  const TRANS = [['destello', /destello|flash/], ['barrido', /barrido|swipe|deslizad/], ['glitch', /glitch|interferencia/], ['zoom', /(con|pone(le|les)?|agrega(le|les)?|mete(le|les)?|usa(r)?|cambia(r)? (a|por)|mas) (el |un |los |las )?(\w+ ){0,2}zoom|zoom (en|entre) (los |cada )?(corte|cambio)|transicion(es)? (de |con |tipo )?(el )?zoom|zoom .*transicion/]];
+  const pidioSeco = /sin (las )?transicion|sac(a|ar|ale|arle)? (las |la )?transicion|quit(a|ar|ale)? (las |la )?transicion|cortes? secos?|transicion(es)? (molest|de mas|no va|no me gust)|(muchos?|demasiad[ao]s?) (efectos|transicion)/.test(t);
+  const tipo = TRANS.find(([, re]) => re.test(t))?.[0];
+  if (pidioSeco) { c.transicion = 'seco'; dijo.push('sin transiciones'); }
+  else if (tipo) { c.transicion = tipo; dijo.push(`transición «${tipo}»`); }
+  else if (/transicion/.test(t)) { const rot = OPCIONES.transicion.filter((x) => x !== 'seco'), i = rot.indexOf(receta.transicion); c.transicion = rot[(i + 1) % rot.length]; dijo.push(`transición «${c.transicion}»`); }
+  if (/zoom/.test(t) && !c.transicion) {
+    // «sin zoom»: si el zoom que se ve es el de las transiciones, se saca eso; si no, el acercamiento automático
+    if (receta.transicion === 'zoom') { c.transicion = 'seco'; dijo.push('sin zoom (cortes secos)'); }
+    else { c.ritmo = c.ritmo || 'normal'; c.quitar_zoom = true; dijo.push('sin zoom'); }
+  }
   return { ...c, entendido: dijo.length ? `Cambio: ${dijo.join(', ')}.` : 'No entendí qué cambiar: se rehace con otros subtítulos.', ...(dijo.length ? {} : { subtitulos: OPCIONES.subtitulos[(OPCIONES.subtitulos.indexOf(aEstilo(receta.subtitulos)) + 1) % OPCIONES.subtitulos.length] }) };
 }
 
@@ -77,7 +90,8 @@ export function aplicarAjuste(receta, c = {}, momento = {}) {
     else { v.gancho = c.gancho; if (n.gancho) delete n.gancho.adelanto; if (c.gancho === 'directo' && n.gancho) delete n.gancho.texto; }
   }
   if (c.subtitulos && OPCIONES.subtitulos.includes(aEstilo(c.subtitulos))) { n.subtitulos = aEstilo(c.subtitulos); v.subtitulos = n.subtitulos; }
-  if (typeof c.karaoke === 'boolean') n.karaoke = c.karaoke;
+  if (typeof c.karaoke === 'boolean') { n.karaoke = c.karaoke; v.karaoke = c.karaoke ? 'con' : 'sin'; }
+  if (c.transicion && OPCIONES.transicion.includes(c.transicion)) { n.transicion = c.transicion; v.transicion = c.transicion; }
   if (c.musica && OPCIONES.musica.includes(c.musica)) { n.musica = c.musica === 'sin' ? null : { clima: c.musica, volumen: n.musica?.volumen ?? 0.25 }; v.musica = c.musica; }
   if (c.ritmo && OPCIONES.ritmo.includes(c.ritmo)) { n.ritmo = c.ritmo; v.ritmo = c.ritmo; }
   if (c.quitar_zoom) n.zoom = false;
@@ -105,7 +119,7 @@ export function crearAjustar({ claude } = {}) {
     let c;
     if (claude) {
       const dicho = palabras.map((p) => p.palabra ?? p.texto ?? '').join(' ').slice(0, 4000);
-      const usuario = `Pedido de la persona: «${String(pedido).slice(0, 2000)}»\n\nReceta actual: ${JSON.stringify({ gancho: receta?.variables?.gancho, subtitulos: aEstilo(receta?.subtitulos), karaoke: receta?.karaoke !== false, musica: receta?.musica?.clima || 'sin', ritmo: receta?.ritmo, largo_s: receta?.largo_s, caption: receta?.caption, hashtags: receta?.hashtags, gancho_texto: receta?.gancho?.texto, portada_texto: receta?.portada?.texto })}\nEl momento dura ${r1((momento.fin_s ?? 0) - (momento.inicio_s ?? 0))} s.\nLo que se dice: ${dicho}`;
+      const usuario = `Pedido de la persona: «${String(pedido).slice(0, 2000)}»\n\nReceta actual: ${JSON.stringify({ gancho: receta?.variables?.gancho, subtitulos: aEstilo(receta?.subtitulos), karaoke: receta?.karaoke !== false, transicion: receta?.transicion || 'seco', musica: receta?.musica?.clima || 'sin', ritmo: receta?.ritmo, largo_s: receta?.largo_s, caption: receta?.caption, hashtags: receta?.hashtags, gancho_texto: receta?.gancho?.texto, portada_texto: receta?.portada?.texto })}\nEl momento dura ${r1((momento.fin_s ?? 0) - (momento.inicio_s ?? 0))} s.\nLo que se dice: ${dicho}`;
       try { c = await claude.estructurado({ modelo: MODELOS.textos, system: SYSTEM_AJUSTE, usuario, herramienta: HERRAMIENTA_AJUSTE, maxTokens: 1500, esfuerzo: 'low' }); }
       catch { c = null; }
     }
