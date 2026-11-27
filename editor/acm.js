@@ -1,6 +1,15 @@
 // Cliente de ACM: avisa en qué etapa va cada crudo y entrega las ediciones. Siempre con Bearer EDITOR_TOKEN.
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Lo que la investigación dice del lugar (distrito, municipio, barrios), recortado: sirve para deducir el territorio de las portadas
+const LUGAR_RE = /distrito|municipio|partido|barrio|localidad|ciudad|intendente|concejal|territorio|provincia|zona/i;
+export function resumenLugar(inv, max = 1500) {
+  const l = (Array.isArray(inv) ? inv : []).map((x) => String(x || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  let out = '';
+  for (const x of [...l.filter((y) => LUGAR_RE.test(y)), ...l.filter((y) => !LUGAR_RE.test(y))]) { if (out.length + x.length + 1 > max) { if (!out) out = x.slice(0, max); break; } out += `${out ? '\n' : ''}${x}`; }
+  return out;
+}
+
 export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn = fetch } = {}) {
   const base = String(url || '').replace(/\/+$/, '');
   async function post(ruta, body) {
@@ -33,7 +42,8 @@ export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn 
           publicoCrudo: j.publico_crudo && typeof j.publico_crudo === 'object' ? j.publico_crudo : null,
           // lo que el equipo escribió al subir el crudo: de qué es y qué buscar adentro
           // para las portadas estilo Chango: territorio, nombre del proyecto, foto del dirigente y banco de fotos de referencia
-          portada: { territorio: typeof j.territorio === 'string' ? j.territorio : '', nombre: typeof j.nombre === 'string' ? j.nombre : '', foto_dirigente: typeof j.foto_dirigente === 'string' ? j.foto_dirigente : '', portada_refs: Array.isArray(j.portada_refs) ? j.portada_refs : [] },
+          portada: { territorio: typeof j.territorio === 'string' ? j.territorio : '', nombre: typeof j.nombre === 'string' ? j.nombre : '', foto_dirigente: typeof j.foto_dirigente === 'string' ? j.foto_dirigente : '', portada_refs: Array.isArray(j.portada_refs) ? j.portada_refs : [],
+            logo: typeof j.logo === 'string' ? j.logo : '', barrio: typeof j.marca?.etiqueta === 'string' ? j.marca.etiqueta : '', investigacion: resumenLugar(j.investigacion) },
           descripcion: typeof j.descripcion === 'string' ? j.descripcion : '', buscar: typeof j.buscar === 'string' ? j.buscar : '' };
       } catch { return { aprendizajes: [], investigacion: [] }; }
     },

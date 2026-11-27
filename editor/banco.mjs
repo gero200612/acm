@@ -1079,6 +1079,25 @@ casos.push(
     const ning = mundoPortada({ decision: { tipo: 'ninguno', lugar: '', escena: '', consultas: [] } });
     yes((await armarConPortada(ning)).every((r) => !r.portada.chango) && ning.llamadas.length === 0 && ning.falBodies.length === 0, 'tipo ninguno: nada que buscar');
   }],
+  ['Portadas', 'Sin territorio de Ajustes, Claude lo deduce de la investigación y del barrio del crudo; con territorio manda ese', async () => {
+    const base = { nombre: 'P', foto_dirigente: '', portada_refs: [] };
+    const w = mundoPortada();
+    const a = await armarConPortada(w, { ctx: { ...base, territorio: '', barrio: 'Boulogne', investigacion: 'Distrito: San Isidro, partido del GBA norte' } });
+    const p = w.claude.pedidos.find((x) => x.herramienta.name === 'decidir_portada');
+    yes(/Boulogne/.test(p.usuario) && /partido del GBA norte/.test(p.usuario) && /deducilo/.test(p.usuario), 'la decisión recibe barrio e investigación');
+    yes(a.every((r) => r.portada.chango), 'hay chango sin territorio cargado');
+    const w2 = mundoPortada();
+    await armarConPortada(w2, { ctx: { ...base, territorio: 'Tigre', barrio: 'Boulogne', investigacion: 'Distrito: San Isidro' } });
+    const p2 = w2.claude.pedidos.find((x) => x.herramienta.name === 'decidir_portada').usuario;
+    yes(/Territorio del proyecto: Tigre/.test(p2) && !/Boulogne|San Isidro/.test(p2), 'con territorio de Ajustes manda ese y no se manda la investigación');
+  }],
+  ['Portadas', 'El logo del proyecto pasa a portada.chango.logo; sin logo no hay campo', async () => {
+    const ctx = { territorio: 'San Isidro', nombre: 'P', foto_dirigente: '', portada_refs: [] };
+    const con = await armarConPortada(mundoPortada(), { ctx: { ...ctx, logo: 'data:image/png;base64,LL' } });
+    yes(con.every((r) => r.portada.chango.logo === 'data:image/png;base64,LL'), 'el logo viaja en cada versión');
+    const sin = await armarConPortada(mundoPortada(), { ctx });
+    yes(sin.every((r) => r.portada.chango && !('logo' in r.portada.chango)), 'sin logo, sin campo');
+  }],
   ['Portadas', 'Los errores nunca frenan la edición: sin FAL_KEY, Wikimedia caída, Claude caído, fal con una versión fallada', async () => {
     const w1 = mundoPortada(); const sinKey = await armarConPortada(w1, { env: { PORTADA_FONDO_IA: '1' } });
     yes(sinKey.length === 3 && sinKey.every((r) => !r.portada.chango && /FAL_KEY/.test(r.portada_motivo)) && w1.claude.pedidos.length === 1, 'IA sin FAL_KEY: ni se llama a Claude por la portada (solo los textos)');
@@ -1101,9 +1120,14 @@ casos.push(
   ['Portadas', 'ACM → editor: el contexto trae territorio, nombre, foto del dirigente y portada_refs', async () => {
     const fetchFn = async () => new Response(JSON.stringify({ aprendizajes: [], territorio: 'Boulogne', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,QQ', portada_refs: [{ lugar: 'plaza', imagen_url: 'u', si: 1, no: 0 }] }), { status: 200 });
     const c = await crearAcm({ url: 'http://acm.test', token: 't', fetchFn }).contexto(1, 2);
-    eq(c.portada, { territorio: 'Boulogne', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,QQ', portada_refs: [{ lugar: 'plaza', imagen_url: 'u', si: 1, no: 0 }] }, 'portada del contexto');
+    eq(c.portada, { territorio: 'Boulogne', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,QQ', portada_refs: [{ lugar: 'plaza', imagen_url: 'u', si: 1, no: 0 }], logo: '', barrio: '', investigacion: '' }, 'portada del contexto');
     const vacio = await crearAcm({ url: 'http://acm.test', token: 't', fetchFn: async () => new Response('{}', { status: 200 }) }).contexto(1);
-    eq(vacio.portada, { territorio: '', nombre: '', foto_dirigente: '', portada_refs: [] }, 'sin datos, vacío');
+    eq(vacio.portada, { territorio: '', nombre: '', foto_dirigente: '', portada_refs: [], logo: '', barrio: '', investigacion: '' }, 'sin datos, vacío');
+    const inv = ['Plan de seguridad: cámaras en las esquinas', 'Distrito: San Isidro, partido del norte del GBA', 'x'.repeat(2000)];
+    const f2 = async () => new Response(JSON.stringify({ territorio: '', logo: 'data:image/png;base64,LL', marca: { etiqueta: 'Boulogne' }, investigacion: inv }), { status: 200 });
+    const c2 = (await crearAcm({ url: 'http://acm.test', token: 't', fetchFn: f2 }).contexto(1, 2)).portada;
+    yes(c2.logo === 'data:image/png;base64,LL' && c2.barrio === 'Boulogne', 'logo y barrio del crudo');
+    yes(c2.investigacion.length <= 1500 && c2.investigacion.startsWith('Distrito: San Isidro'), 'resumen de la investigación recortado, lo del lugar primero');
     eq(normLugar('  Catedral   de SAN Isidro Ñandú '), 'catedral de san isidro nandu', 'normaliza sin tildes');
   }],
 );
