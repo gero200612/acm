@@ -270,7 +270,7 @@ async function conPortadaChango({ portadas, recetas, vars, textos, momento, text
   } catch (e) { res = recetas.map(() => ({ motivo: e.message })); }
   recetas.forEach((r, i) => {
     const x = res?.[i];
-    if (x?.chango) { r.portada.chango = x.chango; r.variables.portada_plano = x.plano || r.variables.portada_plano; }
+    if (x?.chango) { r.portada.chango = x.chango; r.variables.portada_luz = x.luz || r.variables.portada_luz; r.variables.portada_plano = x.plano || r.variables.portada_plano; }
     else r.portada_motivo = String(x?.motivo || 'sin respuesta').slice(0, 300);
   });
   const motivos = recetas.map((r, i) => (r.portada.chango ? '' : `v${i + 1}: ${r.portada_motivo}`)).filter(Boolean);

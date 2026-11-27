@@ -119,7 +119,7 @@ export function crearRunner({ db, estudio, acm, mirarVideo = null, elegirMomento
     const delPublico = (m) => { const a = porPublico[m.datos?.publico]; return a && Object.keys(a).length ? [a] : aprendizajes; };
     if (R.ediciones(t.id).length) return;
     for (const m of ms.filter((x) => x.estado !== 'candidato')) {
-      const recetas = ((await armarRecetas({ trabajo: t, momento: m, transcripcion, aprendizajes: delPublico(m), marca, pedidos, ejemplosTextos, portada })) || []).slice(0, MAX_RECETAS);
+      const recetas = ((await armarRecetas({ trabajo: t, momento: m, transcripcion, aprendizajes: delPublico(m), marca, pedidos, ejemplosTextos, portada: { ...portada, project_id: t.project_id } })) || []).slice(0, MAX_RECETAS);
       recetas.forEach((r, i) => R.guardarEdicion(t.id, m.id, i, r));
     }
   }

@@ -76,22 +76,47 @@ export async function buscarBrave(consulta, { fetchFn = fetch, clave, limite = 1
   u.searchParams.set('q', consulta); u.searchParams.set('count', limite); u.searchParams.set('safesearch', 'strict');
   const r = await fetchFn(u, { headers: { 'x-subscription-token': clave, accept: 'application/json', 'user-agent': UA }, signal: AbortSignal.timeout(20000) });
   if (!r.ok) throw new Error(`Brave respondió ${r.status}`);
-  return ((await r.json())?.results || []).filter((x) => x.properties?.url || x.thumbnail?.src).map((x) => ({
-    imagen_url: x.properties?.url || x.thumbnail.src, respaldo_url: x.thumbnail?.src || '', pagina_url: x.url || '', fuente: x.source ? `Web: ${x.source}` : 'Web (Brave)', licencia: '', autor: '', titulo: x.title || '' }));
+  return ((await r.json())?.results || []).filter((x) => x.thumbnail?.src).map((x) => ({
+    imagen_url: x.thumbnail.src, pagina_url: x.url || '', fuente: x.source ? `Web: ${x.source}` : 'Web (Brave)', licencia: '', autor: '', titulo: x.title || '' }));
 }
 
 const tipoDeImagen = (b) => (b[0] === 0xff && b[1] === 0xd8 ? 'image/jpeg' : b[0] === 0x89 && b[1] === 0x50 ? 'image/png' : b.length > 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP' ? 'image/webp' : '');
-async function bajar(url, fetchFn) {
-  const r = await fetchFn(url, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20000) });
+
+// Solo se bajan imágenes por https de hosts conocidos (nada que apunte a la red interna): Wikimedia y, de Brave, SOLO su miniatura proxeada (nunca la imagen del sitio).
+// Un host que empieza con «.» vale también para sus subdominios.
+export const HOSTS_FOTO = ['upload.wikimedia.org', 'commons.wikimedia.org', 'imgs.search.brave.com'];
+export const HOSTS_FAL = ['.fal.media'];
+export function urlPermitida(url, hosts = HOSTS_FOTO) {
+  try {
+    const x = new URL(String(url));
+    return x.protocol === 'https:' && !x.username && !x.password && hosts.some((h) => (h.startsWith('.') ? x.hostname === h.slice(1) || x.hostname.endsWith(h) : x.hostname === h));
+  } catch { return false; }
+}
+// Baja una imagen sin seguir redirecciones y cortando apenas se pasa de `max` bytes (por Content-Length o leyendo el stream).
+export async function bajar(url, fetchFn, { hosts = HOSTS_FOTO, max = MAX_BYTES } = {}) {
+  if (!urlPermitida(url, hosts)) throw new Error('URL no permitida');
+  const r = await fetchFn(url, { headers: { 'user-agent': UA }, redirect: 'manual', signal: AbortSignal.timeout(20000) });
+  if (r.status >= 300 && r.status < 400) throw new Error('redirección no permitida');
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const b = Buffer.from(await r.arrayBuffer());
-  const tipo = tipoDeImagen(b);
-  if (!tipo || b.length > MAX_BYTES) throw new Error('no es una imagen usable');
+  if (Number(r.headers.get('content-length')) > max) throw new Error('imagen demasiado grande');
+  const partes = []; let total = 0;
+  if (r.body) {
+    const lector = r.body.getReader();
+    for (;;) {
+      const { done, value } = await lector.read();
+      if (done) break;
+      total += value.length;
+      if (total > max) { await lector.cancel().catch(() => {}); throw new Error('imagen demasiado grande'); }
+      partes.push(Buffer.from(value));
+    }
+  } else { const b = Buffer.from(await r.arrayBuffer()); if (b.length > max) throw new Error('imagen demasiado grande'); partes.push(b); }
+  const b = Buffer.concat(partes), tipo = tipoDeImagen(b);
+  if (!tipo) throw new Error('no es una imagen usable');
   return { bytes: b, tipo };
 }
 
 // --- el módulo ---
-export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log = console.log, modelo = MODELOS.portadas } = {}) {
+export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log = console.log, modelo = MODELOS.portadas, banco = null } = {}) {
   const modeloFal = () => env.PORTADA_MODELO || MODELO_FAL;
 
   async function decidir({ momento, texto, territorio }) {
@@ -107,7 +132,7 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
   async function candidatas({ lugar, consultas, refs }) {
     const bloqueadas = new Set(), previas = [];
     for (const r of Array.isArray(refs) ? refs : []) {
-      if (!r?.imagen_url || !mismoLugar(r.lugar, lugar)) continue;
+      if (!r?.imagen_url || !mismoLugar(r.lugar, lugar) || !urlPermitida(r.imagen_url)) continue; // las del banco también pasan por la lista de hosts
       if ((r.no || 0) > (r.si || 0)) bloqueadas.add(r.imagen_url);
       else if ((r.si || 0) > (r.no || 0)) previas.push({ imagen_url: r.imagen_url, pagina_url: r.pagina_url || '', fuente: r.fuente || '', licencia: r.licencia || '', autor: '', titulo: lugar, gusto: true, si: r.si || 0 });
     }
@@ -119,15 +144,14 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
     }
     const vistas = new Set(), todas = [];
     for (const c of [...previas.slice(0, MAX_REFS_BANCO), ...hallazgos]) {
-      if (bloqueadas.has(c.imagen_url) || vistas.has(c.imagen_url)) continue;
+      if (bloqueadas.has(c.imagen_url) || vistas.has(c.imagen_url) || !urlPermitida(c.imagen_url)) continue;
       vistas.add(c.imagen_url); todas.push(c);
     }
     // Wikimedia primero (libre), después la web; hasta MAX_CANDIDATAS, alternando para no llenarlo de una sola fuente
     const lista = [...todas.filter((c) => c.gusto), ...todas.filter((c) => !c.gusto && c.fuente === 'Wikimedia Commons').slice(0, 8), ...todas.filter((c) => !c.gusto && c.fuente !== 'Wikimedia Commons')].slice(0, MAX_CANDIDATAS);
     if (errores.length) log(`[portadas] búsqueda con fallas: ${errores.join('; ')}`);
     const bajadas = await Promise.all(lista.map(async (c) => {
-      for (const u of [c.imagen_url, c.respaldo_url].filter(Boolean)) { try { return { ...c, ...(await bajar(u, fetchFn)) }; } catch { /* prueba la siguiente */ } }
-      return null;
+      try { return { ...c, ...(await bajar(c.imagen_url, fetchFn)) }; } catch { return null; }
     }));
     return bajadas.filter(Boolean);
   }
@@ -161,39 +185,80 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
     return url;
   }
 
-  // Devuelve, por versión: { chango, luz, plano } o { motivo }.
-  //   versiones: [{ luz, plano, lado, linea1, linea2 }]; ctx: { territorio, nombre, foto_dirigente, portada_refs }
+  // Reparte los fondos del banco entre las versiones: el que tiene la luz y el plano pedidos; si no, el de la misma luz, el del mismo plano o cualquiera.
+  // Nunca el mismo fondo dos veces en el momento. Devuelve, por versión, el fondo del banco o null.
+  function reusarDelBanco({ versiones, lugar, project_id }) {
+    const libres = banco?.disponible && project_id ? banco.fondosDe(project_id).filter((f) => mismoLugar(f.lugar, lugar)) : [];
+    const out = versiones.map(() => null), tomados = new Set();
+    const tomar = (i, ok) => { const f = libres.find((x) => !tomados.has(x.id) && ok(x)); if (f) { tomados.add(f.id); out[i] = f; } };
+    versiones.forEach((v, i) => tomar(i, (f) => f.luz === v.luz && f.plano === v.plano));
+    versiones.forEach((v, i) => { if (!out[i]) tomar(i, (f) => f.luz === v.luz); });
+    versiones.forEach((v, i) => { if (!out[i]) tomar(i, (f) => f.plano === v.plano); });
+    versiones.forEach((v, i) => { if (!out[i]) tomar(i, () => true); });
+    return out;
+  }
+
+  const changoDe = ({ fondo_url, v, ctx, referencia }) => ({
+    fondo_url, linea1: v.linea1, linea2: v.linea2, lado: v.lado, nombre: ctx.nombre || '', ...(ctx.foto_dirigente ? { foto_dirigente: ctx.foto_dirigente } : {}), referencia,
+  });
+
+  // Devuelve, por versión: { chango, luz, plano } o { motivo }. Primero se reusan fondos del banco del proyecto; solo lo que falta se busca y se genera.
+  //   versiones: [{ luz, plano, lado, linea1, linea2 }]; ctx: { territorio, nombre, foto_dirigente, portada_refs, project_id }
   async function porMomento({ momento, texto, versiones, ctx = {} }) {
     const sin = (motivo) => versiones.map(() => ({ motivo }));
     try {
-      if (!env.FAL_KEY) return sin('Falta FAL_KEY');
+      if (!env.FAL_KEY && !banco?.disponible) return sin('Falta FAL_KEY');
       const d = await decidir({ momento, texto, territorio: ctx.territorio || '' });
       if (d.motivo) return sin(d.motivo);
-      const cands = await candidatas({ lugar: d.lugar, consultas: d.consultas, refs: ctx.portada_refs });
-      if (!cands.length) return sin(`no encontré fotos de «${d.lugar}»`);
-      const fotos = await elegirFotos({ lugar: d.lugar, cands });
-      if (!fotos.length) return sin(`ninguna foto de «${d.lugar}» sirvió (texto, marcas de agua, gente o no era el lugar)`);
-      // con menos fotos que versiones se reusan; si dos versiones comparten foto y también luz y plano, la segunda cambia de plano
-      const usados = new Set();
-      const planos = Object.keys(PLANO);
-      const asign = versiones.map((v, i) => {
-        const foto = fotos[i % fotos.length];
-        let plano = PLANO[v.plano] ? v.plano : 'medio';
-        for (let k = 0; k < planos.length && usados.has(`${i % fotos.length}|${v.luz}|${plano}`); k++) plano = planos[(planos.indexOf(plano) + 1) % planos.length];
-        usados.add(`${i % fotos.length}|${v.luz}|${plano}`);
-        return { v, foto, plano };
+      const res = versiones.map(() => null);
+      reusarDelBanco({ versiones, lugar: d.lugar, project_id: ctx.project_id }).forEach((f, i) => {
+        if (!f) return;
+        banco.usar(f.id);
+        res[i] = { luz: f.luz, plano: f.plano, reusado: true, chango: changoDe({ fondo_url: banco.url(f), v: versiones[i], ctx, referencia: f.referencia }) };
       });
-      return await Promise.all(asign.map(async ({ v, foto, plano }) => {
-        try {
-          const fondo_url = await fondoFal({ foto, prompt: promptFondo({ lugar: d.lugar, escena: d.escena, luz: v.luz, plano }) });
-          const lic = [foto.licencia, foto.autor].filter(Boolean).join(' — ');
-          return { luz: v.luz, plano, chango: {
-            fondo_url, linea1: v.linea1, linea2: v.linea2, lado: v.lado, nombre: ctx.nombre || '', ...(ctx.foto_dirigente ? { foto_dirigente: ctx.foto_dirigente } : {}),
-            referencia: { lugar: normLugar(d.lugar), imagen_url: foto.imagen_url, pagina_url: foto.pagina_url, fuente: foto.fuente, licencia: lic },
-          } };
-        } catch (e) { return { motivo: `fal: ${e.message}` }; }
-      }));
+      const faltan = versiones.map((_, i) => i).filter((i) => !res[i]);
+      if (!faltan.length) return res;
+      const nuevas = await generar({ d, versiones: faltan.map((i) => versiones[i]), ctx });
+      faltan.forEach((i, k) => { res[i] = nuevas[k]; });
+      return res;
     } catch (e) { return sin(e.message || String(e)); }
+  }
+
+  // buscar fotos, elegir y generar fondos en fal para estas versiones (sin banco)
+  async function generar({ d, versiones, ctx }) {
+    const sin = (motivo) => versiones.map(() => ({ motivo }));
+    if (!env.FAL_KEY) return sin('Falta FAL_KEY');
+    const cands = await candidatas({ lugar: d.lugar, consultas: d.consultas, refs: ctx.portada_refs });
+    if (!cands.length) return sin(`no encontré fotos de «${d.lugar}»`);
+    const fotos = await elegirFotos({ lugar: d.lugar, cands });
+    if (!fotos.length) return sin(`ninguna foto de «${d.lugar}» sirvió (texto, marcas de agua, gente o no era el lugar)`);
+    // con menos fotos que versiones se reusan; si dos versiones comparten foto y también luz y plano, la segunda cambia de plano
+    const usados = new Set(), planos = Object.keys(PLANO);
+    const asign = versiones.map((v, i) => {
+      const foto = fotos[i % fotos.length];
+      let plano = PLANO[v.plano] ? v.plano : 'medio';
+      for (let k = 0; k < planos.length && usados.has(`${i % fotos.length}|${v.luz}|${plano}`); k++) plano = planos[(planos.indexOf(plano) + 1) % planos.length];
+      usados.add(`${i % fotos.length}|${v.luz}|${plano}`);
+      return { v, foto, plano };
+    });
+    return Promise.all(asign.map(async ({ v, foto, plano }) => {
+      try {
+        const fondo_url = await fondoFal({ foto, prompt: promptFondo({ lugar: d.lugar, escena: d.escena, luz: v.luz, plano }) });
+        const lic = [foto.licencia, foto.autor].filter(Boolean).join(' — ');
+        const referencia = { lugar: normLugar(d.lugar), imagen_url: foto.imagen_url, pagina_url: foto.pagina_url, fuente: foto.fuente, licencia: lic };
+        await guardarFondo({ fondo_url, ctx, d, v, plano, foto, referencia });
+        return { luz: v.luz, plano, chango: changoDe({ fondo_url, v, ctx, referencia }) };
+      } catch (e) { return { motivo: `fal: ${e.message}` }; }
+    }));
+  }
+
+  // al banco; si no se puede guardar, la versión sale igual con la URL de fal
+  async function guardarFondo({ fondo_url, ctx, d, v, plano, foto, referencia }) {
+    if (!banco?.disponible || !ctx.project_id) return;
+    try {
+      const { bytes } = await bajar(fondo_url, fetchFn, { hosts: HOSTS_FAL, max: 15 * 1024 * 1024 });
+      banco.guardar({ project_id: ctx.project_id, lugar: normLugar(d.lugar), ref_url: foto.imagen_url, luz: v.luz, plano, referencia }, bytes);
+    } catch (e) { log(`[portadas] no pude guardar el fondo en el banco: ${e.message}`); }
   }
 
   return { porMomento };
