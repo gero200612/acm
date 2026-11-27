@@ -299,6 +299,62 @@ export function recorridoCases(sb) {
         else eq([q.status, q.note], ['programado', ''], 'fuera de horario no se publica ni se bloquea');
       } finally { await api('DELETE', `/api/projects/${c.pol}`); } // que no queden publicaciones de este recorrido para el caso de borrar
     }],
+    [G('portadas'), 'El editor recibe territorio, nombre, foto del dirigente y el banco de fotos de referencia del proyecto (solo el suyo)', async () => {
+      const A = (await api('POST', '/api/projects', { name: 'Portadas A' })).j.id, B = (await api('POST', '/api/projects', { name: 'Portadas B' })).j.id;
+      c.por = { A, B };
+      eq((await api('PUT', `/api/projects/${A}`, { territorio: '  San Isidro, Buenos Aires ' })).j.territorio, 'San Isidro, Buenos Aires', 'territorio guardado y recortado');
+      sb.box.write("UPDATE projects SET foto_dirigente = 'data:image/jpeg;base64,/9j/AAAA' WHERE id = ?", A);
+      sb.box.write("INSERT INTO portada_refs (project_id, lugar, imagen_url, pagina_url, fuente, licencia, si, no) VALUES (?, 'plaza mitre', 'https://x/a.jpg', 'https://x/p', 'Wikimedia', 'CC BY', 2, 1)", A);
+      sb.box.write("INSERT INTO portada_refs (project_id, lugar, imagen_url) VALUES (?, 'otro lugar', 'https://x/b.jpg')", B);
+      eq((await api('GET', `/api/projects/${A}`)).j.foto_dirigente, undefined, 'el panel no recibe la foto entera');
+      eq((await api('GET', `/api/projects/${A}`)).j.tiene_foto_dirigente, true, 'pero sabe que hay');
+      const a = (await sb.box.editorGet(`/api/editor/aprendizajes/${A}`)).j;
+      eq([a.territorio, a.nombre, a.foto_dirigente, a.portada_refs], ['San Isidro, Buenos Aires', 'Portadas A', 'data:image/jpeg;base64,/9j/AAAA', [{ lugar: 'plaza mitre', imagen_url: 'https://x/a.jpg', pagina_url: 'https://x/p', fuente: 'Wikimedia', licencia: 'CC BY', si: 2, no: 1 }]], 'lo de A');
+      const b = (await sb.box.editorGet(`/api/editor/aprendizajes/${B}`)).j;
+      eq([b.territorio, b.foto_dirigente, b.portada_refs.map((x) => x.lugar)], ['', '', ['otro lugar']], 'lo de B, sin mezclar');
+      eq((await sb.box.sql('SELECT count(*) n FROM portada_refs WHERE project_id = ?', A))[0].n, 1, 'una por proyecto');
+      let dup = false; try { sb.box.write("INSERT INTO portada_refs (project_id, lugar, imagen_url) VALUES (?, 'x', 'https://x/a.jpg')", A); } catch { dup = true; }
+      eq(dup, true, 'única por (proyecto, imagen_url)');
+    }],
+    [G('portadas'), 'El voto a la portada suma las variables portada_* y la foto de referencia; cambiarlo o sacarlo deshace el anterior sin acumular', async () => {
+      const { A } = c.por, pid = A;
+      const receta = JSON.stringify({ variables: { portada_luz: 'dorada', portada_plano: 'medio', portada_lado: 'izq', gancho: 'directo' }, portada: { chango: { referencia: { lugar: 'Plaza Mitre', imagen_url: 'https://x/ref.jpg', pagina_url: 'https://x/pag', fuente: 'Wikimedia', licencia: 'CC BY' } } } });
+      const id = sb.box.write("INSERT INTO reels (project_id, title, file, kind, clip_id, recipe, review, publico) VALUES (?, 'Con portada', 'x.mp4', 'listo', 'clip-por', ?, 'pendiente', 'jovenes')", pid, receta).lastInsertRowid;
+      c.por.reel = id;
+      const L = () => sb.box.sql("SELECT variable, value, wins, trials, origin, publico FROM learnings WHERE project_id = ? AND variable LIKE 'portada_%' ORDER BY variable", pid);
+      const R = () => sb.box.sql("SELECT lugar, si, no FROM portada_refs WHERE project_id = ? AND imagen_url = 'https://x/ref.jpg'", pid)[0];
+      const V = () => sb.box.sql('SELECT portada_voto v FROM reels WHERE id = ?', id)[0].v;
+      eq((await api('POST', `/api/reels/${id}/portada`, { voto: 'quizas' })).status, 400, 'voto inválido');
+      eq((await api('POST', '/api/reels/999999/portada', { voto: 'si' })).status, 404, 'reel inexistente');
+      eq((await api('POST', `/api/reels/${id}/portada`, { voto: 'si' })).status, 200, 'voto sí');
+      eq(L().map((x) => [x.variable, x.value, x.wins, x.trials, x.origin, x.publico]), [['portada_lado', 'izq', 1, 1, 'opinion_dueno', 'jovenes'], ['portada_luz', 'dorada', 1, 1, 'opinion_dueno', 'jovenes'], ['portada_plano', 'medio', 1, 1, 'opinion_dueno', 'jovenes']], 'suma las 3 variables de la portada y no las otras');
+      eq([R(), V()], [{ lugar: 'plaza mitre', si: 1, no: 0 }, 'si'], 'la referencia, con el lugar normalizado');
+      await api('POST', `/api/reels/${id}/portada`, { voto: 'si' });
+      eq([L()[0].wins, L()[0].trials, R().si], [1, 1, 1], 'repetir el mismo voto no acumula');
+      await api('POST', `/api/reels/${id}/portada`, { voto: 'no' });
+      eq([L()[0].wins, L()[0].trials, R().si, R().no, V()], [0, 1, 0, 1, 'no'], 'cambiar a no deshace el sí');
+      await api('POST', `/api/reels/${id}/portada`, { voto: null });
+      eq([L()[0].wins, L()[0].trials, R().si, R().no, V()], [0, 0, 0, 0, ''], 'sacar el voto deshace todo');
+      eq(sb.box.sql("SELECT count(*) n FROM learnings WHERE project_id = ? AND variable = 'gancho'", pid)[0].n, 0, 'el gancho no se aprende acá');
+    }],
+    [G('portadas'), 'Permisos del voto: general, administrador y editor del proyecto pueden; la sombra y los de otro proyecto no', async () => {
+      const { A, B, reel } = c.por;
+      for (const [em, role, pr] of [['pa@x.com', 'admin', A], ['pe@x.com', 'editor', A], ['ps@x.com', 'sombra', A], ['pe2@x.com', 'editor', B]])
+        eq((await api('POST', '/api/users', { email: em, name: em, role, project_id: pr, password: 'clave-segura-1' })).status, 200, `alta ${em}`);
+      const voto = async (em, v) => (await (await sb.box.client(em, 'clave-segura-1'))('POST', `/api/reels/${reel}/portada`, { voto: v })).status;
+      eq(await voto('pa@x.com', 'si'), 200, 'administrador'); eq(await voto('pe@x.com', null), 200, 'editor');
+      eq(await voto('ps@x.com', 'si'), 403, 'sombra'); eq(await voto('pe2@x.com', 'si'), 404, 'editor de otro proyecto');
+      eq(sb.box.sql('SELECT portada_voto v FROM reels WHERE id = ?', reel)[0].v, '', 'el último voto válido (sacarlo) quedó');
+    }],
+    [G('portadas'), 'Aprobar o rechazar un recorte no suma las variables portada_* (sí las demás)', async () => {
+      const { A } = c.por;
+      const receta = JSON.stringify({ variables: { portada_luz: 'azul', portada_plano: 'cerca', portada_lado: 'der', gancho: 'pregunta' } });
+      sb.box.write("INSERT INTO reels (project_id, title, file, kind, clip_id, recipe, review) VALUES (?, 'Ap', 'x.mp4', 'listo', 'clip-por2', ?, 'pendiente')", A, receta);
+      eq((await api('POST', '/api/clips/clip-por2/review', { decision: 'aprobar' })).status, 200, 'aprobar');
+      eq(sb.box.sql("SELECT count(*) n FROM learnings WHERE project_id = ? AND variable LIKE 'portada_%' AND value IN ('azul', 'cerca', 'der')", A)[0].n, 0, 'sin variables de portada');
+      eq(sb.box.sql("SELECT value FROM learnings WHERE project_id = ? AND variable = 'gancho'", A).map((x) => x.value), ['pregunta'], 'el gancho sí se aprende');
+      await api('DELETE', `/api/projects/${A}`); await api('DELETE', `/api/projects/${c.por.B}`);
+    }],
     [G('memoria'), 'GET /api/editor/aprendizajes sin token da 401 y con token trae solo lo del proyecto pedido (variables ganadoras e investigación)', async () => {
       const A = (await api('POST', '/api/projects', { name: 'Memoria A' })).j.id, B = (await api('POST', '/api/projects', { name: 'Memoria B' })).j.id;
       const W = (p, variable, value, wins, trials, origin = 'comparacion', network = null) => sb.box.write('INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin) VALUES (?, ?, ?, ?, ?, ?, ?)', p, variable, value, network, wins, trials, origin);

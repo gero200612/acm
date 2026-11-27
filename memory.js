@@ -6,6 +6,8 @@ import { score, weightsOf } from './metrics.js';
 export const MIN_DATA_HOURS = 48;   // cada hermana necesita al menos 48 h desde que se publicó
 export const MIN_TRIALS = 5;        // una variable gana con 5 intentos (ponderados) o más
 export const OWNER_WEIGHT = 3;      // la opinión del dueño pesa 3×
+// de la portada: se aprenden con el 👍/👎 a la portada (no con aprobar o rechazar el video), por eso no están en VARIABLES
+export const PORTADA_VARS = ['portada_luz', 'portada_plano', 'portada_lado'];
 export const VARIABLES = ['gancho', 'subtitulos', 'musica', 'ritmo', 'largo', 'transicion', 'karaoke'];
 const MODEL = process.env.ACM_MEMORY_MODEL || 'claude-sonnet-5-5';
 
@@ -60,7 +62,7 @@ export function winningVariables(db, projectId, { publico } = {}) {
     return top?.value;
   };
   const out = {};
-  for (const v of VARIABLES) { const x = tally.has(v) && best(tally.get(v)); if (x) out[v] = x; }
+  for (const v of [...VARIABLES, ...PORTADA_VARS]) { const x = tally.has(v) && best(tally.get(v)); if (x) out[v] = x; }
   const horario = {};
   for (const [k, m] of tally) if (k.startsWith('horario|') && k.length > 8) { const x = best(m); if (x && /^\d{2}:\d{2}$/.test(x)) horario[k.slice(8)] = x; }
   if (Object.keys(horario).length) out.horario = horario;

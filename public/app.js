@@ -521,6 +521,15 @@ function clipCtx(c) {
   const r = c.reels.find((x) => x.review === 'pendiente') || c.reels[0] || {}, pub = c.moment?.publico || r.publico;
   return [c.crudo ? `De «${esc(c.crudo)}»` : '', c.barrio ? esc(c.barrio) : '', pub ? `Para ${esc(pubName(pub))}` : '', r.duration ? durTxt(r.duration) : ''].filter(Boolean).join(' · ');
 }
+// 👍/👎 a la portada de una versión; si la hizo con una foto de referencia, la muestra con su fuente y licencia
+function portadaBlock(r) {
+  const ref = r.recipe?.portada?.chango?.referencia, v = r.portada_voto || '';
+  const url = (u) => (/^https?:\/\//i.test(u || '') ? esc(u) : '');
+  if (!r.cover && !ref) return '';
+  return `<div class="ap-portada" data-id="${r.id}"><div class="ap-portada-h"><span class="small muted">¿Te gusta la portada?</span>
+    <span class="ap-portada-v" role="group" aria-label="Voto a la portada">${[['si', '👍', 'Me gusta'], ['no', '👎', 'No me gusta']].map(([k, e, t]) => `<button type="button" data-act="portada-voto" data-v="${k}" aria-pressed="${v === k}" title="${t}" aria-label="${t}">${e}</button>`).join('')}</span></div>
+    ${url(ref?.imagen_url) ? `<a class="ap-ref" href="${url(ref.pagina_url) || url(ref.imagen_url)}" target="_blank" rel="noopener noreferrer"><img src="${url(ref.imagen_url)}" alt="Foto de referencia" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'"><span class="small muted">Foto de referencia${ref.lugar ? `: ${esc(ref.lugar)}` : ''}${ref.fuente || ref.licencia ? `<br>${[ref.fuente, ref.licencia].filter(Boolean).map(esc).join(' · ')}` : ''}</span></a>` : ''}</div>`;
+}
 const coverOf = (r) => (r.cover ? `<img src="/media/${esc(r.cover)}" alt="" loading="lazy">` : `<video src="${esc(vsrc(r))}#t=0.5" preload="metadata" muted playsinline></video>`);
 function aprobarView() {
   const p = state.project, R = state.review || { clips: [], rehaciendo: [], pending: 0, review_mode: p.review_mode };
@@ -534,6 +543,7 @@ function aprobarView() {
         <video src="${esc(vsrc(r))}${r.cover ? '' : '#t=0.5'}" ${r.cover ? `poster="/media/${esc(r.cover)}" preload="none"` : 'preload="metadata"'} controls controlslist="nofullscreen" playsinline></video>
         <button type="button" class="btn sm ver-cel" data-act="ver-cel" data-src="${esc(vsrc(r))}" data-cap="${esc(r.caption || '')}">${icon('phone', 15)} Ver como celular</button>
         ${tcBlock(r)}
+        ${portadaBlock(r)}
         <div class="ap-ed-h"><b>Versión ${i + 1}</b>${r.duration ? `<span class="small muted">${durTxt(r.duration)}</span>` : ''}</div>
         ${r.redo_pedido ? `<p class="ap-redone">${icon('refresh', 14)} Rehecha: pediste «${esc(r.redo_pedido)}»${r.redo_detail ? `<span>${esc(r.redo_detail)}</span>` : ''}</p>` : ''}
         <label class="field ap-txt">Texto de la publicación<textarea class="input ap-cap-in" rows="3" maxlength="2200" data-orig="${esc(r.caption || '')}">${esc(r.caption || '')}</textarea></label>
@@ -1765,6 +1775,12 @@ function projectSettings(p) {
     <div class="two"><label class="field">Fecha de la elección<input class="input" type="date" name="election_date" value="${esc(p.election_date)}"></label>
     <label class="field">Último día de propaganda<input class="input" type="date" name="propaganda_until" value="${esc(p.propaganda_until)}"><span class="hint">Después de ese día no se publica ni se pauta</span></label></div>
     <div class="field">Color del proyecto${swatchPicker('color', p.color || '#ff5a1f')}<span class="hint">Identifica al proyecto en el panel</span></div>
+    <div class="aj-sep">Portadas</div>
+    <label class="field">Territorio<input class="input" name="territorio" maxlength="200" value="${esc(p.territorio || '')}" placeholder="San Isidro, Buenos Aires"><span class="hint">Dónde hace política: el editor lo usa para elegir el fondo de las portadas</span></label>
+    <div class="field">Foto del dirigente<div class="row" style="gap:10px;flex-wrap:wrap">
+      <label class="btn sm">${p.tiene_foto_dirigente ? 'Cambiar foto' : 'Subir foto'}<input type="file" id="foto-dir" accept="image/*" hidden></label>
+      ${p.tiene_foto_dirigente ? '<span class="chip s-conectada">Cargada</span><button type="button" class="btn sm danger" data-act="foto-dir-del">Quitar</button>' : '<span class="small muted">Sin foto</span>'}</div>
+      <span class="hint">Sirve para reconocerlo en el video. Se achica sola a menos de 300 KB (JPG, PNG o WebP, hasta 15 MB).</span></div>
     <div class="aj-sep">Campaña</div>
     <label class="field">Tipo de proyecto<select class="input" name="kind">${[['club', 'Club o institución'], ['politica', 'Política'], ['comercial', 'Comercial']].map(([v, t]) => `<option value="${v}" ${(p.kind || 'club') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     <div class="field">Revisión de recortes<input type="hidden" name="review_mode" value="${p.review_mode === 'auto' ? 'auto' : 'manual'}">
@@ -2490,6 +2506,11 @@ function afterRender(r) {
     const box = inp.closest('[data-swatches]'), lab = inp.closest('.sw-custom'); box.querySelector('input[type=hidden]').value = inp.value;
     box.querySelectorAll('.sw').forEach((b) => b.setAttribute('aria-pressed', String(b === lab))); lab.style.setProperty('--c', inp.value); swatchChanged(box);
   }));
+  $('#foto-dir')?.addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append('foto', f);
+    try { await api(`/api/projects/${state.project.id}/foto-dirigente`, { method: 'PUT', body: fd }); toast('Foto guardada'); await loadProject(state.project.id); render(); } catch (err) { fail(err); }
+  });
   $('#project-form [name=photo]')?.addEventListener('change', (e) => { const f = e.target.files[0]; if (f) $('#aj-av').innerHTML = `<img src="${URL.createObjectURL(f)}" alt="">`; });
   const pf = $('#project-form');
   if (pf && r.view === 'project') wireKindDefaults(pf);
@@ -2555,6 +2576,14 @@ document.addEventListener('click', async (e) => {
       case 'swatch': {
         const box = el.closest('[data-swatches]'); box.querySelector('input[type=hidden]').value = el.dataset.v;
         box.querySelectorAll('.sw').forEach((b) => b.setAttribute('aria-pressed', String(b === el))); swatchChanged(box); break; }
+      case 'foto-dir-del': await api(`/api/projects/${state.project.id}/foto-dirigente`, { method: 'DELETE' }); toast('Foto quitada'); await loadProject(state.project.id); render(); break;
+      case 'portada-voto': {
+        const box = el.closest('.ap-portada'), id = Number(box.dataset.id), nuevo = el.getAttribute('aria-pressed') === 'true' ? null : el.dataset.v;
+        await api(`/api/reels/${id}/portada`, { method: 'POST', body: { voto: nuevo } });
+        $$('button[data-act=portada-voto]', box).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === nuevo)));
+        const r = [...(state.review?.clips || []), ...(state.review?.rehaciendo || []), ...(state.review?.recent || [])].flatMap((c) => c.reels).find((x) => x.id === id); if (r) r.portada_voto = nuevo || '';
+        const re = state.reels?.find((x) => x.id === id); if (re) re.portada_voto = nuevo || '';
+        break; }
       case 'aj-review': case 'aj-largo': {
         const seg = el.closest('.seg'); seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
         (act === 'aj-review' ? el.closest('.field').querySelector('[name=review_mode]') : $('#marca-largo')).value = el.dataset.v; break; }

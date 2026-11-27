@@ -117,6 +117,7 @@ const EDITOR = [
   ['POST', /^\/api\/reels\/\d+\/comments$/],
   ['PUT', /^\/api\/reels\/\d+$/], // solo el texto y los hashtags (lo limita la ruta)
   ['POST', /^\/api\/reels\/\d+\/rehacer$/],
+  ['POST', /^\/api\/reels\/\d+\/portada$/], // 👍/👎 a la portada
 ];
 const CONTENT = { sombra: SOMBRA, editor: EDITOR };
 // Rutas de proyecto que el administrador de dirigente NO usa: las de usuarios van por su propia regla.

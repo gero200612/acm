@@ -29,7 +29,7 @@ import { flushAlerts, dailySummary, editorAtrasado, cuentaAlert, AUTH_ERROR, wee
 import { initPlanner, planProject, expiredBlocked, localExpiry, bestSlotsOf } from './planner.js';
 import { initMetrics, readDue, weightsOf, WEIGHT_KEYS } from './metrics.js';
 import { initMarketing, marketingCycle, projectsToCycle } from './marketing.js';
-import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars, textosPropios } from './memory.js';
+import { initMemory, memoryCycle, memoryOf, winningVariables, investigationOf, recipeVars, textosPropios, PORTADA_VARS } from './memory.js';
 import { initKnowledge, addItems, addInstagram, search, stats, fillVectors, KINDS, outliers } from './knowledge.js';
 import { initShare, mountShare, ensureReportLink } from './share.js';
 import { initWatch, watchCycle } from './watch.js';
@@ -147,6 +147,14 @@ CREATE TABLE IF NOT EXISTS clip_reviews (
 CREATE INDEX IF NOT EXISTS clip_reviews_project ON clip_reviews(project_id, id);`);
 // lo aprendido queda anotado con el público de la edición (cada público aprende por separado)
 if (!cols('learnings').includes('publico')) db.exec("ALTER TABLE learnings ADD COLUMN publico TEXT DEFAULT ''");
+// portadas estilo Chango: el territorio y la foto del dirigente (data-URI JPEG ≤ 300 KB) van en el proyecto; el voto 👍/👎 de la portada, en cada versión
+if (!cols('projects').includes('territorio')) db.exec("ALTER TABLE projects ADD COLUMN territorio TEXT DEFAULT ''");
+if (!cols('projects').includes('foto_dirigente')) db.exec("ALTER TABLE projects ADD COLUMN foto_dirigente TEXT DEFAULT ''");
+if (!cols('reels').includes('portada_voto')) db.exec("ALTER TABLE reels ADD COLUMN portada_voto TEXT DEFAULT ''");
+// banco de fotos de referencia por lugar (lugar en minúsculas y sin tildes); si/no = votos sobre portadas hechas con esa foto
+db.exec(`CREATE TABLE IF NOT EXISTS portada_refs (
+  id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, lugar TEXT NOT NULL DEFAULT '', imagen_url TEXT NOT NULL,
+  pagina_url TEXT DEFAULT '', fuente TEXT DEFAULT '', licencia TEXT DEFAULT '', si INTEGER NOT NULL DEFAULT 0, no INTEGER NOT NULL DEFAULT 0, UNIQUE (project_id, imagen_url));`);
 initTrace(db);
 initKnowledge(db);
 initAlerts(db);
@@ -266,7 +274,10 @@ app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
   if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe el proyecto' });
   const w = winningVariables(db, pid);
   // pedidos: comentarios por segundo y motivos de rechazo (para no repetir el error); referencias: reels de otros que el equipo marcó como inspiración
-  res.json({ project_id: pid, aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid), publicos: publicosDe(pid),
+  const proy = get('SELECT name, territorio, foto_dirigente FROM projects WHERE id = ?', pid);
+  res.json({ project_id: pid, territorio: proy.territorio || '', nombre: proy.name || '', foto_dirigente: proy.foto_dirigente || '',
+    portada_refs: all('SELECT lugar, imagen_url, pagina_url, fuente, licencia, si, no FROM portada_refs WHERE project_id = ? ORDER BY id', pid),
+    aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid), publicos: publicosDe(pid),
     // cómo escribe el dirigente (sus captions con más me gusta): el editor escribe los textos con esa voz
     ejemplos_textos: textosPropios(db, pid),
     // lo aprendido de cada público por separado (sus aprobaciones y comparaciones): el editor arma las versiones de ese público con esto
@@ -540,7 +551,7 @@ function update(table, id, data) {
   if (!keys.length) return;
   run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => data[k]), id);
 }
-const P_FIELDS = ['name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode', 'score_weights', 'publicos', 'marca'];
+const P_FIELDS = ['territorio', 'name', 'role', 'org', 'election_date', 'propaganda_until', 'padron', 'color', 'notes', 'demo', 'kind', 'ads_networks', 'review_mode', 'score_weights', 'publicos', 'marca'];
 const FUENTES = ['bootzy']; // vacío = la del editor
 function limpiarMarca(v) {
   let m = v; if (typeof m === 'string') { try { m = JSON.parse(m || '{}'); } catch { return null; } }
@@ -619,11 +630,12 @@ const NETWORKS = ['instagram', 'facebook', 'tiktok', 'youtube'];
 // lo que ve la pantalla de la pauta de TikTok/Google: los valores comunes tal cual, de los secretos solo si hay uno guardado
 const publicAdsFields = (net, ac) => Object.fromEntries(Object.entries(ADS_FIELDS[net]).map(([k, secret]) => [k, secret ? { set: !!ac[k] } : { value: ac[k] || '' }]));
 function projectSummary(full) {
-  const { ads_creds, ads_state, ...p } = full;
+  const { ads_creds, ads_state, foto_dirigente, ...p } = full; // la foto es grande: el panel solo necesita saber si hay
   const ac = vault.open(ads_creds);
   const c = (sql) => get(sql, p.id).n;
   return {
     ...p,
+    tiene_foto_dirigente: !!foto_dirigente,
     publicos: (() => { try { return JSON.parse(p.publicos || '[]'); } catch { return []; } })(),
     marca: (() => { try { return JSON.parse(p.marca || '{}'); } catch { return {}; } })(),
     score_weights: weightsOf(p.score_weights),
@@ -701,8 +713,39 @@ app.put('/api/projects/:id', upload.single('photo'), (req, res) => {
   if ('demo' in data) data.demo = String(data.demo) === '1' ? 1 : 0;
   const bad = circuitFields(data, p.kind); if (bad) return res.status(400).json({ error: bad });
   if (req.file) { rmFile(p.photo); data.photo = req.file.filename; }
+  if ('territorio' in data) data.territorio = String(data.territorio || '').trim().slice(0, 200);
   update('projects', p.id, data);
   res.json(projectSummary(get('SELECT * FROM projects WHERE id = ?', p.id)));
+});
+// Foto del dirigente para reconocerlo en las portadas: se achica a JPEG ≤ 300 KB con ffmpeg y queda como data-URI en el proyecto
+const fotoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const FOTO_MAX = 300 * 1024;
+const jpegDe = (buf, ancho, q) => new Promise((resolve, reject) => {
+  const p = spawn('ffmpeg', ['-v', 'error', '-protocol_whitelist', 'pipe', '-i', 'pipe:0', '-frames:v', '1', '-vf', `scale='min(${ancho},iw)':-2`, '-q:v', String(q), '-f', 'mjpeg', 'pipe:1'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const out = []; let err = '';
+  p.stdout.on('data', (d) => out.push(d)); p.stderr.on('data', (d) => { err = (err + d).slice(-300); });
+  p.on('error', reject); p.stdin.on('error', () => {});
+  p.on('close', (c) => (c === 0 && out.length ? resolve(Buffer.concat(out)) : reject(new Error(err.trim() || `ffmpeg salió con ${c}`))));
+  p.stdin.end(buf);
+});
+async function achicarFoto(buf) {
+  for (const [ancho, q] of [[720, 4], [720, 8], [540, 10], [400, 14], [300, 20]]) { const j = await jpegDe(buf, ancho, q); if (j.length <= FOTO_MAX) return j; }
+  throw new Error('No pude achicar la foto a 300 KB');
+}
+app.put('/api/projects/:id/foto-dirigente', fotoUpload.single('foto'), async (req, res) => {
+  const p = get('SELECT id FROM projects WHERE id = ?', req.params.id);
+  if (!p) return res.status(404).json({ error: 'No existe' });
+  if (!req.file) return res.status(400).json({ error: 'Falta la foto' });
+  try {
+    const j = await achicarFoto(req.file.buffer);
+    run('UPDATE projects SET foto_dirigente = ? WHERE id = ?', `data:image/jpeg;base64,${j.toString('base64')}`, p.id);
+    res.json({ ok: true, bytes: j.length });
+  } catch (e) { res.status(400).json({ error: /300 KB/.test(e.message) ? e.message : 'No pude leer esa foto: probá con un JPG o PNG' }); }
+});
+app.delete('/api/projects/:id/foto-dirigente', (req, res) => {
+  if (!get('SELECT id FROM projects WHERE id = ?', req.params.id)) return res.status(404).json({ error: 'No existe' });
+  run("UPDATE projects SET foto_dirigente = '' WHERE id = ?", req.params.id);
+  res.json({ ok: true });
 });
 app.delete('/api/projects/:id', (req, res) => {
   const p = get('SELECT * FROM projects WHERE id = ?', req.params.id);
@@ -1569,7 +1612,7 @@ app.get('/api/projects/:id/review', (req, res) => {
   const p = get('SELECT id, review_mode FROM projects WHERE id = ?', req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe el proyecto' });
   const reels = all(`SELECT r.id, r.title, r.caption, r.hashtags, r.file, r.preview, r.cover, r.duration, r.clip_id, r.moment, r.recipe, r.review, r.review_note, r.created_at, r.publico,
-    r.redo, r.redo_pedido, r.redo_detail, c.title AS crudo_title, c.etiqueta AS crudo_etiqueta
+    r.redo, r.redo_pedido, r.redo_detail, r.portada_voto, c.title AS crudo_title, c.etiqueta AS crudo_etiqueta
     FROM reels r LEFT JOIN reels c ON c.id = r.source_id WHERE r.project_id = ? AND r.kind = 'listo' AND r.clip_id IS NOT NULL ORDER BY r.id`, p.id);
   const clips = new Map();
   const notes = commentsOf(db, reels.map((r) => r.id));
@@ -1639,14 +1682,51 @@ function reviewClip(clipId, body, { onlyProject = null, onlyPending = false, ori
   const why = 'El recorte se rechazó: ya no está aprobado.';
   for (const id of rejected) run("UPDATE posts SET status = 'bloqueado', note = ? WHERE reel_id = ? AND status = 'programado'", why, id);
   run('INSERT INTO clip_reviews (clip_id, project_id, decision, rechazar_ids, comentario, reviewer) VALUES (?, ?, ?, ?, ?, ?)', clipId, projectId, decision, JSON.stringify([...rejected]), who ? `${note}${note ? ' ' : ''}(por link: ${who})`.trim() : note, reviewer || (who ? `link: ${who}` : ''));
-  for (const { r, wins } of affected) for (const [variable, value] of Object.entries(recipeVars(parseJson(r.recipe))))
+  for (const { r, wins } of affected) for (const [variable, value] of Object.entries(recipeVars(parseJson(r.recipe)))) {
+    if (variable.startsWith('portada_')) continue; // la portada se aprende con su propio 👍/👎, no con aprobar o rechazar el video
     run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin, publico) VALUES (?, ?, ?, NULL, ?, 1, ?, ?)", projectId, variable, value, wins, origin, r.publico || '');
+  }
   if (affected.some((x) => x.wins)) replanificar(projectId);
   const mode = get('SELECT review_mode FROM projects WHERE id = ?', projectId).review_mode;
   const next = reviewMode(mode, all('SELECT decision FROM clip_reviews WHERE id IN (SELECT max(id) FROM clip_reviews WHERE project_id = ? GROUP BY clip_id) ORDER BY id DESC LIMIT 20', projectId).map((x) => x.decision));
   if (next !== mode) run('UPDATE projects SET review_mode = ? WHERE id = ?', next, projectId);
   return { status: 200, body: { ok: true, review_mode: next, reels: all('SELECT id, review FROM reels WHERE clip_id = ? ORDER BY id', clipId), rehaciendo: redo.length, programado: programadoDe([...approved]) } };
 }
+// 👍/👎 a la portada de una versión: suma (o deshace) en learnings las variables portada_* y en portada_refs la foto de referencia
+const sinTildes = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+function votarPortada(reel, voto) {
+  const prev = reel.portada_voto || '';
+  if (prev === (voto || '')) return;
+  const rec = parseJson(reel.recipe) || {}, pid = reel.project_id, pub = reel.publico || '';
+  const vars = Object.entries(rec.variables || {}).filter(([k, v]) => PORTADA_VARS.includes(k) && typeof v === 'string' && v);
+  const ref = rec.portada?.chango?.referencia, imagen = String(ref?.imagen_url || '').slice(0, 2000);
+  // signo +1 suma el voto, -1 lo deshace: 👍 mueve victorias y pruebas, 👎 solo las pruebas
+  const mover = (v, signo) => {
+    const w = v === 'si' ? signo : 0;
+    for (const [variable, value] of vars) {
+      const f = get("SELECT id FROM learnings WHERE project_id = ? AND variable = ? AND value = ? AND origin = 'opinion_dueno' AND network IS NULL AND publico = ?", pid, variable, value, pub);
+      if (f) run("UPDATE learnings SET wins = max(0, wins + ?), trials = max(0, trials + ?), updated_at = datetime('now') WHERE id = ?", w, signo, f.id);
+      else if (signo > 0) run("INSERT INTO learnings (project_id, variable, value, network, wins, trials, origin, publico) VALUES (?, ?, ?, NULL, ?, ?, 'opinion_dueno', ?)", pid, variable, value, w, signo, pub);
+    }
+    if (imagen) {
+      const col = v === 'si' ? 'si' : 'no';
+      if (signo > 0) run(`INSERT INTO portada_refs (project_id, lugar, imagen_url, pagina_url, fuente, licencia, ${col}) VALUES (?, ?, ?, ?, ?, ?, 1)
+        ON CONFLICT (project_id, imagen_url) DO UPDATE SET ${col} = ${col} + 1`, pid, sinTildes(ref.lugar), imagen, String(ref.pagina_url || '').slice(0, 2000), String(ref.fuente || '').slice(0, 200), String(ref.licencia || '').slice(0, 200));
+      else run(`UPDATE portada_refs SET ${col} = max(0, ${col} - 1) WHERE project_id = ? AND imagen_url = ?`, pid, imagen);
+    }
+  };
+  if (prev) mover(prev, -1);
+  if (voto) mover(voto, 1);
+  run('UPDATE reels SET portada_voto = ? WHERE id = ?', voto || '', reel.id);
+}
+app.post('/api/reels/:id/portada', (req, res) => {
+  const voto = req.body?.voto ?? null;
+  if (voto !== null && voto !== 'si' && voto !== 'no') return res.status(400).json({ error: "El voto es 'si', 'no' o null" });
+  const r = get("SELECT * FROM reels WHERE id = ? AND kind = 'listo'", req.params.id);
+  if (!r) return res.status(404).json({ error: 'No existe esa versión' });
+  votarPortada(r, voto);
+  res.json({ ok: true, voto: voto || '' });
+});
 // dónde y cuándo sale lo que se acaba de aprobar (lo programa el planificador al aprobar)
 function programadoDe(ids) {
   if (!ids.length) return { publicaciones: 0, cuentas: 0, primera: '' };

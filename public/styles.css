@@ -1644,3 +1644,13 @@ kbd { font: 600 11px var(--sans); border: 1px solid var(--line); border-radius: 
 .ci-row span { color: var(--muted); }
 .ci-row p { margin: 0; }
 @media (max-width: 560px) { .ci-row { grid-template-columns: 1fr; gap: 2px; } .ci-n { margin-left: 0; } }
+
+/* portada: voto y foto de referencia */
+.ap-portada { display: grid; gap: 6px; margin: 6px 0; }
+.ap-portada-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ap-portada-v { display: inline-flex; gap: 6px; }
+.ap-portada-v button { border: 1px solid var(--line, #e2e4e9); background: transparent; border-radius: 8px; padding: 2px 10px; font-size: 16px; cursor: pointer; }
+.ap-portada-v button[aria-pressed="true"] { background: #e3f7ec; border-color: #30a46c; }
+.ap-portada-v button[data-v="no"][aria-pressed="true"] { background: #fdecee; border-color: #e5484d; }
+.ap-ref { display: flex; gap: 8px; align-items: center; text-decoration: none; color: inherit; }
+.ap-ref img { width: 56px; height: 72px; object-fit: cover; border-radius: 6px; flex: none; }
