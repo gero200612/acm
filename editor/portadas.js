@@ -41,12 +41,12 @@ export const HERRAMIENTA_DECIDIR = {
       tipo: { type: 'string', enum: ['lugar', 'escena', 'ninguno'], description: 'lugar: se nombra o es claro un lugar concreto; escena: el tema no es un lugar y se representa con una escena del territorio; ninguno: no se puede mostrar nada sin inventar' },
       lugar: { type: 'string', description: 'Nombre del lugar o de la escena, corto (ej.: «Catedral de San Isidro», «patrullero en calle arbolada de Boulogne»)' },
       escena: { type: 'string', description: 'En inglés, una frase: qué se ve en el fondo' },
-      consultas: { type: 'array', items: { type: 'string' }, description: 'De 2 a 4 búsquedas de fotos, de la más específica a la más general, con el nombre del lugar y la ciudad/país' },
+      consultas: { type: 'array', items: { type: 'string' }, description: 'De 2 a 4 búsquedas de fotos, de la más específica a la más general, CORTAS (2 a 4 palabras, ej.: «Costanera San Isidro»): el buscador exige todas las palabras, una consulta larga no devuelve nada' },
     },
     required: ['tipo', 'lugar', 'escena', 'consultas'],
   },
 };
-const SYSTEM_DECIDIR = `Sos editor visual de reels de un dirigente político argentino. Para la portada hace falta una foto REAL de fondo: del lugar del que se habla o, si el tema no es un lugar (seguridad, impuestos, tránsito), de una escena del territorio que lo represente. No inventes lugares: si el momento no nombra ni insinúa un lugar y no hay territorio, devolvé tipo «ninguno». Las consultas deben incluir la ciudad o el país para no confundir homónimos (por ejemplo «San Isidro» existe en otros países).`;
+const SYSTEM_DECIDIR = `Sos editor visual de reels de un dirigente político argentino. Para la portada hace falta una foto REAL de fondo: del lugar del que se habla o, si el tema no es un lugar (seguridad, impuestos, tránsito), de una escena del territorio que lo represente. No inventes lugares: si el momento no nombra ni insinúa un lugar y no hay territorio, devolvé tipo «ninguno». Las consultas deben incluir la ciudad o el país para no confundir homónimos (por ejemplo «San Isidro» existe en otros países). Las consultas tienen que ser CORTAS, de 2 a 4 palabras (nombre del lugar + ciudad): Wikimedia y Openverse piden todas las palabras, y una consulta larga no devuelve nada.`;
 
 export const HERRAMIENTA_ELEGIR = {
   name: 'elegir_fotos_portada',
