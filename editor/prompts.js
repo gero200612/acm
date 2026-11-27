@@ -108,7 +108,7 @@ export function usuarioMomentos({ palabras = [], investigacion = [], aprendizaje
   return partes.join('\n\n');
 }
 
-export const SYSTEM_TEXTOS = `Sos community manager de redes sociales en Argentina. Escribís en español rioplatense (voseo), natural, sin sonar a publicidad ni a robot, sin emojis de relleno. Para un mismo recorte de video te piden tres versiones DISTINTAS entre sí: cada una con su caption, sus hashtags, el texto del gancho (lo que se lee en pantalla los primeros 3 segundos) y el texto de la portada. El gancho y la portada son CARTELES como los de los reels de @gustavo_posse: de 1 a 3 palabras, no una frase (por ejemplo «OBRAS SIN FIN», «¿Y LA VÍA?», «SIN VENTAS»): la palabra o las dos palabras más fuertes del tema, sin puntuación de relleno ni verbos largos. Nada de oraciones. Los tres captions tienen que ser claramente diferentes (otro ángulo, otro arranque), no la misma frase reordenada. Captions de hasta 220 caracteres. Hashtags: de 4 a 8, en minúscula, sin espacios, con #, mezclando uno amplio y otros específicos del tema.`;
+export const SYSTEM_TEXTOS = `Sos community manager de redes sociales en Argentina. Escribís en español rioplatense (voseo), natural, sin sonar a publicidad ni a robot, sin emojis de relleno. Para un mismo recorte de video te piden tres versiones DISTINTAS entre sí: cada una con su caption, sus hashtags, el texto del gancho (lo que se lee en pantalla los primeros 3 segundos) y el texto de la portada (más su versión en 2 líneas: una línea corta que prepara y otra de 1 a 3 palabras que va enorme). El gancho y la portada son CARTELES como los de los reels de @gustavo_posse: de 1 a 3 palabras, no una frase (por ejemplo «OBRAS SIN FIN», «¿Y LA VÍA?», «SIN VENTAS»): la palabra o las dos palabras más fuertes del tema, sin puntuación de relleno ni verbos largos. Nada de oraciones. Los tres captions tienen que ser claramente diferentes (otro ángulo, otro arranque), no la misma frase reordenada. Captions de hasta 220 caracteres. Hashtags: de 4 a 8, en minúscula, sin espacios, con #, mezclando uno amplio y otros específicos del tema.`;
 
 export const HERRAMIENTA_TEXTOS = {
   name: 'registrar_textos',
@@ -124,6 +124,8 @@ export const HERRAMIENTA_TEXTOS = {
             caption: { type: 'string' }, hashtags: { type: 'array', items: { type: 'string' } },
             gancho_texto: { type: 'string', description: 'De 1 a 3 palabras (un cartel, no una frase); vacío si la versión no lleva texto de gancho' },
             portada_texto: { type: 'string', description: 'De 1 a 3 palabras (un cartel, no una frase)' },
+            portada_linea1: { type: 'string', description: 'Portada en 2 líneas: la primera, corta (hasta 5 palabras), prepara el remate (ej.: «Lo que no te cuentan de»)' },
+            portada_linea2: { type: 'string', description: 'Portada en 2 líneas: la segunda, de 1 a 3 palabras, va ENORME (ej.: «LA CATEDRAL»); no repite la primera' },
             frase_gancho: { type: 'integer', description: 'Solo si la versión lleva un adelanto (lo mejor primero): el número de la frase elegida de la lista de frases; 0 si no hay ninguna que sirva' },
           },
           required: ['caption', 'hashtags', 'gancho_texto', 'portada_texto'],

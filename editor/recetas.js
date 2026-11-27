@@ -15,6 +15,10 @@ export const OPCIONES = {
   largo: ['completo', 'medio', 'corto'],
   // Transición en cada corte interno del reel (donde se sacan pausas y entre tramos de un tema partido), con su sonido bajo la voz; el Estudio pone como mucho una cada 2,5 s. seco = corte a secas
   transicion: ['seco', 'zoom', 'destello', 'barrido', 'glitch'],
+  // Portada estilo Chango (portadas.js): luz y plano del fondo generado, y de qué lado va la persona. Se aprenden con el 👍/👎 de la portada.
+  portada_luz: ['dorada', 'dia', 'azul', 'noche'],
+  portada_plano: ['lejos', 'medio', 'cerca'],
+  portada_lado: ['izq', 'der', 'centro'],
 };
 const DIMS = Object.keys(OPCIONES);
 // «karaoke» era un estilo: ahora es el estilo `recuadro` con el karaoke encendido. Lo guardado con el nombre viejo (aprendizajes, estilos de público, recetas pendientes) vale como `recuadro`.
@@ -74,7 +78,7 @@ function elegirEstilos({ semilla = 0, aprendizajes, estilo } = {}) {
   // el karaoke ganador «sin» también cuenta como algo aprendido (hay una ganadora que seguir y una versión que explora)
   const hay = Object.keys(g).length > 0 || (karaokeDe(estilo) && puedeSinKaraoke(estilo) && normalizarAprendizajes(aprendizajes).karaoke === 'sin');
   // sin aprendizajes: cada dimensión rota con su propio desfase, así las 3 difieren y, entre momentos, se reparten parejo
-  const rotada = (i) => ({ gancho: elegir('gancho', s + i), subtitulos: elegir('subtitulos', 3 * s + i), musica: elegir('musica', s + i + 1), ritmo: elegir('ritmo', s + i + 1), largo: elegir('largo', s + i + 2), transicion: elegir('transicion', s + i + 3) });
+  const rotada = (i) => ({ gancho: elegir('gancho', s + i), subtitulos: elegir('subtitulos', 3 * s + i), musica: elegir('musica', s + i + 1), ritmo: elegir('ritmo', s + i + 1), largo: elegir('largo', s + i + 2), transicion: elegir('transicion', s + i + 3), portada_luz: elegir('portada_luz', s + i), portada_plano: elegir('portada_plano', s + i + 1), portada_lado: elegir('portada_lado', s + i + 2) });
   // el reparto de ganchos es fijo (uno de cada tipo) mientras el estilo del público deje usarlos; los aprendizajes no lo pisan: es lo que se está probando
   const probar = GANCHOS_DE_PRUEBA.every((x) => O.gancho.includes(x));
   const gancho = (i) => (probar ? GANCHOS_DE_PRUEBA[(s + i) % GANCHOS_DE_PRUEBA.length] : undefined);
@@ -125,6 +129,12 @@ export function cartelCorto(texto, max = MAX_PALABRAS_CARTEL) {
   const tramos = String(texto).split(/[:;,.—–|]+|\s-\s/).map(pal).filter((t) => t.length);
   const corto = [...tramos].reverse().find((t) => t.length <= max);
   return corto ? corto.join(' ') : ''; // sin un tramo corto, mejor sin cartel que palabras sueltas sin sentido
+}
+// Textos de la portada de una versión: línea 2 de 1 a 3 palabras (va enorme) y línea 1 corta. Sin línea 2 propia, vale el cartel de siempre.
+export function lineasDePortada(texto = {}, respaldo = '') {
+  const linea2 = cartelCorto(texto.portada_linea2) || respaldo;
+  const linea1 = String(texto.portada_linea1 || '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 6).join(' ');
+  return { linea1: linea1.toLowerCase() === linea2.toLowerCase() ? '' : linea1, linea2 };
 }
 const r1 = (x) => Math.round(x * 10) / 10;
 const r3 = (x) => Math.round(x * 1000) / 1000;
@@ -205,7 +215,7 @@ export function construirReceta({ v, momento, palabras = [], textos, marca = {},
     explora: v.explora,
     ...(Object.keys(mr).length ? { marca: mr } : {}),
     ...(v.transicion ? { transicion: v.transicion } : {}),
-    variables: { gancho: tipo, subtitulos: v.subtitulos, musica: v.musica, ritmo: v.ritmo, largo: v.largo, ...(v.transicion ? { transicion: v.transicion } : {}), karaoke: v.karaoke !== false ? 'con' : 'sin' },
+    variables: { gancho: tipo, subtitulos: v.subtitulos, musica: v.musica, ritmo: v.ritmo, largo: v.largo, ...(v.transicion ? { transicion: v.transicion } : {}), portada_luz: v.portada_luz, portada_plano: v.portada_plano, portada_lado: v.portada_lado, karaoke: v.karaoke !== false ? 'con' : 'sin' },
     caption: String(textos.caption || '').trim(), hashtags: textos.hashtags,
   };
 }
@@ -227,8 +237,10 @@ export function validarTextos(resp) {
   return out;
 }
 
-export function crearArmarRecetas({ claude, modelo = MODELOS.textos } = {}) {
-  return async ({ momento, transcripcion, palabras, aprendizajes, marca = {}, pedidos, ejemplosTextos = [] } = {}) => {
+// `portadas` (portadas.js) arma el fondo estilo Chango de cada versión; sin él, o si falla, las recetas salen con la portada de siempre.
+// `portada`: lo que ACM sabe para eso { territorio, nombre, foto_dirigente, portada_refs }.
+export function crearArmarRecetas({ claude, modelo = MODELOS.textos, portadas = null, log = console.log } = {}) {
+  return async ({ momento, transcripcion, palabras, aprendizajes, marca = {}, pedidos, ejemplosTextos = [], portada = {} } = {}) => {
     palabras = palabras || transcripcion?.palabras || [];
     const vars = elegirVariables({ semilla: momento.idx ?? momento.id ?? 0, aprendizajes, estilo: momento.datos?.publico_estilo });
     const tr = Array.isArray(momento.datos?.tramos) && momento.datos.tramos.length > 1 ? momento.datos.tramos : [momento];
@@ -239,10 +251,28 @@ export function crearArmarRecetas({ claude, modelo = MODELOS.textos } = {}) {
     try { textos = validarTextos(await claude.estructurado(pedido)); }
     catch (e) { if (/^Falta ANTHROPIC/.test(e.message)) throw e; textos = validarTextos(await claude.estructurado(pedido)); } // un reintento
     const usadas = [];
-    return vars.map((v, i) => {
+    const recetas = vars.map((v, i) => {
       const frase = GANCHOS_CON_ADELANTO.includes(v.gancho) && candidatas.length ? elegirFrase(candidatas, textos[i].frase_gancho, usadas) : undefined;
       if (frase) usadas.push(frase);
       return construirReceta({ v, momento, palabras, textos: textos[i], marca, frase });
     });
+    if (portadas) await conPortadaChango({ portadas, recetas, vars, textos, momento, texto: enMomento.map((p) => p.texto).join(' ').slice(0, 6000), portada, log });
+    return recetas;
   };
+}
+
+// Suma `portada.chango` a las recetas de un momento. Cualquier falla deja las recetas como estaban y anota el motivo en `portada_motivo`.
+async function conPortadaChango({ portadas, recetas, vars, textos, momento, texto, portada, log }) {
+  let res;
+  try {
+    const versiones = recetas.map((r, i) => ({ luz: vars[i].portada_luz, plano: vars[i].portada_plano, lado: vars[i].portada_lado, ...lineasDePortada(textos[i], r.portada.texto) }));
+    res = await portadas.porMomento({ momento, texto, versiones, ctx: portada });
+  } catch (e) { res = recetas.map(() => ({ motivo: e.message })); }
+  recetas.forEach((r, i) => {
+    const x = res?.[i];
+    if (x?.chango) { r.portada.chango = x.chango; r.variables.portada_plano = x.plano || r.variables.portada_plano; }
+    else r.portada_motivo = String(x?.motivo || 'sin respuesta').slice(0, 300);
+  });
+  const motivos = recetas.map((r, i) => (r.portada.chango ? '' : `v${i + 1}: ${r.portada_motivo}`)).filter(Boolean);
+  if (motivos.length) log(`[portadas] momento ${momento.id ?? momento.idx ?? '?'} sin portada chango en ${motivos.length} de ${recetas.length}: ${[...new Set(motivos.map((m) => m.replace(/^v\d+: /, '')))].join(' | ')}`);
 }

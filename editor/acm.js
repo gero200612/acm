@@ -32,6 +32,8 @@ export function crearAcm({ url, token, reintentos = 3, esperaMs = 1000, fetchFn 
           pedidos: j.pedidos && typeof j.pedidos === 'object' ? j.pedidos : { comentarios: [], rechazos: [] }, ejemplosTextos: Array.isArray(j.ejemplos_textos) ? j.ejemplos_textos : [],
           publicoCrudo: j.publico_crudo && typeof j.publico_crudo === 'object' ? j.publico_crudo : null,
           // lo que el equipo escribió al subir el crudo: de qué es y qué buscar adentro
+          // para las portadas estilo Chango: territorio, nombre del proyecto, foto del dirigente y banco de fotos de referencia
+          portada: { territorio: typeof j.territorio === 'string' ? j.territorio : '', nombre: typeof j.nombre === 'string' ? j.nombre : '', foto_dirigente: typeof j.foto_dirigente === 'string' ? j.foto_dirigente : '', portada_refs: Array.isArray(j.portada_refs) ? j.portada_refs : [] },
           descripcion: typeof j.descripcion === 'string' ? j.descripcion : '', buscar: typeof j.buscar === 'string' ? j.buscar : '' };
       } catch { return { aprendizajes: [], investigacion: [] }; }
     },

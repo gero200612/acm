@@ -19,6 +19,8 @@ import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
 import { crearAnalista, corregirReceta, elegirCuadros } from './analista.js';
 import { tramosAEstado, notasDe } from './mirar.js';
+import { crearPortadas, normLugar } from './portadas.js';
+import { lineasDePortada } from './recetas.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (c, what) => { if (!c) throw new Error(what); };
@@ -921,6 +923,172 @@ casos.push(
     const r = tramosAEstado({ tramos: [{ planilla: 2, cuadro_desde: 1, cuadro_hasta: 9, se_ve: 'b' }, { planilla: 1, cuadro_desde: 3, cuadro_hasta: 2, se_ve: 'a' }, { planilla: 5, cuadro_desde: 1, cuadro_hasta: 1 }, { planilla: 1, cuadro_desde: 0, cuadro_hasta: 1 }] }, pl, 2);
     eq(r.map((x) => [x.desde_s, x.hasta_s, x.se_ve]), [[2, 6, 'a'], [8, 11, 'b']], 'swap, tope de la planilla, inválidos fuera');
     eq(notasDe({ notas_mirar: ['a'], notas_buscar: ['b'], notas_momentos: ['c'] }), ['a', 'b', 'c'], 'notas');
+  }],
+);
+
+// --- Portadas estilo Chango: Claude, Wikimedia, Brave y fal simulados ---
+const JPG = (n) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, n)]);
+// el mundo de afuera: `wiki` = fotos que devuelve Wikimedia, `brave` = las de Brave, `elegir` decide qué fotos (números) acepta la visión, `fal` falla o no
+function mundoPortada(o = {}) {
+  const w = { llamadas: [], falBodies: [], visionTextos: [], decisiones: 0, ...o };
+  const wiki = o.wiki ?? [1, 2, 3, 4, 5].map((i) => `https://upload.test/wiki${i}.jpg`);
+  const brave = o.brave ?? [1, 2].map((i) => `https://web.test/brave${i}.jpg`);
+  w.fetchFn = async (url, init = {}) => {
+    const u = String(url), res = (code, body) => new Response(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body), { status: code });
+    w.llamadas.push(u.split('?')[0]);
+    if (u.startsWith('https://commons.wikimedia.org/w/api.php')) {
+      if (o.wikiFalla) return res(500, 'x');
+      const pages = Object.fromEntries(wiki.map((src, i) => [String(i), { title: `File:Catedral ${i}.jpg`, index: i + 1, imageinfo: [{ thumburl: src, url: src, descriptionurl: `https://commons.test/File:Catedral${i}`, mime: 'image/jpeg', width: 3000, height: 2000, extmetadata: { LicenseShortName: { value: 'CC BY-SA 4.0' }, Artist: { value: '<a href="x">Ana</a>' } } }] }]));
+      pages.x = { title: 'File:Plano.svg', index: 99, imageinfo: [{ thumburl: 'https://upload.test/x.png', mime: 'image/svg+xml', width: 3000, height: 2000 }] };
+      return res(200, { query: { pages } });
+    }
+    if (u.startsWith('https://api.search.brave.com/')) {
+      w.braveToken = init.headers['x-subscription-token'];
+      return res(200, { results: brave.map((src, i) => ({ title: `Web ${i}`, url: `https://pagina.test/${i}`, source: 'pagina.test', thumbnail: { src: src + '?t' }, properties: { url: src } })) });
+    }
+    if (u.startsWith('https://fal.run/')) {
+      const b = JSON.parse(init.body); w.falBodies.push({ modelo: u.slice('https://fal.run/'.length), auth: init.headers.authorization, ...b });
+      if (o.falFalla && o.falFalla(w.falBodies.length - 1)) return res(500, 'sin crédito');
+      return res(200, { images: [{ url: `https://fal.media/fondo${w.falBodies.length}.jpg` }] });
+    }
+    if (/^https:\/\/(upload|web)\.test\//.test(u)) return u.includes('rota') ? res(404, '') : res(200, JPG(u.length));
+    return res(404, '');
+  };
+  w.claude = { pedidos: [], async estructurado(p) {
+    w.claude.pedidos.push(p);
+    if (o.claudeFalla) throw new Error('Claude caído');
+    if (p.herramienta.name === 'decidir_portada') { w.decisiones++; return o.decision ?? { tipo: 'lugar', lugar: 'Catedral de San Isidro', escena: 'the cathedral of San Isidro', consultas: ['Catedral de San Isidro Buenos Aires', 'Catedral San Isidro'] }; }
+    if (p.herramienta.name === 'elegir_fotos_portada') {
+      w.visionTextos = p.usuario.filter((b) => b.type === 'text').map((b) => b.text);
+      w.imagenes = p.usuario.filter((b) => b.type === 'image').length;
+      return { elegidas: (o.elegir ?? [1, 2, 3]).map((foto) => ({ foto, motivo: 'ok' })) };
+    }
+    return { versiones: [0, 1, 2].map((i) => ({ caption: `Caption ${w.claude.pedidos.length}-${i}`, hashtags: ['#club', `#tema${i}`], gancho_texto: `Gancho ${i}`, portada_texto: `Portada ${i}`, portada_linea1: `Linea ${i}`, portada_linea2: `Remate ${i}` })) };
+  } };
+  return w;
+}
+const armarConPortada = (w, { env = { FAL_KEY: 'k-fal' }, ctx = { territorio: 'San Isidro, Buenos Aires', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,AAAA', portada_refs: [] }, momento = MOM, log = () => {} } = {}) =>
+  crearArmarRecetas({ claude: w.claude, portadas: crearPortadas({ claude: w.claude, fetchFn: w.fetchFn, env, log }), log })({ momento, transcripcion: { palabras: PALABRAS }, aprendizajes: [], portada: ctx });
+
+casos.push(
+  ['Portadas', 'portada_luz, portada_plano y portada_lado distintos en las 3 versiones sin aprendizaje, y tiradas a la ganadora con aprendizaje', () => {
+    for (let k = 0; k < 30; k++) for (const d of ['portada_luz', 'portada_plano', 'portada_lado']) eq(new Set(elegirVariables({ semilla: k }).map((v) => v[d])).size, 3, `${d} distinto en las 3 (semilla ${k})`);
+    eq(OPCIONES.portada_luz, ['dorada', 'dia', 'azul', 'noche'], 'valores de la luz'); eq(OPCIONES.portada_lado, ['izq', 'der', 'centro'], 'valores del lado');
+    const v = elegirVariables({ semilla: 4, aprendizajes: { portada_luz: 'noche' } });
+    eq(v.filter((x) => x.portada_luz === 'noche').length >= 2, true, 'la ganadora va en las 2 versiones de base');
+    eq(normalizarAprendizajes({ portada_plano: 'cerca' }).portada_plano, 'cerca', 'el aprendizaje de portada se normaliza');
+    eq(elegirVariables({ semilla: 1, aprendizajes: { portada_lado: 'der' }, estilo: { portada_lado: ['izq', 'centro'] } }).some((x) => x.portada_lado === 'der'), false, 'una ganadora fuera del estilo no se usa');
+  }],
+  ['Portadas', 'Haiku pide la portada en 2 líneas; sin portadas la receta queda como hoy (portada.texto, sin chango) y lleva las variables portada_*', async () => {
+    const claude = claudeFalso();
+    const rs = await crearArmarRecetas({ claude })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: [] });
+    const props = claude.pedidos[0].herramienta.input_schema.properties.versiones.items.properties;
+    yes(props.portada_linea1 && props.portada_linea2 && props.portada_texto, 'pide linea1, linea2 y sigue pidiendo portada_texto');
+    for (const r of rs) yes(r.portada.texto && !('chango' in r.portada) && r.variables.portada_luz && r.variables.portada_plano && r.variables.portada_lado && !('portada_motivo' in r), 'portada de hoy + variables');
+    eq(lineasDePortada({ portada_linea1: 'Lo que no te cuentan de', portada_linea2: 'La Catedral de San Isidro hoy' }, 'Mirá esto'), { linea1: 'Lo que no te cuentan de', linea2: 'Mirá esto' }, 'una línea 2 larga cae al respaldo');
+    eq(lineasDePortada({ portada_linea1: 'x', portada_linea2: 'Gran Obra' }), { linea1: 'x', linea2: 'Gran Obra' }, 'líneas buenas');
+    eq(lineasDePortada({ portada_linea1: 'Obra', portada_linea2: 'obra' }).linea1, '', 'la línea 1 no repite la 2');
+  }],
+  ['Portadas', 'Camino feliz: receta.portada.chango según el contrato, un fondo por versión en fal con foto como data-URI, luz y plano de las variables', async () => {
+    const w = mundoPortada();
+    const rs = await armarConPortada(w);
+    eq(rs.length, 3, 'tres recetas');
+    for (const [i, r] of rs.entries()) {
+      const c = r.portada.chango;
+      yes(c && /^https:\/\/fal\.media\/fondo\d\.jpg$/.test(c.fondo_url), `v${i + 1} tiene fondo`);
+      eq([c.linea1, c.linea2, c.lado, c.nombre, c.foto_dirigente], [`Linea ${i}`, `Remate ${i}`, r.variables.portada_lado, 'Posse', 'data:image/jpeg;base64,AAAA'], 'campos del contrato');
+      eq(Object.keys(c.referencia).sort(), ['fuente', 'imagen_url', 'licencia', 'lugar', 'pagina_url'], 'referencia del contrato');
+      eq(c.referencia.lugar, 'catedral de san isidro', 'lugar normalizado');
+      yes(c.referencia.fuente === 'Wikimedia Commons' && c.referencia.licencia.startsWith('CC BY-SA 4.0') && c.referencia.pagina_url.startsWith('https://commons.test/'), 'fuente y licencia a la vista');
+      yes(r.portada.texto && !('portada_motivo' in r), 'portada.texto de respaldo se mantiene');
+    }
+    eq(new Set(rs.map((r) => r.portada.chango.referencia.imagen_url)).size, 3, 'tres fotos distintas');
+    eq(w.falBodies.length, 3, 'tres fondos');
+    for (const [i, b] of w.falBodies.entries()) {
+      eq([b.modelo, b.auth, b.num_images, b.image_size], ['bytedance/seedream/v5.5/edit', 'Key k-fal', 1, { width: 1152, height: 2048 }], 'llamada a fal');
+      yes(/^data:image\/jpeg;base64,/.test(b.image_urls[0]) && /exact location/.test(b.prompt) && /Remove all people/.test(b.prompt), 'foto como data-URI y prompt del prototipo');
+    }
+    const luces = { dorada: 'golden hour', dia: 'daylight', azul: 'blue hour', noche: 'night' }, planos = { lejos: 'Wide shot', medio: 'Medium shot', cerca: 'Close-up' };
+    // las versiones salen en el orden de las variables; cada fondo lleva SU luz y SU plano
+    for (const [i, r] of rs.entries()) { const b = w.falBodies.find((x) => x.image_urls[0].length > 0 && x.prompt.includes(luces[r.variables.portada_luz]) && x.prompt.includes(planos[r.variables.portada_plano])); yes(b, `v${i + 1}: el prompt trae su luz y plano`); }
+    eq(w.claude.pedidos.filter((p) => p.herramienta.name === 'decidir_portada').length, 1, 'se decide UNA vez por momento');
+    yes(w.llamadas.some((u) => u.includes('wikimedia')), 'busca en Wikimedia');
+    eq(w.llamadas.some((u) => u.includes('brave')), false, 'sin BRAVE_API_KEY se saltea Brave');
+    yes(w.llamadas.every((u) => !u.endsWith('x.png')), 'los SVG/no-fotos no se bajan');
+  }],
+  ['Portadas', 'Con BRAVE_API_KEY suma la búsqueda de imágenes de Brave; PORTADA_MODELO cambia el modelo (y el formato) de fal', async () => {
+    const w = mundoPortada({ wiki: ['https://upload.test/w1.jpg'], elegir: [1, 2, 3] });
+    const rs = await armarConPortada(w, { env: { FAL_KEY: 'k', BRAVE_API_KEY: 'bk', PORTADA_MODELO: 'fal-ai/nano-banana-2/edit' } });
+    eq(w.braveToken, 'bk', 'token de Brave');
+    eq(w.falBodies.map((b) => [b.modelo, b.aspect_ratio]), [['fal-ai/nano-banana-2/edit', '9:16'], ['fal-ai/nano-banana-2/edit', '9:16'], ['fal-ai/nano-banana-2/edit', '9:16']], 'modelo por env');
+    yes(rs.some((r) => r.portada.chango.referencia.fuente.startsWith('Web: ')), 'una foto de la web con su fuente');
+  }],
+  ['Portadas', 'Banco del proyecto: las fotos con más 👍 van primero y marcadas; las que tienen más 👎 nunca se usan', async () => {
+    const w = mundoPortada();
+    const refs = [
+      { lugar: 'Catedral de San Isidro', imagen_url: 'https://upload.test/gustada.jpg', pagina_url: 'https://p/1', fuente: 'Wikimedia Commons', licencia: 'CC0', si: 3, no: 1 },
+      { lugar: 'CATEDRAL de San Isidro', imagen_url: 'https://upload.test/wiki2.jpg', pagina_url: 'https://p/2', fuente: 'Wikimedia Commons', licencia: '', si: 0, no: 2 },
+      { lugar: 'Plaza Mitre', imagen_url: 'https://upload.test/otra-plaza.jpg', pagina_url: '', fuente: '', licencia: '', si: 9, no: 0 },
+    ];
+    const rs = await armarConPortada(w, { ctx: { territorio: 't', nombre: 'P', foto_dirigente: '', portada_refs: refs } });
+    yes(w.visionTextos[0].startsWith('Lugar pedido') && w.visionTextos[1].includes('(gustó)'), 'la gustada va primera y marcada');
+    eq(w.imagenes, 5, 'la del banco + 4 de Wikimedia (la de 👎 fuera)');
+    const usadas = rs.map((r) => r.portada.chango.referencia.imagen_url);
+    yes(usadas.includes('https://upload.test/gustada.jpg'), 'se usa la que gustó');
+    yes(!usadas.some((u) => u.includes('wiki2.jpg') || u.includes('otra-plaza')), 'ni la de 👎 ni la de otro lugar');
+    eq(rs.every((r) => !('foto_dirigente' in r.portada.chango)), true, 'sin foto del dirigente no se manda el campo');
+  }],
+  ['Portadas', 'Con 1 o 2 fotos válidas las versiones reusan, con luz o plano distintos; con 0, ninguna lleva chango y se anota por qué', async () => {
+    const dos = await armarConPortada(mundoPortada({ elegir: [2, 4] }));
+    eq(dos.every((r) => r.portada.chango), true, 'las 3 con chango');
+    eq(new Set(dos.map((r) => r.portada.chango.referencia.imagen_url)).size, 2, 'dos fotos para tres versiones');
+    eq(new Set(dos.map((r) => `${r.portada.chango.referencia.imagen_url}|${r.variables.portada_luz}|${r.variables.portada_plano}`)).size, 3, 'ninguna repite foto+luz+plano');
+    const w = mundoPortada({ elegir: [] }), logs = [];
+    const cero = await armarConPortada(w, { log: (m) => logs.push(m) });
+    eq(cero.length, 3, 'las 3 recetas igual');
+    for (const r of cero) yes(!('chango' in r.portada) && /ninguna foto/.test(r.portada_motivo) && r.portada.texto, 'sin chango, con motivo y portada de hoy');
+    eq(w.falBodies.length, 0, 'sin fotos no se gasta en fal');
+    yes(logs.length === 1 && logs[0].includes('sin portada chango'), 'el motivo se registra');
+    eq(paraEstudio(cero[0]).portada_motivo, undefined, 'el motivo no viaja al Estudio');
+  }],
+  ['Portadas', 'Si el tema no es un lugar: con territorio se usa una escena; sin territorio y sin lugar nombrado, sin chango y sin buscar nada', async () => {
+    const esc = { tipo: 'escena', lugar: 'patrullero en calle arbolada de Boulogne', escena: 'a police car on a tree-lined street', consultas: ['calle arbolada Boulogne'] };
+    const conT = mundoPortada({ decision: esc });
+    const a = await armarConPortada(conT);
+    eq(a.every((r) => r.portada.chango), true, 'con territorio hay chango');
+    yes(conT.falBodies.every((b) => /police car/.test(b.prompt)), 'la escena va al prompt');
+    const sinT = mundoPortada({ decision: esc });
+    const b = await armarConPortada(sinT, { ctx: { territorio: '', nombre: 'P', foto_dirigente: '', portada_refs: [] } });
+    yes(b.every((r) => !r.portada.chango && /territorio/.test(r.portada_motivo)) && sinT.llamadas.length === 0, 'sin territorio, sin escena inventada y sin búsquedas');
+    const ning = mundoPortada({ decision: { tipo: 'ninguno', lugar: '', escena: '', consultas: [] } });
+    yes((await armarConPortada(ning)).every((r) => !r.portada.chango) && ning.llamadas.length === 0 && ning.falBodies.length === 0, 'tipo ninguno: nada que buscar');
+  }],
+  ['Portadas', 'Los errores nunca frenan la edición: sin FAL_KEY, Wikimedia caída, Claude caído, fal con una versión fallada', async () => {
+    const w1 = mundoPortada(); const sinKey = await armarConPortada(w1, { env: {} });
+    yes(sinKey.length === 3 && sinKey.every((r) => !r.portada.chango && /FAL_KEY/.test(r.portada_motivo)) && w1.claude.pedidos.length === 1, 'sin FAL_KEY: ni se llama a Claude por la portada (solo los textos)');
+    const w2 = mundoPortada({ wikiFalla: true }); const wk = await armarConPortada(w2);
+    yes(wk.length === 3 && wk.every((r) => !r.portada.chango && /no encontré fotos/.test(r.portada_motivo)), 'Wikimedia caída: sin fotos');
+    const w3 = mundoPortada({ wiki: ['https://upload.test/rota1.jpg'], brave: [] }); const rota = await armarConPortada(w3);
+    yes(rota.every((r) => !r.portada.chango), 'fotos que no se pueden bajar: sin chango');
+    // Claude caído solo en la portada: los textos se piden antes con otro cliente; acá cae toda la llamada de portada
+    const w4 = mundoPortada(); const orig = w4.claude.estructurado.bind(w4.claude);
+    w4.claude.estructurado = async (p) => { if (p.herramienta.name === 'decidir_portada') throw new Error('Claude caído'); return orig(p); };
+    const ck = await armarConPortada(w4);
+    yes(ck.length === 3 && ck.every((r) => !r.portada.chango && /Claude caído/.test(r.portada_motivo) && r.caption), 'Claude caído en la portada: recetas igual');
+    const w5 = mundoPortada({ falFalla: (n) => n === 1 }); const fa = await armarConPortada(w5);
+    eq(fa.filter((r) => r.portada.chango).length, 2, 'una versión sin fondo, las otras 2 con');
+    yes(fa.find((r) => !r.portada.chango).portada_motivo.startsWith('fal: fal respondió 500'), 'motivo de fal');
+    const w6 = { porMomento: async () => { throw new Error('explotó'); } };
+    const ex = await crearArmarRecetas({ claude: claudeFalso(), portadas: w6, log: () => {} })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: [] });
+    yes(ex.length === 3 && ex.every((r) => !r.portada.chango && r.portada_motivo === 'explotó'), 'una excepción del módulo tampoco frena');
+  }],
+  ['Portadas', 'ACM → editor: el contexto trae territorio, nombre, foto del dirigente y portada_refs', async () => {
+    const fetchFn = async () => new Response(JSON.stringify({ aprendizajes: [], territorio: 'Boulogne', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,QQ', portada_refs: [{ lugar: 'plaza', imagen_url: 'u', si: 1, no: 0 }] }), { status: 200 });
+    const c = await crearAcm({ url: 'http://acm.test', token: 't', fetchFn }).contexto(1, 2);
+    eq(c.portada, { territorio: 'Boulogne', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,QQ', portada_refs: [{ lugar: 'plaza', imagen_url: 'u', si: 1, no: 0 }] }, 'portada del contexto');
+    const vacio = await crearAcm({ url: 'http://acm.test', token: 't', fetchFn: async () => new Response('{}', { status: 200 }) }).contexto(1);
+    eq(vacio.portada, { territorio: '', nombre: '', foto_dirigente: '', portada_refs: [] }, 'sin datos, vacío');
+    eq(normLugar('  Catedral   de SAN Isidro Ñandú '), 'catedral de san isidro nandu', 'normaliza sin tildes');
   }],
 );
 

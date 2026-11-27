@@ -52,6 +52,9 @@ Estados del crudo en ACM (`reels.status`): `en_cola`, `transcribiendo`, `buscand
 | `ESTUDIO_URL`, `ESTUDIO_EMPRESA`, `ESTUDIO_CLAVE` | el Estudio |
 | `ACM_URL` | dirección de ACM |
 | `ANTHROPIC_API_KEY` | Claude: momentos (`claude-sonnet-5-5`) y textos (`claude-haiku-5-5`). Sin ella el trabajo termina en `error` con un mensaje claro |
+| `FAL_KEY` | portadas estilo Chango (`portadas.js`): fondo por versión en fal. Sin ella no hay chango y se sigue con la portada de siempre |
+| `PORTADA_MODELO` | modelo de fal del fondo (por defecto `bytedance/seedream/v5.5/edit`; `fal-ai/nano-banana-2/edit` es la alternativa) |
+| `BRAVE_API_KEY` | opcional: segunda fuente de fotos (Brave Images) además de Wikimedia Commons |
 
 En ACM: `EDITOR_URL` (si falta, los crudos quedan `en_cola` y no pasa nada) y `EDITOR_TOKEN`.
 
