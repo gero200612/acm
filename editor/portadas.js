@@ -5,6 +5,9 @@
 //   4. El fondo ES la foto real (se baja, se guarda en el banco de fondos y se sirve desde el editor). El Estudio la recorta a 9:16, la desenfoca y le pone el tinte de portada_luz.
 //   Con PORTADA_FONDO_IA=1 (apagado por defecto) el camino viejo: fal redibuja la foto como escena 9:16 según portada_luz / portada_plano.
 // Todo lo que falla acá deja a la versión sin `portada.chango` (sale la portada de hoy) y se registra el motivo: la portada nunca frena una edición.
+import https from 'node:https';
+import dns from 'node:dns';
+import net from 'node:net';
 import { MODELOS } from './claude.js';
 
 export const MODELO_FAL = 'bytedance/seedream/v5.5/edit';
@@ -80,8 +83,9 @@ export async function buscarBrave(consulta, { fetchFn = fetch, clave, limite = 1
   u.searchParams.set('q', consulta); u.searchParams.set('count', limite); u.searchParams.set('safesearch', 'strict');
   const r = await fetchFn(u, { headers: { 'x-subscription-token': clave, accept: 'application/json', 'user-agent': UA }, signal: AbortSignal.timeout(20000) });
   if (!r.ok) throw new Error(`Brave respondió ${r.status}`);
+  // imagen_url es la ORIGINAL del sitio (se baja con bajarSeguro); si no se puede, se cae a la miniatura proxeada de Brave (respaldo_url)
   return ((await r.json())?.results || []).filter((x) => x.thumbnail?.src).map((x) => ({
-    imagen_url: x.thumbnail.src, pagina_url: x.url || '', fuente: x.source ? `Web: ${x.source}` : 'Web (Brave)', licencia: '', autor: '', titulo: x.title || '' }));
+    imagen_url: /^https:\/\//.test(x.properties?.url || '') ? x.properties.url : x.thumbnail.src, respaldo_url: x.thumbnail.src, pagina_url: x.url || '', fuente: x.source ? `Web: ${x.source}` : 'Web (Brave)', licencia: '', autor: '', titulo: x.title || '' }));
 }
 
 const tipoDeImagen = (b) => (b[0] === 0xff && b[1] === 0xd8 ? 'image/jpeg' : b[0] === 0x89 && b[1] === 0x50 ? 'image/png' : b.length > 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP' ? 'image/webp' : '');
@@ -141,8 +145,67 @@ export async function bajar(url, fetchFn, { hosts = HOSTS_FOTO, max = MAX_BYTES 
   return { bytes: b, tipo };
 }
 
+// --- bajada de imágenes de sitios cualquiera (la original de Brave), con protección SSRF ---
+// IP privada, loopback, link-local, CGNAT, multicast o reservada (IPv4 e IPv6, incluidas las ::ffff: mapeadas y las que embeben una IPv4)
+const RANGOS_V4 = [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]];
+const v4ANum = (ip) => ip.split('.').reduce((a, o) => a * 256 + Number(o), 0);
+export function ipPrivada(ip) {
+  const v = net.isIP(ip);
+  if (v === 4) { const n = v4ANum(ip); return RANGOS_V4.some(([base, bits]) => Math.floor(n / 2 ** (32 - bits)) === Math.floor(v4ANum(base) / 2 ** (32 - bits))); }
+  if (v !== 6) return true; // lo que no es una IP válida no se usa
+  let h; try { h = new URL(`http://[${ip}]`).hostname.slice(1, -1); } catch { return true; } // forma comprimida en hexa, sin punteadas
+  const partes = h.split('::'), a = partes[0] ? partes[0].split(':') : [], b = partes[1] ? partes[1].split(':') : [];
+  const g = [...a, ...Array(8 - a.length - b.length).fill('0'), ...b].map((x) => parseInt(x, 16));
+  if (g.length !== 8 || g.some(Number.isNaN)) return true;
+  const embebida = (hi, lo) => ipPrivada(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  if (g.slice(0, 5).every((x) => x === 0) && (g[5] === 0xffff || g[5] === 0)) return g[6] === 0 && g[7] <= 1 ? true : embebida(g[6], g[7]); // ::, ::1, ::ffff:a.b.c.d y ::a.b.c.d
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return embebida(g[6], g[7]); // NAT64
+  if (g[0] === 0x2002) return embebida(g[1], g[2]); // 6to4
+  if (g[0] === 0x2001 && g[1] === 0) return true; // Teredo
+  if (g[0] === 0x2001 && g[1] === 0xdb8) return true; // documentación
+  if (g[0] === 0x100 && g.slice(1, 4).every((x) => x === 0)) return true; // descarte
+  return (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0 || (g[0] & 0xff00) === 0xff00;
+}
+// el `lookup` que se le pasa a https.request: siempre devuelve la IP ya resuelta y validada (contra DNS rebinding), nunca vuelve a resolver
+export const lookupFijado = (ip) => (_host, opts, cb) => {
+  if (typeof opts === 'function') { cb = opts; opts = {}; }
+  const family = net.isIP(ip);
+  if (opts?.all) cb(null, [{ address: ip, family }]); else cb(null, ip, family);
+};
+// GET por https a la IP fijada, con el nombre original para SNI y Host; devuelve la respuesta (stream) sin seguir redirecciones
+export function pedirFijado({ url, ip }) {
+  const u = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = https.request({ protocol: 'https:', hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'GET', servername: net.isIP(u.hostname) ? undefined : u.hostname,
+      headers: { host: u.hostname, 'user-agent': UA, accept: 'image/*' }, lookup: lookupFijado(ip), timeout: 20000 }, resolve);
+    req.on('timeout', () => req.destroy(new Error('tiempo agotado')));
+    req.on('error', reject);
+    req.end();
+  });
+}
+export async function bajarSeguro(url, { lookup = (h) => dns.promises.lookup(h, { all: true }), pedir = pedirFijado, max = MAX_BYTES } = {}) {
+  let u; try { u = new URL(String(url)); } catch { throw new Error('URL no válida'); }
+  if (u.protocol !== 'https:' || (u.port && u.port !== '443') || u.username || u.password) throw new Error('URL no permitida');
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  const direcciones = (await lookup(host)).map((x) => x.address);
+  if (!direcciones.length || direcciones.some(ipPrivada)) throw new Error('el host resuelve a una dirección no permitida');
+  const r = await pedir({ url: u.href, ip: direcciones[0] }); // una sola resolución: se conecta a esta IP
+  try {
+    if (r.statusCode >= 300 && r.statusCode < 400) throw new Error('redirección no permitida');
+    if (r.statusCode !== 200) throw new Error(`HTTP ${r.statusCode}`);
+    if (!/^image\//i.test(String(r.headers['content-type'] || ''))) throw new Error('no es una imagen (content-type)');
+    if (Number(r.headers['content-length']) > max) throw new Error('imagen demasiado grande');
+    const partes = []; let total = 0;
+    for await (const c of r) { total += c.length; if (total > max) throw new Error('imagen demasiado grande'); partes.push(c); }
+    const b = Buffer.concat(partes), tipo = tipoDeImagen(b);
+    if (!tipo) throw new Error('no es una imagen usable');
+    return { bytes: b, tipo };
+  } finally { r.destroy?.(); }
+}
+
 // --- el módulo ---
-export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log = console.log, modelo = MODELOS.portadas, banco = null } = {}) {
+export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log = console.log, modelo = MODELOS.portadas, banco = null, lookup, pedir } = {}) {
+  const seguro = { ...(lookup ? { lookup } : {}), ...(pedir ? { pedir } : {}) };
   const modeloFal = () => env.PORTADA_MODELO || MODELO_FAL;
 
   async function decidir({ momento, texto, territorio }) {
@@ -158,7 +221,7 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
   async function candidatas({ lugar, consultas, refs }) {
     const bloqueadas = new Set(), previas = [];
     for (const r of Array.isArray(refs) ? refs : []) {
-      if (!r?.imagen_url || !mismoLugar(r.lugar, lugar) || !urlPermitida(r.imagen_url)) continue; // las del banco también pasan por la lista de hosts
+      if (!r?.imagen_url || !mismoLugar(r.lugar, lugar) || !(urlPermitida(r.imagen_url) || /^https:\/\//.test(r.imagen_url))) continue; // las del banco: hosts conocidos o https (que baja bajarSeguro)
       if ((r.no || 0) > (r.si || 0)) bloqueadas.add(r.imagen_url);
       else if ((r.si || 0) > (r.no || 0)) previas.push({ imagen_url: r.imagen_url, pagina_url: r.pagina_url || '', fuente: r.fuente || '', licencia: r.licencia || '', autor: '', titulo: lugar, gusto: true, si: r.si || 0 });
     }
@@ -170,14 +233,21 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
     }
     const vistas = new Set(), todas = [];
     for (const c of [...previas.slice(0, MAX_REFS_BANCO), ...hallazgos]) {
-      if (bloqueadas.has(c.imagen_url) || vistas.has(c.imagen_url) || !urlPermitida(c.imagen_url)) continue;
+      if (bloqueadas.has(c.imagen_url) || vistas.has(c.imagen_url) || !(urlPermitida(c.imagen_url) || /^https:\/\//.test(c.imagen_url))) continue;
       vistas.add(c.imagen_url); todas.push(c);
     }
     // Wikimedia primero (libre), después la web; hasta MAX_CANDIDATAS, alternando para no llenarlo de una sola fuente
     const lista = [...todas.filter((c) => c.gusto), ...todas.filter((c) => !c.gusto && c.fuente === 'Wikimedia Commons').slice(0, 8), ...todas.filter((c) => !c.gusto && c.fuente !== 'Wikimedia Commons')].slice(0, MAX_CANDIDATAS);
     if (errores.length) log(`[portadas] búsqueda con fallas: ${errores.join('; ')}`);
     const bajadas = await Promise.all(lista.map(async (c) => {
-      try { return { ...c, ...(await bajar(c.imagen_url, fetchFn)) }; } catch { return null; }
+      // host conocido: bajar directo; cualquier otro https (la original de Brave): bajarSeguro, y si falla, la miniatura. fondo_directo = URL que el Estudio puede bajar sin banco
+      if (urlPermitida(c.imagen_url)) { try { return { ...c, fondo_directo: c.imagen_url, ...(await bajar(c.imagen_url, fetchFn)) }; } catch { return null; } }
+      try { return { ...c, fondo_directo: c.respaldo_url || '', ...(await bajarSeguro(c.imagen_url, seguro)) }; }
+      catch (e) {
+        if (!c.respaldo_url) return null;
+        log(`[portadas] no bajé la original (${e.message}); uso la miniatura`);
+        try { return { ...c, fondo_directo: c.respaldo_url, ...(await bajar(c.respaldo_url, fetchFn)) }; } catch { return null; }
+      }
     }));
     // resolución mínima en el lado corto; y un tope de peso total para que el pedido a Claude entre
     let peso = 0;
@@ -294,7 +364,7 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
         const archivo = bytes ? guardarFondo({ ctx, d, luz, plano, foto, referencia, bytes, tipo, fondo_tipo: ia ? 'ia' : 'foto' }) : '';
         // la foto directa sale del editor si hay banco con URL pública; si no, la miniatura permitida (Wikimedia o Brave)
         if (archivo) fondo_url = banco.url({ archivo });
-        else if (!ia) fondo_url = foto.imagen_url;
+        else if (!ia) { fondo_url = foto.fondo_directo; if (!fondo_url) throw new Error('no hay cómo servir el fondo sin el banco'); }
         return { luz, plano, chango: changoDe({ fondo_url, fondo_tipo: ia ? 'ia' : 'foto', luz, plano, v, ctx, referencia }) };
       } catch (e) { return { motivo: `${ia ? 'fal' : 'foto'}: ${e.message}` }; }
     }));

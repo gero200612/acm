@@ -19,7 +19,8 @@ import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
 import { crearAnalista, corregirReceta, elegirCuadros } from './analista.js';
 import { tramosAEstado, notasDe } from './mirar.js';
-import { crearPortadas, normLugar, bajar, urlPermitida, dimensiones } from './portadas.js';
+import { Readable } from 'node:stream';
+import { crearPortadas, normLugar, bajar, urlPermitida, dimensiones, ipPrivada, bajarSeguro, lookupFijado } from './portadas.js';
 import { crearBancoFondos } from './fondos.js';
 import { lineasDePortada } from './recetas.js';
 
@@ -947,7 +948,7 @@ function mundoPortada(o = {}) {
     }
     if (u.startsWith('https://api.search.brave.com/')) {
       w.braveToken = init.headers['x-subscription-token'];
-      return res(200, { results: brave.map((src, i) => ({ title: `Web ${i}`, url: `https://pagina.test/${i}`, source: 'pagina.test', thumbnail: { src: src + '?t' }, properties: { url: 'https://sitio-externo.test/' + i + '.jpg' } })) });
+      return res(200, { results: brave.map((src, i) => ({ title: `Web ${i}`, url: `https://pagina.test/${i}`, source: 'pagina.test', thumbnail: { src: src + '?t' }, properties: { url: (o.hostOriginal ?? 'sitio-externo.test') ? `https://${o.hostOriginal ?? 'sitio-externo.test'}/${i}.jpg` : '' } })) });
     }
     if (u.startsWith('https://fal.run/')) {
       const b = JSON.parse(init.body); w.falBodies.push({ modelo: u.slice('https://fal.run/'.length), auth: init.headers.authorization, ...b });
@@ -957,6 +958,10 @@ function mundoPortada(o = {}) {
     if (/^https:\/\/(upload\.wikimedia\.org|imgs\.search\.brave\.com|fal\.media)\//.test(u)) return u.includes('rota') ? res(404, '') : res(200, u.includes('chica') ? JPG(u.length, 800, 600) : JPG(u.length));
     return res(404, '');
   };
+  // red «segura» (la original de Brave): resolución de nombres y pedido a la IP fijada, simulados
+  w.resueltos = []; w.pedidosSeguros = [];
+  w.lookup = async (h) => { w.resueltos.push(h); return [{ address: h === 'privado.test' ? '10.0.0.5' : '93.184.216.34', family: 4 }]; };
+  w.pedir = async ({ url, ip }) => { w.pedidosSeguros.push({ url, ip }); const r = Readable.from([JPG(url.length)]); r.statusCode = 200; r.headers = { 'content-type': 'image/jpeg' }; return r; };
   w.claude = { pedidos: [], async estructurado(p) {
     w.claude.pedidos.push(p);
     if (o.claudeFalla) throw new Error('Claude caído');
@@ -971,7 +976,7 @@ function mundoPortada(o = {}) {
   return w;
 }
 const armarConPortada = (w, { banco = null, env = {}, ctx = { territorio: 'San Isidro, Buenos Aires', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,AAAA', portada_refs: [] }, momento = MOM, log = () => {} } = {}) =>
-  crearArmarRecetas({ claude: w.claude, portadas: crearPortadas({ claude: w.claude, fetchFn: w.fetchFn, env, log, banco }), log })({ momento, transcripcion: { palabras: PALABRAS }, aprendizajes: [], portada: ctx });
+  crearArmarRecetas({ claude: w.claude, portadas: crearPortadas({ claude: w.claude, fetchFn: w.fetchFn, env, log, banco, lookup: w.lookup, pedir: w.pedir }), log })({ momento, transcripcion: { palabras: PALABRAS }, aprendizajes: [], portada: ctx });
 
 casos.push(
   ['Portadas', 'portada_luz, portada_plano y portada_lado distintos en las 3 versiones sin aprendizaje, y tiradas a la ganadora con aprendizaje', () => {
@@ -1026,7 +1031,8 @@ casos.push(
     eq(w.braveToken, 'bk', 'token de Brave');
     eq(w.falBodies.map((b) => [b.modelo, b.aspect_ratio]), [['fal-ai/nano-banana-2/edit', '9:16'], ['fal-ai/nano-banana-2/edit', '9:16'], ['fal-ai/nano-banana-2/edit', '9:16']], 'modelo por env');
     yes(rs.some((r) => r.portada.chango.referencia.fuente.startsWith('Web: ')), 'una foto de la web con su fuente');
-    yes(w.llamadas.every((u) => !u.includes('sitio-externo')) && rs.every((r) => !r.portada.chango.referencia.imagen_url.includes('sitio-externo')), 'de Brave solo la miniatura proxeada, nunca la imagen del sitio');
+    yes(w.llamadas.every((u) => !u.includes('sitio-externo')), 'la original del sitio no pasa por el fetch común sino por la bajada segura');
+    yes(w.pedidosSeguros.length > 0 && w.pedidosSeguros.every((x) => x.ip === '93.184.216.34' && x.url.startsWith('https://sitio-externo.test/')), 'y va a la IP ya resuelta');
   }],
   ['Portadas', 'Banco del proyecto: las fotos con más 👍 van primero y marcadas; las que tienen más 👎 nunca se usan', async () => {
     const w = mundoPortada();
@@ -1180,9 +1186,9 @@ casos.push(
     eq([msg, llamadas.length], ['URL no permitida', 0], 'ni se hace el pedido');
     // el banco del proyecto: una referencia con host no permitido se descarta aunque tenga 👍
     const w = mundoPortada();
-    const refs = [{ lugar: 'Catedral de San Isidro', imagen_url: 'http://169.254.169.254/foto.jpg', pagina_url: '', fuente: '', licencia: '', si: 5, no: 0 }, { lugar: 'Catedral de San Isidro', imagen_url: 'https://sitio-externo.test/gustada.jpg', pagina_url: '', fuente: '', licencia: '', si: 5, no: 0 }];
+    const refs = [{ lugar: 'Catedral de San Isidro', imagen_url: 'http://169.254.169.254/foto.jpg', pagina_url: '', fuente: '', licencia: '', si: 5, no: 0 }, { lugar: 'Catedral de San Isidro', imagen_url: 'https://privado.test/gustada.jpg', pagina_url: '', fuente: '', licencia: '', si: 5, no: 0 }];
     await armarConPortada(w, { ctx: { territorio: 't', nombre: 'P', foto_dirigente: '', portada_refs: refs } });
-    yes(w.llamadas.every((u) => !u.includes('169.254') && !u.includes('sitio-externo')), 'no se pidió ninguna de las dos');
+    yes(w.llamadas.every((u) => !u.includes('169.254') && !u.includes('privado.test')) && w.pedidosSeguros.length === 0, 'no se pidió ninguna de las dos (una no es https, la otra resuelve a una IP privada)');
     yes(!w.visionTextos.some((t) => t.includes('(gustó)')), 'tampoco llegaron a la visión');
   }],
   ['Seguridad', 'Sin seguir redirecciones, y con tope de tamaño: Content-Length de más y stream que se pasa se cortan', async () => {
@@ -1256,6 +1262,68 @@ casos.push(
     const webp = Buffer.alloc(40); webp.write('RIFF', 0, 'latin1'); webp.write('WEBP', 8, 'latin1'); webp.write('VP8X', 12, 'latin1'); webp.writeUIntLE(1199, 24, 3); webp.writeUIntLE(799, 27, 3);
     eq(dimensiones(webp), { ancho: 1200, alto: 800 }, 'WEBP');
     eq(dimensiones(Buffer.from('basura')), null, 'basura');
+  }],
+);
+
+// --- La original de Brave: bajada con protección SSRF (IP resuelta y validada, conexión a esa IP, sin redirecciones) ---
+const respuesta = (cuerpo, { status = 200, headers = { 'content-type': 'image/jpeg' } } = {}) => { const r = Readable.from(Array.isArray(cuerpo) ? cuerpo : [cuerpo]); r.statusCode = status; r.headers = headers; return r; };
+const seguroCon = (resp) => { const c = { resueltos: 0, pedidos: [] }; return { c, lookup: async () => { c.resueltos++; return [{ address: '93.184.216.34', family: 4 }]; }, pedir: async (x) => { c.pedidos.push(x); return resp(); } }; };
+
+casos.push(
+  ['SSRF', 'ipPrivada: loopback, privadas, link-local, CGNAT, multicast y reservadas, IPv4 e IPv6 (incluidas las ::ffff: mapeadas); las públicas pasan', () => {
+    for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1', '100.127.255.255', '0.0.0.0', '192.0.0.1', '224.0.0.1', '240.0.0.1', '255.255.255.255', '198.18.0.1',
+      '::1', '::', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:10.0.0.1', '::ffff:a9fe:a9fe', 'fe80::1', 'fc00::1', 'fd12:3456::1', 'ff02::1', '64:ff9b::7f00:1', '2002:7f00:1::', '2001:db8::1', '2001:0:4136:e378:8000:63bf:3fff:fdd2', 'no es ip']) yes(ipPrivada(ip), `${ip} debe rechazarse`);
+    for (const ip of ['93.184.216.34', '8.8.8.8', '100.128.0.1', '172.15.0.1', '172.32.0.1', '2606:2800:220:1:248:1893:25c8:1946', '::ffff:8.8.8.8', '2a00:1450:4001:81b::200e']) yes(!ipPrivada(ip), `${ip} es pública`);
+  }],
+  ['SSRF', 'bajarSeguro: solo https, puerto 443, sin usuario/clave; si algún IP resuelto es privado (o IPv6 mapeada) ni se hace el pedido', async () => {
+    const s = seguroCon(() => respuesta(JPG(1)));
+    for (const u of ['http://sitio.test/a.jpg', 'https://sitio.test:8443/a.jpg', 'https://u:p@sitio.test/a.jpg', 'ftp://sitio.test/a.jpg', 'basura']) { let m = ''; try { await bajarSeguro(u, s); } catch (e) { m = e.message; } yes(/URL/.test(m), `rechaza ${u}`); }
+    eq([s.c.resueltos, s.c.pedidos.length], [0, 0], 'ni siquiera se resolvió');
+    for (const direcciones of [[{ address: '10.0.0.5' }], [{ address: '93.184.216.34' }, { address: '127.0.0.1' }], [{ address: '::ffff:7f00:1' }], [{ address: '::ffff:192.168.0.1' }], [{ address: '169.254.169.254' }], []]) {
+      const c = { n: 0 }; let m = '';
+      try { await bajarSeguro('https://sitio.test/a.jpg', { lookup: async () => direcciones, pedir: async () => { c.n++; return respuesta(JPG(1)); } }); } catch (e) { m = e.message; }
+      yes(/no permitida/.test(m) && c.n === 0, `rechaza ${JSON.stringify(direcciones)}`);
+    }
+    const ok = await bajarSeguro('https://sitio.test/a.jpg', s);
+    eq([ok.tipo, s.c.pedidos.length], ['image/jpeg', 1], 'una pública pasa');
+  }],
+  ['SSRF', 'DNS rebinding: se resuelve UNA vez y se conecta a esa IP; un segundo lookup que daría una IP privada no se usa', async () => {
+    let n = 0; const pedidos = [];
+    const lookup = async () => [{ address: n++ === 0 ? '93.184.216.34' : '127.0.0.1', family: 4 }];
+    await bajarSeguro('https://sitio.test/a.jpg', { lookup, pedir: async (x) => { pedidos.push(x); return respuesta(JPG(1)); } });
+    eq([n, pedidos.map((x) => x.ip)], [1, ['93.184.216.34']], 'un solo lookup y se pide a la IP validada');
+    // y la conexión real usa un lookup fijado: nunca vuelve a resolver el nombre
+    const fijado = lookupFijado('93.184.216.34');
+    eq(await new Promise((r) => fijado('sitio.test', {}, (e, a, f) => r([a, f]))), ['93.184.216.34', 4], 'lookup fijado');
+    eq(await new Promise((r) => fijado('otro.test', { all: true }, (e, l) => r(l))), [{ address: '93.184.216.34', family: 4 }], 'lookup fijado con all');
+    eq(await new Promise((r) => lookupFijado('2606:2800::1')('x', (e, a, f) => r([a, f]))), ['2606:2800::1', 6], 'IPv6 fijada');
+  }],
+  ['SSRF', 'bajarSeguro: sin redirecciones, content-type image/*, tope por header y por stream', async () => {
+    const intenta = async (resp, o = {}) => { let m = ''; try { await bajarSeguro('https://sitio.test/a.jpg', { ...seguroCon(resp), ...o }); } catch (e) { m = e.message; } return m; };
+    eq(await intenta(() => respuesta('', { status: 302, headers: { location: 'http://127.0.0.1/x', 'content-type': 'image/jpeg' } })), 'redirección no permitida', '302');
+    eq(await intenta(() => respuesta('<html>', { headers: { 'content-type': 'text/html' } })), 'no es una imagen (content-type)', 'text/html');
+    eq(await intenta(() => respuesta(JPG(1), { headers: {} })), 'no es una imagen (content-type)', 'sin content-type');
+    eq(await intenta(() => respuesta(JPG(1), { status: 404 })), 'HTTP 404', '404');
+    eq(await intenta(() => respuesta(JPG(1), { headers: { 'content-type': 'image/jpeg', 'content-length': String(6 * 1024 * 1024) } })), 'imagen demasiado grande', 'Content-Length de más');
+    let leidos = 0, destruida = false;
+    const grande = () => { const r = new Readable({ read() { leidos += 1024; this.push(Buffer.alloc(1024, 1)); }, destroy(e, cb) { destruida = true; cb(e); } }); r.statusCode = 200; r.headers = { 'content-type': 'image/jpeg' }; return r; };
+    eq(await intenta(grande, { max: 10 * 1024 }), 'imagen demasiado grande', 'stream que se pasa');
+    yes(destruida && leidos <= 64 * 1024, `se cortó la lectura (${leidos})`);
+    eq(await intenta(() => respuesta(Buffer.from('no soy imagen'))), 'no es una imagen usable', 'bytes que no son imagen');
+  }],
+  ['Brave', 'Foto directa: se usa la ORIGINAL del resultado de Brave (a la IP validada); sin banco, fondo_url es la miniatura; si la original falla, se cae a la miniatura', async () => {
+    const w = mundoPortada({ wiki: [], brave: ['https://imgs.search.brave.com/b1.jpg', 'https://imgs.search.brave.com/b2.jpg'], elegir: [1, 2] });
+    const rs = await armarConPortada(w, { env: { BRAVE_API_KEY: 'bk' } });
+    yes(rs.every((r) => r.portada.chango), 'con chango');
+    eq(w.pedidosSeguros.every((x) => x.ip === '93.184.216.34' && /^https:\/\/sitio-externo\.test\//.test(x.url)), true, 'original por la vía segura');
+    for (const r of rs) { const c = r.portada.chango; yes(c.referencia.imagen_url.startsWith('https://sitio-externo.test/') && c.fondo_url.startsWith('https://imgs.search.brave.com/'), 'referencia = original; fondo_url = miniatura permitida'); }
+    // la original resuelve a una IP privada: se usa la miniatura (se baja con el fetch común)
+    const logs = [], w2 = mundoPortada({ wiki: [], brave: ['https://imgs.search.brave.com/b1.jpg'], hostOriginal: 'privado.test', elegir: [1] });
+    const r2 = await armarConPortada(w2, { env: { BRAVE_API_KEY: 'bk' }, log: (m) => logs.push(m) });
+    yes(w2.pedidosSeguros.length === 0 && r2.every((r) => r.portada.chango) && logs.some((m) => /miniatura/.test(m)), 'cae a la miniatura');
+    // sin la original en el resultado (no es https), directo la miniatura
+    const w3 = mundoPortada({ wiki: [], brave: ['https://imgs.search.brave.com/b1.jpg'], hostOriginal: '', elegir: [1] });
+    yes((await armarConPortada(w3, { env: { BRAVE_API_KEY: 'bk' } })).every((r) => r.portada.chango) && w3.pedidosSeguros.length === 0, 'sin original, miniatura');
   }],
 );
 
