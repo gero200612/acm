@@ -274,7 +274,7 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
       let luz = v.luz;
       if (!ia) {
         if (foto.noche) luz = 'noche';
-        else if (luz === 'noche' || !LUZ[luz]) luz = DIURNAS.find((x) => !luces.includes(x)) || DIURNAS[0];
+        else if (luz === 'noche' || !LUZ[luz]) luz = DIURNAS.find((x) => !luces.includes(x) && !versiones.some((o) => o.luz === x)) || DIURNAS.find((x) => !luces.includes(x)) || DIURNAS[0]; // un tinte que no pidió otra versión
       } else if (!LUZ[luz]) luz = 'calido';
       luces.push(luz);
       let plano = PLANO[v.plano] ? v.plano : 'medio';

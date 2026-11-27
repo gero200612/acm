@@ -1239,8 +1239,8 @@ casos.push(
     // semilla 3: las variables piden noche, calido, neutro; la foto 2 (versión 2) es de noche
     const w = mundoPortada({ noche: [2] });
     const rs = await armarConPortada(w, { momento: { ...MOM, id: 3, idx: 3 } });
-    eq(rs.map((r) => r.variables.portada_luz), ['calido', 'noche', 'neutro'], 'v1 pedía noche con foto de día → tinte de día distinto; v2 foto de noche → noche');
-    eq(rs.map((r) => r.portada.chango.luz), ['calido', 'noche', 'neutro'], 'la misma luz va al Estudio');
+    eq(rs.map((r) => r.variables.portada_luz), ['frio', 'noche', 'neutro'], 'v1 pedía noche con foto de día → tinte de día distinto; v2 foto de noche → noche');
+    eq(rs.map((r) => r.portada.chango.luz), ['frio', 'noche', 'neutro'], 'la misma luz va al Estudio');
     const sin = await armarConPortada(mundoPortada(), { momento: { ...MOM, id: 3, idx: 3 } });
     yes(sin.every((r) => r.variables.portada_luz !== 'noche') && new Set(sin.map((r) => r.variables.portada_luz)).size === 3, 'sin fotos de noche, ninguna noche y 3 tintes distintos');
     const props = w.claude.pedidos.find((p) => p.herramienta.name === 'elegir_fotos_portada');
