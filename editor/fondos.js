@@ -1,5 +1,5 @@
 // Banco de fondos de portada: cada fondo que genera fal (USD 0,03) se guarda acá para reusarlo en otros momentos del mismo lugar.
-// Archivo en el directorio de datos del editor (`dir`, con nombre UUID) + registro en la base. Se sirve en /fondos/<uuid>.jpg (sin token, como /entregas:
+// Archivo en el directorio de datos del editor (`dir`, con nombre UUID) + registro en la base. Se sirve en /fondos/<uuid>.<ext> (sin token, como /entregas:
 // el nombre no se adivina), así que fondo_url de un fondo reusado es una URL que el Estudio puede bajar. Sin publicUrl el banco no sirve para reusar.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -10,7 +10,8 @@ export const DIAS_SIN_REUSO = 7;
 export function crearBancoFondos({ db, dir, publicUrl = '', ahora = () => Date.now() } = {}) {
   db.exec(`CREATE TABLE IF NOT EXISTS fondos (
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, lugar TEXT NOT NULL, ref_url TEXT DEFAULT '', luz TEXT NOT NULL, plano TEXT NOT NULL,
-  archivo TEXT NOT NULL, referencia TEXT DEFAULT '{}', creado TEXT NOT NULL, ultimo_uso TEXT NOT NULL)`);
+  archivo TEXT NOT NULL, referencia TEXT DEFAULT '{}', creado TEXT NOT NULL, ultimo_uso TEXT NOT NULL, tipo TEXT NOT NULL DEFAULT 'foto')`);
+  if (!db.prepare('PRAGMA table_info(fondos)').all().some((c) => c.name === 'tipo')) db.exec("ALTER TABLE fondos ADD COLUMN tipo TEXT NOT NULL DEFAULT 'ia'");
   const pub = String(publicUrl || '').replace(/\/+$/, '');
   const iso = (ms) => new Date(ms).toISOString();
   return {
@@ -25,13 +26,14 @@ export function crearBancoFondos({ db, dir, publicUrl = '', ahora = () => Date.n
     url: (f) => `${pub}/fondos/${f.archivo}`,
     usar(id) { db.prepare('UPDATE fondos SET ultimo_uso = ? WHERE id = ?').run(iso(ahora()), id); },
     // guarda el fondo recién generado (cuenta como usado ahora)
-    guardar({ project_id, lugar, ref_url, luz, plano, referencia }, bytes) {
+    // tipo: 'foto' (la foto real directa) o 'ia' (generado por fal); ext: jpg, png o webp
+    guardar({ project_id, lugar, ref_url, luz, plano, referencia, tipo = 'foto', ext = 'jpg' }, bytes) {
       fs.mkdirSync(dir, { recursive: true });
-      const archivo = `${crypto.randomUUID()}.jpg`;
+      const archivo = `${crypto.randomUUID()}.${ext}`;
       fs.writeFileSync(path.join(dir, archivo), bytes);
       const t = iso(ahora());
-      db.prepare('INSERT INTO fondos (project_id, lugar, ref_url, luz, plano, archivo, referencia, creado, ultimo_uso) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(project_id, lugar, ref_url || '', luz, plano, archivo, JSON.stringify(referencia || {}), t, t);
+      db.prepare('INSERT INTO fondos (project_id, lugar, ref_url, luz, plano, archivo, referencia, creado, ultimo_uso, tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(project_id, lugar, ref_url || '', luz, plano, archivo, JSON.stringify(referencia || {}), t, t, tipo);
       return archivo;
     },
   };

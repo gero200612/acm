@@ -19,7 +19,7 @@ import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
 import { crearAnalista, corregirReceta, elegirCuadros } from './analista.js';
 import { tramosAEstado, notasDe } from './mirar.js';
-import { crearPortadas, normLugar, bajar, urlPermitida } from './portadas.js';
+import { crearPortadas, normLugar, bajar, urlPermitida, dimensiones } from './portadas.js';
 import { crearBancoFondos } from './fondos.js';
 import { lineasDePortada } from './recetas.js';
 
@@ -928,7 +928,9 @@ casos.push(
 );
 
 // --- Portadas estilo Chango: Claude, Wikimedia, Brave y fal simulados ---
-const JPG = (n) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, n)]);
+// un JPEG mínimo con sus medidas (SOF0): lo que `dimensiones` necesita para exigir resolución
+const JPG = (n, ancho = 2000, alto = 1300) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, alto >> 8, alto & 255, ancho >> 8, ancho & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]), Buffer.alloc(64, n)]);
+const IA = { FAL_KEY: 'k-fal', PORTADA_FONDO_IA: '1' }; // el camino de IA (fal redibuja la foto) está apagado por defecto
 // el mundo de afuera: `wiki` = fotos que devuelve Wikimedia, `brave` = las de Brave, `elegir` decide qué fotos (números) acepta la visión, `fal` falla o no
 function mundoPortada(o = {}) {
   const w = { llamadas: [], falBodies: [], visionTextos: [], decisiones: 0, ...o };
@@ -952,7 +954,7 @@ function mundoPortada(o = {}) {
       if (o.falFalla && o.falFalla(w.falBodies.length - 1)) return res(500, 'sin crédito');
       return res(200, { images: [{ url: `https://fal.media/fondo${w.falBodies.length}.jpg` }] });
     }
-    if (/^https:\/\/(upload\.wikimedia\.org|imgs\.search\.brave\.com|fal\.media)\//.test(u)) return u.includes('rota') ? res(404, '') : res(200, JPG(u.length));
+    if (/^https:\/\/(upload\.wikimedia\.org|imgs\.search\.brave\.com|fal\.media)\//.test(u)) return u.includes('rota') ? res(404, '') : res(200, u.includes('chica') ? JPG(u.length, 800, 600) : JPG(u.length));
     return res(404, '');
   };
   w.claude = { pedidos: [], async estructurado(p) {
@@ -962,19 +964,19 @@ function mundoPortada(o = {}) {
     if (p.herramienta.name === 'elegir_fotos_portada') {
       w.visionTextos = p.usuario.filter((b) => b.type === 'text').map((b) => b.text);
       w.imagenes = p.usuario.filter((b) => b.type === 'image').length;
-      return { elegidas: (o.elegir ?? [1, 2, 3]).map((foto) => ({ foto, motivo: 'ok' })) };
+      return { elegidas: (o.elegir ?? [1, 2, 3]).map((foto) => ({ foto, motivo: 'ok', momento_del_dia: (o.noche ?? []).includes(foto) ? 'noche' : 'dia' })) };
     }
     return { versiones: [0, 1, 2].map((i) => ({ caption: `Caption ${w.claude.pedidos.length}-${i}`, hashtags: ['#club', `#tema${i}`], gancho_texto: `Gancho ${i}`, portada_texto: `Portada ${i}`, portada_linea1: `Linea ${i}`, portada_linea2: `Remate ${i}` })) };
   } };
   return w;
 }
-const armarConPortada = (w, { banco = null, env = { FAL_KEY: 'k-fal' }, ctx = { territorio: 'San Isidro, Buenos Aires', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,AAAA', portada_refs: [] }, momento = MOM, log = () => {} } = {}) =>
+const armarConPortada = (w, { banco = null, env = {}, ctx = { territorio: 'San Isidro, Buenos Aires', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,AAAA', portada_refs: [] }, momento = MOM, log = () => {} } = {}) =>
   crearArmarRecetas({ claude: w.claude, portadas: crearPortadas({ claude: w.claude, fetchFn: w.fetchFn, env, log, banco }), log })({ momento, transcripcion: { palabras: PALABRAS }, aprendizajes: [], portada: ctx });
 
 casos.push(
   ['Portadas', 'portada_luz, portada_plano y portada_lado distintos en las 3 versiones sin aprendizaje, y tiradas a la ganadora con aprendizaje', () => {
     for (let k = 0; k < 30; k++) for (const d of ['portada_luz', 'portada_plano', 'portada_lado']) eq(new Set(elegirVariables({ semilla: k }).map((v) => v[d])).size, 3, `${d} distinto en las 3 (semilla ${k})`);
-    eq(OPCIONES.portada_luz, ['dorada', 'dia', 'azul', 'noche'], 'valores de la luz'); eq(OPCIONES.portada_lado, ['izq', 'der', 'centro'], 'valores del lado');
+    eq(OPCIONES.portada_luz, ['calido', 'neutro', 'frio', 'noche'], 'valores de la luz (tinte)'); eq(OPCIONES.portada_lado, ['izq', 'der', 'centro'], 'valores del lado');
     const v = elegirVariables({ semilla: 4, aprendizajes: { portada_luz: 'noche' } });
     eq(v.filter((x) => x.portada_luz === 'noche').length >= 2, true, 'la ganadora va en las 2 versiones de base');
     eq(normalizarAprendizajes({ portada_plano: 'cerca' }).portada_plano, 'cerca', 'el aprendizaje de portada se normaliza');
@@ -990,15 +992,16 @@ casos.push(
     eq(lineasDePortada({ portada_linea1: 'x', portada_linea2: 'Gran Obra' }), { linea1: 'x', linea2: 'Gran Obra' }, 'líneas buenas');
     eq(lineasDePortada({ portada_linea1: 'Obra', portada_linea2: 'obra' }).linea1, '', 'la línea 1 no repite la 2');
   }],
-  ['Portadas', 'Camino feliz: receta.portada.chango según el contrato, un fondo por versión en fal con foto como data-URI, luz y plano de las variables', async () => {
+  ['Portadas', 'Camino de IA (PORTADA_FONDO_IA=1): receta.portada.chango según el contrato, un fondo por versión en fal con foto como data-URI, luz y plano de las variables', async () => {
     const w = mundoPortada();
-    const rs = await armarConPortada(w);
+    const rs = await armarConPortada(w, { env: IA });
     eq(rs.length, 3, 'tres recetas');
     for (const [i, r] of rs.entries()) {
       const c = r.portada.chango;
-      yes(c && /^https:\/\/fal\.media\/fondo\d\.jpg$/.test(c.fondo_url), `v${i + 1} tiene fondo`);
+      yes(c && /^https:\/\/fal\.media\/fondo\d\.jpg$/.test(c.fondo_url), `v${i + 1} tiene fondo`); // (sin banco: la URL de fal)
       eq([c.linea1, c.linea2, c.lado, c.nombre, c.foto_dirigente], [`Linea ${i}`, `Remate ${i}`, r.variables.portada_lado, 'Posse', 'data:image/jpeg;base64,AAAA'], 'campos del contrato');
       eq(Object.keys(c.referencia).sort(), ['fuente', 'imagen_url', 'licencia', 'lugar', 'pagina_url'], 'referencia del contrato');
+      eq([c.fondo_tipo, c.luz, c.plano], ['ia', r.variables.portada_luz, r.variables.portada_plano], 'tipo, luz y plano a la vista');
       eq(c.referencia.lugar, 'catedral de san isidro', 'lugar normalizado');
       yes(c.referencia.fuente === 'Wikimedia Commons' && c.referencia.licencia.startsWith('CC BY-SA 4.0') && c.referencia.pagina_url.startsWith('https://commons.test/'), 'fuente y licencia a la vista');
       yes(r.portada.texto && !('portada_motivo' in r), 'portada.texto de respaldo se mantiene');
@@ -1009,7 +1012,7 @@ casos.push(
       eq([b.modelo, b.auth, b.num_images, b.image_size], ['bytedance/seedream/v5.5/edit', 'Key k-fal', 1, { width: 1152, height: 2048 }], 'llamada a fal');
       yes(/^data:image\/jpeg;base64,/.test(b.image_urls[0]) && /exact location/.test(b.prompt) && /Remove all people/.test(b.prompt), 'foto como data-URI y prompt del prototipo');
     }
-    const luces = { dorada: 'golden hour', dia: 'daylight', azul: 'blue hour', noche: 'night' }, planos = { lejos: 'Wide shot', medio: 'Medium shot', cerca: 'Close-up' };
+    const luces = { calido: 'golden hour', neutro: 'daylight', frio: 'blue hour', noche: 'night' }, planos = { lejos: 'Wide shot', medio: 'Medium shot', cerca: 'Close-up' };
     // las versiones salen en el orden de las variables; cada fondo lleva SU luz y SU plano
     for (const [i, r] of rs.entries()) { const b = w.falBodies.find((x) => x.image_urls[0].length > 0 && x.prompt.includes(luces[r.variables.portada_luz]) && x.prompt.includes(planos[r.variables.portada_plano])); yes(b, `v${i + 1}: el prompt trae su luz y plano`); }
     eq(w.claude.pedidos.filter((p) => p.herramienta.name === 'decidir_portada').length, 1, 'se decide UNA vez por momento');
@@ -1019,7 +1022,7 @@ casos.push(
   }],
   ['Portadas', 'Con BRAVE_API_KEY suma la búsqueda de imágenes de Brave; PORTADA_MODELO cambia el modelo (y el formato) de fal', async () => {
     const w = mundoPortada({ wiki: ['https://upload.wikimedia.org/w1.jpg'], elegir: [1, 2, 3] });
-    const rs = await armarConPortada(w, { env: { FAL_KEY: 'k', BRAVE_API_KEY: 'bk', PORTADA_MODELO: 'fal-ai/nano-banana-2/edit' } });
+    const rs = await armarConPortada(w, { env: { ...IA, BRAVE_API_KEY: 'bk', PORTADA_MODELO: 'fal-ai/nano-banana-2/edit' } });
     eq(w.braveToken, 'bk', 'token de Brave');
     eq(w.falBodies.map((b) => [b.modelo, b.aspect_ratio]), [['fal-ai/nano-banana-2/edit', '9:16'], ['fal-ai/nano-banana-2/edit', '9:16'], ['fal-ai/nano-banana-2/edit', '9:16']], 'modelo por env');
     yes(rs.some((r) => r.portada.chango.referencia.fuente.startsWith('Web: ')), 'una foto de la web con su fuente');
@@ -1056,7 +1059,7 @@ casos.push(
   ['Portadas', 'Si el tema no es un lugar: con territorio se usa una escena; sin territorio y sin lugar nombrado, sin chango y sin buscar nada', async () => {
     const esc = { tipo: 'escena', lugar: 'patrullero en calle arbolada de Boulogne', escena: 'a police car on a tree-lined street', consultas: ['calle arbolada Boulogne'] };
     const conT = mundoPortada({ decision: esc });
-    const a = await armarConPortada(conT);
+    const a = await armarConPortada(conT, { env: IA });
     eq(a.every((r) => r.portada.chango), true, 'con territorio hay chango');
     yes(conT.falBodies.every((b) => /police car/.test(b.prompt)), 'la escena va al prompt');
     const sinT = mundoPortada({ decision: esc });
@@ -1066,8 +1069,8 @@ casos.push(
     yes((await armarConPortada(ning)).every((r) => !r.portada.chango) && ning.llamadas.length === 0 && ning.falBodies.length === 0, 'tipo ninguno: nada que buscar');
   }],
   ['Portadas', 'Los errores nunca frenan la edición: sin FAL_KEY, Wikimedia caída, Claude caído, fal con una versión fallada', async () => {
-    const w1 = mundoPortada(); const sinKey = await armarConPortada(w1, { env: {} });
-    yes(sinKey.length === 3 && sinKey.every((r) => !r.portada.chango && /FAL_KEY/.test(r.portada_motivo)) && w1.claude.pedidos.length === 1, 'sin FAL_KEY: ni se llama a Claude por la portada (solo los textos)');
+    const w1 = mundoPortada(); const sinKey = await armarConPortada(w1, { env: { PORTADA_FONDO_IA: '1' } });
+    yes(sinKey.length === 3 && sinKey.every((r) => !r.portada.chango && /FAL_KEY/.test(r.portada_motivo)) && w1.claude.pedidos.length === 1, 'IA sin FAL_KEY: ni se llama a Claude por la portada (solo los textos)');
     const w2 = mundoPortada({ wikiFalla: true }); const wk = await armarConPortada(w2);
     yes(wk.length === 3 && wk.every((r) => !r.portada.chango && /no encontré fotos/.test(r.portada_motivo)), 'Wikimedia caída: sin fotos');
     const w3 = mundoPortada({ wiki: ['https://upload.wikimedia.org/rota1.jpg'], brave: [] }); const rota = await armarConPortada(w3);
@@ -1077,7 +1080,7 @@ casos.push(
     w4.claude.estructurado = async (p) => { if (p.herramienta.name === 'decidir_portada') throw new Error('Claude caído'); return orig(p); };
     const ck = await armarConPortada(w4);
     yes(ck.length === 3 && ck.every((r) => !r.portada.chango && /Claude caído/.test(r.portada_motivo) && r.caption), 'Claude caído en la portada: recetas igual');
-    const w5 = mundoPortada({ falFalla: (n) => n === 1 }); const fa = await armarConPortada(w5);
+    const w5 = mundoPortada({ falFalla: (n) => n === 1 }); const fa = await armarConPortada(w5, { env: IA });
     eq(fa.filter((r) => r.portada.chango).length, 2, 'una versión sin fondo, las otras 2 con');
     yes(fa.find((r) => !r.portada.chango).portada_motivo.startsWith('fal: fal respondió 500'), 'motivo de fal');
     const w6 = { porMomento: async () => { throw new Error('explotó'); } };
@@ -1107,15 +1110,15 @@ const resp = (body, init = {}) => new Response(body, init);
 casos.push(
   ['Fondos', 'Cada fondo generado se guarda (archivo + registro); pasados 7 días se reusa SIN fal, ni búsqueda, ni visión, con una URL del editor y las variables de la receta ajustadas', async () => {
     const b = bancoDeFondos(), w = mundoPortada();
-    const a = await armarConPortada(w, { banco: b.banco, ctx: CTX(1) });
+    const a = await armarConPortada(w, { env: IA, banco: b.banco, ctx: CTX(1) });
     eq(w.falBodies.length, 3, 'la primera vez, 3 fondos en fal');
     const f = filas(b);
     eq(f.length, 3, '3 registros');
     yes(f.every((x) => x.project_id === 1 && x.lugar === 'catedral de san isidro' && x.ref_url.startsWith('https://upload.wikimedia.org/') && fs.existsSync(path.join(b.dir, x.archivo)) && x.creado && x.ultimo_uso), 'registro completo y archivo en disco');
-    eq(a.map((r) => r.portada.chango.fondo_url.startsWith('https://fal.media/')), [true, true, true], 'recién generado: URL de fal');
+    yes(a.every((r) => r.portada.chango.fondo_url.startsWith('http://editor.test/fondos/')), 'recién generado: también sale del editor');
     b.dias(8);
     const w2 = mundoPortada();
-    const r = await armarConPortada(w2, { banco: b.banco, ctx: CTX(1), momento: { ...MOM, id: 2, idx: 1 } });
+    const r = await armarConPortada(w2, { env: IA, banco: b.banco, ctx: CTX(1), momento: { ...MOM, id: 2, idx: 1 } });
     eq([w2.falBodies.length, w2.llamadas.filter((u) => !u.startsWith('http://editor.test')).length, w2.claude.pedidos.some((p) => p.herramienta.name === 'elegir_fotos_portada')], [0, 0, false], 'sin fal, sin búsqueda, sin visión');
     const urls = r.map((x) => x.portada.chango.fondo_url);
     yes(urls.every((u) => /^http:\/\/editor\.test\/fondos\/[0-9a-f-]{36}\.jpg$/.test(u)), 'URL que sirve el editor');
@@ -1126,36 +1129,34 @@ casos.push(
   }],
   ['Fondos', 'Un fondo usado hace menos de 7 días no se reusa (se genera), y el banco es por proyecto', async () => {
     const b = bancoDeFondos();
-    await armarConPortada(mundoPortada(), { banco: b.banco, ctx: CTX(1) });
+    await armarConPortada(mundoPortada(), { env: IA, banco: b.banco, ctx: CTX(1) });
     b.dias(6);
-    const w = mundoPortada(), r = await armarConPortada(w, { banco: b.banco, ctx: CTX(1) });
+    const w = mundoPortada(), r = await armarConPortada(w, { env: IA, banco: b.banco, ctx: CTX(1) });
     eq(w.falBodies.length, 3, 'a los 6 días se genera de nuevo');
-    yes(r.every((x) => x.portada.chango.fondo_url.startsWith('https://fal.media/')), 'URLs de fal');
     eq(filas(b).length, 6, 'y se guardan los nuevos');
     b.dias(2); // los primeros ya cumplieron 8 días; los segundos tienen 2
-    const w2 = mundoPortada(); await armarConPortada(w2, { banco: b.banco, ctx: CTX(2) });
+    const w2 = mundoPortada(); await armarConPortada(w2, { env: IA, banco: b.banco, ctx: CTX(2) });
     eq(w2.falBodies.length, 3, 'otro proyecto no reusa los de este');
-    const w3 = mundoPortada(), r3 = await armarConPortada(w3, { banco: b.banco, ctx: CTX(1) });
+    const w3 = mundoPortada(), r3 = await armarConPortada(w3, { env: IA, banco: b.banco, ctx: CTX(1) });
     eq(w3.falBodies.length, 0, 'del proyecto 1 se reusan los de 8 días');
     const ids = new Set(filas(b).filter((x) => x.project_id === 1 && Date.parse(x.ultimo_uso) === b.reloj.t).map((x) => x.archivo));
     eq(r3.every((x) => ids.has(x.portada.chango.fondo_url.split('/').pop())), true, 'y solo los viejos');
   }],
   ['Fondos', 'Con menos fondos que versiones: se reusan los que hay y solo se genera lo que falta (buscando solo para eso)', async () => {
     const b = bancoDeFondos();
-    for (const [luz, plano] of [['dorada', 'lejos'], ['noche', 'cerca']]) b.banco.guardar({ project_id: 1, lugar: 'catedral de san isidro', ref_url: 'https://upload.wikimedia.org/vieja.jpg', luz, plano, referencia: { lugar: 'catedral de san isidro', imagen_url: 'https://upload.wikimedia.org/vieja.jpg', pagina_url: 'p', fuente: 'Wikimedia Commons', licencia: 'CC0' } }, JPG(1));
+    for (const [luz, plano] of [['calido', 'lejos'], ['noche', 'cerca']]) b.banco.guardar({ project_id: 1, tipo: 'ia', lugar: 'catedral de san isidro', ref_url: 'https://upload.wikimedia.org/vieja.jpg', luz, plano, referencia: { lugar: 'catedral de san isidro', imagen_url: 'https://upload.wikimedia.org/vieja.jpg', pagina_url: 'p', fuente: 'Wikimedia Commons', licencia: 'CC0' } }, JPG(1));
     b.dias(8);
-    const w = mundoPortada(), r = await armarConPortada(w, { banco: b.banco, ctx: CTX(1) });
+    const w = mundoPortada(), r = await armarConPortada(w, { env: IA, banco: b.banco, ctx: CTX(1) });
     eq(w.falBodies.length, 1, 'un solo fondo en fal');
-    eq(r.filter((x) => x.portada.chango.fondo_url.startsWith('http://editor.test/')).length, 2, 'dos del banco');
     eq(new Set(r.map((x) => x.portada.chango.fondo_url)).size, 3, 'los 3 distintos');
     eq(filas(b).length, 3, 'el nuevo se suma al banco');
     // otro lugar: el banco no sirve
     const w2 = mundoPortada({ decision: { tipo: 'lugar', lugar: 'Plaza Mitre', escena: 'a plaza', consultas: ['Plaza Mitre'] } });
-    b.dias(8); await armarConPortada(w2, { banco: b.banco, ctx: CTX(1) });
+    b.dias(8); await armarConPortada(w2, { env: IA, banco: b.banco, ctx: CTX(1) });
     eq(w2.falBodies.length, 3, 'otro lugar, todo nuevo');
     // sin URL pública no hay cómo servir el archivo: no se reusa
     const sinPub = crearBancoFondos({ db: b.db, dir: b.dir, publicUrl: '', ahora: () => b.reloj.t });
-    const w3 = mundoPortada(); await armarConPortada(w3, { banco: sinPub, ctx: CTX(1) });
+    const w3 = mundoPortada(); await armarConPortada(w3, { env: IA, banco: sinPub, ctx: CTX(1) });
     eq(w3.falBodies.length, 3, 'sin publicUrl no se reusa');
   }],
   ['Fondos', 'El editor sirve /fondos/<uuid>.jpg (sin salir de la carpeta) para que el Estudio lo baje', async () => {
@@ -1198,9 +1199,63 @@ casos.push(
     eq([msg, cancelado], ['imagen demasiado grande', true], 'stream cortado');
     yes(leidos <= 20 * 1024, `no se leyó de más (${leidos})`);
     const okb = await bajar('https://upload.wikimedia.org/a.jpg', async () => resp(JPG(3)), { max: 1024 });
-    eq([okb.tipo, okb.bytes.length], ['image/jpeg', 68], 'una imagen chica pasa');
+    eq([okb.tipo, okb.bytes.length], ['image/jpeg', 85], 'una imagen chica pasa');
     msg = ''; try { await bajar('https://upload.wikimedia.org/a.jpg', async () => resp('<html>no soy imagen</html>')); } catch (e) { msg = e.message; }
     eq(msg, 'no es una imagen usable', 'lo que no es imagen no pasa');
+  }],
+);
+
+// --- Fondo = la foto real directa (sin IA): luz como tinte, resolución, banco de fotos ---
+casos.push(
+  ['Foto directa', 'Por defecto no se llama a fal (ni hace falta FAL_KEY): el fondo es la foto elegida, con fondo_tipo «foto», luz y plano; sin banco, la miniatura permitida', async () => {
+    const w = mundoPortada(), rs = await armarConPortada(w, { env: { FAL_KEY: 'k-fal' } });
+    eq([w.falBodies.length, w.llamadas.some((u) => u.startsWith('https://fal.run')), rs.every((r) => r.portada.chango)], [0, false, true], 'sin fal');
+    for (const r of rs) { const c = r.portada.chango; eq([c.fondo_tipo, c.luz, c.plano, c.referencia.imagen_url === c.fondo_url], ['foto', r.variables.portada_luz, r.variables.portada_plano, true], 'tipo, luz y plano; fondo_url = la miniatura de la referencia'); yes(urlPermitida(c.fondo_url), 'URL permitida'); }
+    eq(new Set(rs.map((r) => r.portada.chango.fondo_url)).size, 3, '3 fotos distintas');
+    const w2 = mundoPortada(), sinKey = await armarConPortada(w2, { env: {} });
+    yes(sinKey.every((r) => r.portada.chango), 'sin FAL_KEY anda igual');
+    const w3 = mundoPortada({ brave: ['https://imgs.search.brave.com/b1.jpg'] }), conBrave = await armarConPortada(w3, { env: { BRAVE_API_KEY: 'x' }, ctx: CTX(1) });
+    yes(conBrave.length === 3, 'con Brave también');
+  }],
+  ['Foto directa', 'Con banco y EDITOR_PUBLIC_URL la foto se baja, se guarda y fondo_url sale del editor (/fondos/<uuid>); se reusa pasados 7 días sin buscar ni mirar, y los fondos de IA no se reusan como fotos', async () => {
+    const b = bancoDeFondos(), w = mundoPortada();
+    const a = await armarConPortada(w, { banco: b.banco, ctx: CTX(1) });
+    const f = filas(b);
+    eq([f.length, f.every((x) => x.tipo === 'foto' && x.ref_url.startsWith('https://upload.wikimedia.org/') && fs.existsSync(path.join(b.dir, x.archivo)))], [3, true], '3 fotos guardadas');
+    yes(a.every((r) => /^http:\/\/editor\.test\/fondos\/[0-9a-f-]{36}\.jpg$/.test(r.portada.chango.fondo_url) && r.portada.chango.fondo_tipo === 'foto'), 'URL del editor');
+    yes(fs.readFileSync(path.join(b.dir, f[0].archivo)).subarray(0, 4).equals(Buffer.from([0xff, 0xd8, 0xff, 0xc0])), 'el archivo guardado es la foto bajada');
+    b.dias(8);
+    const w2 = mundoPortada(), r = await armarConPortada(w2, { banco: b.banco, ctx: CTX(1), momento: { ...MOM, id: 2, idx: 1 } });
+    eq([w2.llamadas.filter((u) => !u.startsWith('http://editor.test')).length, w2.claude.pedidos.some((p) => p.herramienta.name === 'elegir_fotos_portada'), new Set(r.map((x) => x.portada.chango.fondo_url)).size], [0, false, 3], 'sin buscar, sin visión, 3 distintas');
+    // un banco que solo tiene fondos de IA no sirve en modo foto
+    const b2 = bancoDeFondos();
+    for (const [luz, plano] of [['calido', 'lejos'], ['neutro', 'medio'], ['frio', 'cerca']]) b2.banco.guardar({ project_id: 1, tipo: 'ia', lugar: 'catedral de san isidro', luz, plano, referencia: {} }, JPG(2));
+    b2.dias(8);
+    const w3 = mundoPortada(); await armarConPortada(w3, { banco: b2.banco, ctx: CTX(1) });
+    yes(w3.claude.pedidos.some((p) => p.herramienta.name === 'elegir_fotos_portada'), 'se buscó: lo de IA no vale como foto');
+    eq(filas(b2).filter((x) => x.tipo === 'foto').length, 3, 'y se guardaron fotos');
+  }],
+  ['Foto directa', 'La luz es un tinte (calido, neutro, frio, noche): «noche» solo con una foto de noche, y con ella siempre; una foto de día nunca queda en noche', async () => {
+    // semilla 3: las variables piden noche, calido, neutro; la foto 2 (versión 2) es de noche
+    const w = mundoPortada({ noche: [2] });
+    const rs = await armarConPortada(w, { momento: { ...MOM, id: 3, idx: 3 } });
+    eq(rs.map((r) => r.variables.portada_luz), ['calido', 'noche', 'neutro'], 'v1 pedía noche con foto de día → tinte de día distinto; v2 foto de noche → noche');
+    eq(rs.map((r) => r.portada.chango.luz), ['calido', 'noche', 'neutro'], 'la misma luz va al Estudio');
+    const sin = await armarConPortada(mundoPortada(), { momento: { ...MOM, id: 3, idx: 3 } });
+    yes(sin.every((r) => r.variables.portada_luz !== 'noche') && new Set(sin.map((r) => r.variables.portada_luz)).size === 3, 'sin fotos de noche, ninguna noche y 3 tintes distintos');
+    const props = w.claude.pedidos.find((p) => p.herramienta.name === 'elegir_fotos_portada');
+    yes(props.herramienta.input_schema.properties.elegidas.items.required.includes('momento_del_dia') && /mástil|poste/.test(props.system) && /9:16/.test(props.system) && /noche/.test(props.system), 'la visión pide día o noche y usabilidad como fondo vertical');
+  }],
+  ['Foto directa', 'Resolución mínima: las fotos con menos de 900 px en el lado corto ni llegan a la visión; el lector de medidas entiende JPEG, PNG y WEBP', async () => {
+    const w = mundoPortada({ wiki: ['https://upload.wikimedia.org/chica1.jpg', 'https://upload.wikimedia.org/chica2.jpg', 'https://upload.wikimedia.org/buena.jpg'], brave: [], elegir: [1] });
+    await armarConPortada(w);
+    eq(w.imagenes, 1, 'solo la de buena resolución llega a la visión');
+    eq(dimensiones(JPG(1, 1920, 1080)), { ancho: 1920, alto: 1080 }, 'JPEG');
+    const png = Buffer.alloc(40); Buffer.from([0x89, 0x50, 0x4e, 0x47]).copy(png); png.writeUInt32BE(1000, 16); png.writeUInt32BE(1500, 20);
+    eq(dimensiones(png), { ancho: 1000, alto: 1500 }, 'PNG');
+    const webp = Buffer.alloc(40); webp.write('RIFF', 0, 'latin1'); webp.write('WEBP', 8, 'latin1'); webp.write('VP8X', 12, 'latin1'); webp.writeUIntLE(1199, 24, 3); webp.writeUIntLE(799, 27, 3);
+    eq(dimensiones(webp), { ancho: 1200, alto: 800 }, 'WEBP');
+    eq(dimensiones(Buffer.from('basura')), null, 'basura');
   }],
 );
 

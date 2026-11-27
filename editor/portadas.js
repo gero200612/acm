@@ -1,8 +1,9 @@
-// Portadas estilo Chango: por cada momento, el fondo de las 3 versiones (una foto REAL del lugar → escena 9:16 por fal).
+// Portadas estilo Chango: por cada momento, el fondo de las 3 versiones.
 //   1. Claude decide qué mostrar atrás (un lugar o una escena del territorio) y qué buscar.
 //   2. Se buscan fotos en Wikimedia Commons (y en Brave Images si hay BRAVE_API_KEY); primero las del banco del proyecto que gustaron.
-//   3. Claude con visión elige 3 que muestren el lugar desde ángulos distintos.
-//   4. fal genera un fondo por versión, con luz y plano según portada_luz / portada_plano.
+//   3. Claude con visión elige 3 usables TAL CUAL como fondo vertical (y dice si son de día o de noche).
+//   4. El fondo ES la foto real (se baja, se guarda en el banco de fondos y se sirve desde el editor). El Estudio la recorta a 9:16, la desenfoca y le pone el tinte de portada_luz.
+//   Con PORTADA_FONDO_IA=1 (apagado por defecto) el camino viejo: fal redibuja la foto como escena 9:16 según portada_luz / portada_plano.
 // Todo lo que falla acá deja a la versión sin `portada.chango` (sale la portada de hoy) y se registra el motivo: la portada nunca frena una edición.
 import { MODELOS } from './claude.js';
 
@@ -10,12 +11,15 @@ export const MODELO_FAL = 'bytedance/seedream/v5.5/edit';
 const UA = 'ACM-Editor/1.0 (portadas; contacto por el proyecto)';
 const MAX_CANDIDATAS = 12, MAX_REFS_BANCO = 4, MAX_BYTES = 5 * 1024 * 1024;
 
+// portada_luz es un tinte: calido | neutro | frio | noche (noche solo si la foto ya es de noche). En el camino de IA, además, la luz del fondo generado.
 const LUZ = {
-  dorada: 'warm golden hour light, cinematic',
-  dia: 'bright clear daylight, blue sky, natural colors',
-  azul: 'blue hour dusk, deep blue sky with the first warm lights glowing',
+  calido: 'warm golden hour light, cinematic',
+  neutro: 'bright clear daylight, blue sky, natural colors',
+  frio: 'blue hour dusk, deep blue sky with the first warm lights glowing',
   noche: 'night scene lit by warm street and building lights, dark blue sky',
 };
+const DIURNAS = ['calido', 'neutro', 'frio'];
+export const MIN_LADO_CORTO = 900; // px: al recortar a 9:16 la foto se estira a pantalla de celular
 const PLANO = {
   lejos: 'Wide shot: show the whole place with some of its surroundings.',
   medio: 'Medium shot: the main part of the place fills the frame.',
@@ -46,25 +50,25 @@ export const HERRAMIENTA_ELEGIR = {
   description: 'Las fotos elegidas (hasta 3), por número.',
   input_schema: {
     type: 'object',
-    properties: { elegidas: { type: 'array', items: { type: 'object', properties: { foto: { type: 'integer' }, motivo: { type: 'string' } }, required: ['foto', 'motivo'] } } },
+    properties: { elegidas: { type: 'array', items: { type: 'object', properties: { foto: { type: 'integer' }, motivo: { type: 'string' }, momento_del_dia: { type: 'string', enum: ['dia', 'noche'], description: 'noche solo si la foto ya es de noche (cielo oscuro, luces prendidas)' } }, required: ['foto', 'motivo', 'momento_del_dia'] } } },
     required: ['elegidas'],
   },
 };
-const SYSTEM_ELEGIR = `Elegís fotos de referencia para un fondo de portada. Elegí hasta 3 que muestren el lugar pedido desde ángulos o encuadres DISTINTOS (no tres casi iguales). Descartá las que tengan texto encima, marcas de agua, logos, gente en primer plano, baja calidad o que NO sean ese lugar (ojo con homónimos de otros países). Las marcadas «gustó» tienen prioridad si cumplen todo lo demás. Si ninguna sirve, devolvé la lista vacía.`;
+const SYSTEM_ELEGIR = `Elegís fotos reales para usar TAL CUAL de fondo de una portada vertical: el Estudio recorta el centro de la foto a 9:16 y pone a una persona recortada adelante, con la cabeza en el centro. Elegí hasta 3 que muestren el lugar pedido desde ángulos o encuadres DISTINTOS (no tres casi iguales) y que sirvan así: al recortar el centro a 9:16 no deben quedar gente, autos ni carteles o texto en primer plano, ni un objeto fino (mástil, poste, farol) justo en el centro donde va la cabeza. Descartá también marcas de agua, logos, baja calidad o fotos que NO sean ese lugar (ojo con homónimos de otros países). Las marcadas «gustó» tienen prioridad si cumplen todo lo demás. Para cada elegida decí si es de día o de noche (noche solo si ya lo es). Si ninguna sirve, devolvé la lista vacía.`;
 
 // --- fuentes de fotos ---
 const sinHtml = (s) => String(s || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 
 export async function buscarWikimedia(consulta, { fetchFn = fetch, limite = 15 } = {}) {
   const u = new URL('https://commons.wikimedia.org/w/api.php');
-  for (const [k, v] of Object.entries({ action: 'query', format: 'json', generator: 'search', gsrsearch: consulta, gsrnamespace: 6, gsrlimit: limite, prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: 1200 })) u.searchParams.set(k, v);
+  for (const [k, v] of Object.entries({ action: 'query', format: 'json', generator: 'search', gsrsearch: consulta, gsrnamespace: 6, gsrlimit: limite, prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: 2000 })) u.searchParams.set(k, v);
   const r = await fetchFn(u, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20000) });
   if (!r.ok) throw new Error(`Wikimedia respondió ${r.status}`);
   const pages = Object.values((await r.json())?.query?.pages || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
   const out = [];
   for (const p of pages) {
     const i = p.imageinfo?.[0];
-    if (!i || !/^image\/(jpeg|png|webp)$/.test(i.mime || '') || (i.width || 0) < 800 || (i.height || 0) < 500) continue;
+    if (!i || !/^image\/(jpeg|png|webp)$/.test(i.mime || '') || Math.min(i.thumbwidth || i.width || 0, i.thumbheight || i.height || 0) < MIN_LADO_CORTO) continue;
     const m = i.extmetadata || {};
     out.push({ imagen_url: i.thumburl || i.url, pagina_url: i.descriptionurl || '', fuente: 'Wikimedia Commons', licencia: sinHtml(m.LicenseShortName?.value), autor: sinHtml(m.Artist?.value).slice(0, 80), titulo: String(p.title || '').replace(/^File:/, '') });
   }
@@ -81,6 +85,28 @@ export async function buscarBrave(consulta, { fetchFn = fetch, clave, limite = 1
 }
 
 const tipoDeImagen = (b) => (b[0] === 0xff && b[1] === 0xd8 ? 'image/jpeg' : b[0] === 0x89 && b[1] === 0x50 ? 'image/png' : b.length > 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP' ? 'image/webp' : '');
+
+// ancho y alto de un JPEG, PNG o WEBP sin dependencias (null si no se puede leer)
+export function dimensiones(b) {
+  try {
+    if (b[0] === 0x89 && b[1] === 0x50) return { ancho: b.readUInt32BE(16), alto: b.readUInt32BE(20) };
+    if (b[0] === 0xff && b[1] === 0xd8) {
+      for (let i = 2; i + 9 < b.length;) {
+        if (b[i] !== 0xff) { i++; continue; }
+        const m = b[i + 1];
+        if (m >= 0xc0 && m <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(m)) return { ancho: b.readUInt16BE(i + 7), alto: b.readUInt16BE(i + 5) };
+        i += m === 0xd8 || (m >= 0xd0 && m <= 0xd7) || m === 0x01 ? 2 : 2 + b.readUInt16BE(i + 2);
+      }
+      return null;
+    }
+    const f = b.toString('latin1', 12, 16);
+    if (f === 'VP8X') return { ancho: 1 + b.readUIntLE(24, 3), alto: 1 + b.readUIntLE(27, 3) };
+    if (f === 'VP8 ') return { ancho: b.readUInt16LE(26) & 0x3fff, alto: b.readUInt16LE(28) & 0x3fff };
+    if (f === 'VP8L') { const v = b.readUInt32LE(21); return { ancho: 1 + (v & 0x3fff), alto: 1 + ((v >> 14) & 0x3fff) }; }
+  } catch { /* sin medidas */ }
+  return null;
+}
+const extDe = (tipo) => ({ 'image/png': 'png', 'image/webp': 'webp' })[tipo] || 'jpg';
 
 // Solo se bajan imágenes por https de hosts conocidos (nada que apunte a la red interna): Wikimedia y, de Brave, SOLO su miniatura proxeada (nunca la imagen del sitio).
 // Un host que empieza con «.» vale también para sus subdominios.
@@ -153,7 +179,9 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
     const bajadas = await Promise.all(lista.map(async (c) => {
       try { return { ...c, ...(await bajar(c.imagen_url, fetchFn)) }; } catch { return null; }
     }));
-    return bajadas.filter(Boolean);
+    // resolución mínima en el lado corto; y un tope de peso total para que el pedido a Claude entre
+    let peso = 0;
+    return bajadas.filter(Boolean).map((c) => ({ ...c, medidas: dimensiones(c.bytes) })).filter((c) => c.medidas && Math.min(c.medidas.ancho, c.medidas.alto) >= MIN_LADO_CORTO).filter((c) => (peso += c.bytes.length) <= 20 * 1024 * 1024);
   }
 
   async function elegirFotos({ lugar, cands }) {
@@ -164,7 +192,8 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
     });
     const r = await claude.estructurado({ modelo, system: SYSTEM_ELEGIR, usuario: bloques, herramienta: HERRAMIENTA_ELEGIR, maxTokens: 1500, esfuerzo: 'low' });
     const ids = [...new Set((Array.isArray(r.elegidas) ? r.elegidas : []).map((x) => Number(x?.foto)).filter((n) => Number.isInteger(n) && n >= 1 && n <= cands.length))].slice(0, 3);
-    return ids.map((n) => cands[n - 1]);
+    const nocturnas = new Set((Array.isArray(r.elegidas) ? r.elegidas : []).filter((x) => x?.momento_del_dia === 'noche').map((x) => Number(x.foto)));
+    return ids.map((n) => ({ ...cands[n - 1], noche: nocturnas.has(n) }));
   }
 
   function promptFondo({ lugar, escena, luz, plano }) {
@@ -185,10 +214,13 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
     return url;
   }
 
+  const iaActivo = () => env.PORTADA_FONDO_IA === '1';
+
   // Reparte los fondos del banco entre las versiones: el que tiene la luz y el plano pedidos; si no, el de la misma luz, el del mismo plano o cualquiera.
-  // Nunca el mismo fondo dos veces en el momento. Devuelve, por versión, el fondo del banco o null.
+  // Nunca el mismo fondo dos veces en el momento. Solo del mismo tipo (foto o IA) que el modo actual. Devuelve, por versión, el fondo del banco o null.
   function reusarDelBanco({ versiones, lugar, project_id }) {
-    const libres = banco?.disponible && project_id ? banco.fondosDe(project_id).filter((f) => mismoLugar(f.lugar, lugar)) : [];
+    const tipo = iaActivo() ? 'ia' : 'foto';
+    const libres = banco?.disponible && project_id ? banco.fondosDe(project_id).filter((f) => f.tipo === tipo && mismoLugar(f.lugar, lugar)) : [];
     const out = versiones.map(() => null), tomados = new Set();
     const tomar = (i, ok) => { const f = libres.find((x) => !tomados.has(x.id) && ok(x)); if (f) { tomados.add(f.id); out[i] = f; } };
     versiones.forEach((v, i) => tomar(i, (f) => f.luz === v.luz && f.plano === v.plano));
@@ -198,23 +230,24 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
     return out;
   }
 
-  const changoDe = ({ fondo_url, v, ctx, referencia }) => ({
-    fondo_url, linea1: v.linea1, linea2: v.linea2, lado: v.lado, nombre: ctx.nombre || '', ...(ctx.foto_dirigente ? { foto_dirigente: ctx.foto_dirigente } : {}), referencia,
+  // fondo_tipo: 'foto' (real, el Estudio la desenfoca y la tiñe con `luz`) o 'ia' (ya generada). luz y plano son los realmente usados.
+  const changoDe = ({ fondo_url, fondo_tipo, luz, plano, v, ctx, referencia }) => ({
+    fondo_url, fondo_tipo, luz, plano, linea1: v.linea1, linea2: v.linea2, lado: v.lado, nombre: ctx.nombre || '', ...(ctx.foto_dirigente ? { foto_dirigente: ctx.foto_dirigente } : {}), referencia,
   });
 
-  // Devuelve, por versión: { chango, luz, plano } o { motivo }. Primero se reusan fondos del banco del proyecto; solo lo que falta se busca y se genera.
+  // Devuelve, por versión: { chango, luz, plano } o { motivo }. Primero se reusan fondos del banco del proyecto; solo lo que falta se busca y se prepara.
   //   versiones: [{ luz, plano, lado, linea1, linea2 }]; ctx: { territorio, nombre, foto_dirigente, portada_refs, project_id }
   async function porMomento({ momento, texto, versiones, ctx = {} }) {
     const sin = (motivo) => versiones.map(() => ({ motivo }));
     try {
-      if (!env.FAL_KEY && !banco?.disponible) return sin('Falta FAL_KEY');
+      if (iaActivo() && !env.FAL_KEY && !banco?.disponible) return sin('Falta FAL_KEY');
       const d = await decidir({ momento, texto, territorio: ctx.territorio || '' });
       if (d.motivo) return sin(d.motivo);
       const res = versiones.map(() => null);
       reusarDelBanco({ versiones, lugar: d.lugar, project_id: ctx.project_id }).forEach((f, i) => {
         if (!f) return;
         banco.usar(f.id);
-        res[i] = { luz: f.luz, plano: f.plano, reusado: true, chango: changoDe({ fondo_url: banco.url(f), v: versiones[i], ctx, referencia: f.referencia }) };
+        res[i] = { luz: f.luz, plano: f.plano, reusado: true, chango: changoDe({ fondo_url: banco.url(f), fondo_tipo: f.tipo, luz: f.luz, plano: f.plano, v: versiones[i], ctx, referencia: f.referencia }) };
       });
       const faltan = versiones.map((_, i) => i).filter((i) => !res[i]);
       if (!faltan.length) return res;
@@ -224,41 +257,54 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
     } catch (e) { return sin(e.message || String(e)); }
   }
 
-  // buscar fotos, elegir y generar fondos en fal para estas versiones (sin banco)
+  // buscar fotos y elegir; después, por versión, la foto como fondo (o, con PORTADA_FONDO_IA=1, el fondo que genera fal)
   async function generar({ d, versiones, ctx }) {
+    const ia = iaActivo();
     const sin = (motivo) => versiones.map(() => ({ motivo }));
-    if (!env.FAL_KEY) return sin('Falta FAL_KEY');
+    if (ia && !env.FAL_KEY) return sin('Falta FAL_KEY');
     const cands = await candidatas({ lugar: d.lugar, consultas: d.consultas, refs: ctx.portada_refs });
-    if (!cands.length) return sin(`no encontré fotos de «${d.lugar}»`);
+    if (!cands.length) return sin(`no encontré fotos usables de «${d.lugar}»`);
     const fotos = await elegirFotos({ lugar: d.lugar, cands });
-    if (!fotos.length) return sin(`ninguna foto de «${d.lugar}» sirvió (texto, marcas de agua, gente o no era el lugar)`);
-    // con menos fotos que versiones se reusan; si dos versiones comparten foto y también luz y plano, la segunda cambia de plano
-    const usados = new Set(), planos = Object.keys(PLANO);
+    if (!fotos.length) return sin(`ninguna foto de «${d.lugar}» sirvió (gente o texto en el centro, marcas de agua, poca resolución o no era el lugar)`);
+    // con menos fotos que versiones se reusan; si dos versiones comparten foto y también luz y plano, la segunda cambia de plano.
+    // La luz es un tinte: «noche» solo con una foto de noche (y con ella, siempre); una foto de día nunca queda en «noche».
+    const usados = new Set(), planos = Object.keys(PLANO), luces = [];
     const asign = versiones.map((v, i) => {
       const foto = fotos[i % fotos.length];
+      let luz = v.luz;
+      if (!ia) {
+        if (foto.noche) luz = 'noche';
+        else if (luz === 'noche' || !LUZ[luz]) luz = DIURNAS.find((x) => !luces.includes(x)) || DIURNAS[0];
+      } else if (!LUZ[luz]) luz = 'calido';
+      luces.push(luz);
       let plano = PLANO[v.plano] ? v.plano : 'medio';
-      for (let k = 0; k < planos.length && usados.has(`${i % fotos.length}|${v.luz}|${plano}`); k++) plano = planos[(planos.indexOf(plano) + 1) % planos.length];
-      usados.add(`${i % fotos.length}|${v.luz}|${plano}`);
-      return { v, foto, plano };
+      for (let k = 0; k < planos.length && usados.has(`${i % fotos.length}|${luz}|${plano}`); k++) plano = planos[(planos.indexOf(plano) + 1) % planos.length];
+      usados.add(`${i % fotos.length}|${luz}|${plano}`);
+      return { v, foto, luz, plano };
     });
-    return Promise.all(asign.map(async ({ v, foto, plano }) => {
+    return Promise.all(asign.map(async ({ v, foto, luz, plano }) => {
+      const lic = [foto.licencia, foto.autor].filter(Boolean).join(' — ');
+      const referencia = { lugar: normLugar(d.lugar), imagen_url: foto.imagen_url, pagina_url: foto.pagina_url, fuente: foto.fuente, licencia: lic };
       try {
-        const fondo_url = await fondoFal({ foto, prompt: promptFondo({ lugar: d.lugar, escena: d.escena, luz: v.luz, plano }) });
-        const lic = [foto.licencia, foto.autor].filter(Boolean).join(' — ');
-        const referencia = { lugar: normLugar(d.lugar), imagen_url: foto.imagen_url, pagina_url: foto.pagina_url, fuente: foto.fuente, licencia: lic };
-        await guardarFondo({ fondo_url, ctx, d, v, plano, foto, referencia });
-        return { luz: v.luz, plano, chango: changoDe({ fondo_url, v, ctx, referencia }) };
-      } catch (e) { return { motivo: `fal: ${e.message}` }; }
+        let fondo_url, bytes = foto.bytes, tipo = foto.tipo;
+        if (ia) {
+          fondo_url = await fondoFal({ foto, prompt: promptFondo({ lugar: d.lugar, escena: d.escena, luz, plano }) });
+          try { ({ bytes, tipo } = await bajar(fondo_url, fetchFn, { hosts: HOSTS_FAL, max: 15 * 1024 * 1024 })); } catch (e) { bytes = null; log(`[portadas] no pude bajar el fondo de fal: ${e.message}`); }
+        }
+        const archivo = bytes ? guardarFondo({ ctx, d, luz, plano, foto, referencia, bytes, tipo, fondo_tipo: ia ? 'ia' : 'foto' }) : '';
+        // la foto directa sale del editor si hay banco con URL pública; si no, la miniatura permitida (Wikimedia o Brave)
+        if (archivo) fondo_url = banco.url({ archivo });
+        else if (!ia) fondo_url = foto.imagen_url;
+        return { luz, plano, chango: changoDe({ fondo_url, fondo_tipo: ia ? 'ia' : 'foto', luz, plano, v, ctx, referencia }) };
+      } catch (e) { return { motivo: `${ia ? 'fal' : 'foto'}: ${e.message}` }; }
     }));
   }
 
-  // al banco; si no se puede guardar, la versión sale igual con la URL de fal
-  async function guardarFondo({ fondo_url, ctx, d, v, plano, foto, referencia }) {
-    if (!banco?.disponible || !ctx.project_id) return;
-    try {
-      const { bytes } = await bajar(fondo_url, fetchFn, { hosts: HOSTS_FAL, max: 15 * 1024 * 1024 });
-      banco.guardar({ project_id: ctx.project_id, lugar: normLugar(d.lugar), ref_url: foto.imagen_url, luz: v.luz, plano, referencia }, bytes);
-    } catch (e) { log(`[portadas] no pude guardar el fondo en el banco: ${e.message}`); }
+  // al banco; si no se puede guardar devuelve '' y la versión sale igual (con la URL original)
+  function guardarFondo({ ctx, d, luz, plano, foto, referencia, bytes, tipo, fondo_tipo }) {
+    if (!banco?.disponible || !ctx.project_id) return '';
+    try { return banco.guardar({ project_id: ctx.project_id, lugar: normLugar(d.lugar), ref_url: foto.imagen_url, luz, plano, referencia, tipo: fondo_tipo, ext: extDe(tipo) }, bytes); }
+    catch (e) { log(`[portadas] no pude guardar el fondo en el banco: ${e.message}`); return ''; }
   }
 
   return { porMomento };

@@ -15,8 +15,8 @@ export const OPCIONES = {
   largo: ['completo', 'medio', 'corto'],
   // Transición en cada corte interno del reel (donde se sacan pausas y entre tramos de un tema partido), con su sonido bajo la voz; el Estudio pone como mucho una cada 2,5 s. seco = corte a secas
   transicion: ['seco', 'zoom', 'destello', 'barrido', 'glitch'],
-  // Portada estilo Chango (portadas.js): luz y plano del fondo generado, y de qué lado va la persona. Se aprenden con el 👍/👎 de la portada.
-  portada_luz: ['dorada', 'dia', 'azul', 'noche'],
+  // Portada estilo Chango (portadas.js): tinte (luz), plano y de qué lado va la persona. Se aprenden con el 👍/👎 de la portada.
+  portada_luz: ['calido', 'neutro', 'frio', 'noche'], // tinte de la foto de fondo; «noche» solo si la foto ya es de noche (portadas.js lo resuelve)
   portada_plano: ['lejos', 'medio', 'cerca'],
   portada_lado: ['izq', 'der', 'centro'],
 };

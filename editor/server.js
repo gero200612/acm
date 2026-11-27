@@ -52,7 +52,7 @@ export function crearEditor({ token, db, estudio, acm, publicUrl, dir, dirFondos
   });
   // los fondos de portada guardados (banco de fondos): el Estudio los baja de acá; nombre UUID, sin token como /entregas
   if (dirFondos) app.get('/fondos/:f', (req, res) => {
-    if (!/^[0-9a-f-]{36}\.jpg$/.test(req.params.f)) return res.status(404).end();
+    if (!/^[0-9a-f-]{36}\.(jpg|png|webp)$/.test(req.params.f)) return res.status(404).end();
     res.sendFile(req.params.f, { root: path.resolve(dirFondos) }, (e) => { if (e && !res.headersSent) res.status(404).end(); });
   });
   return { app, runner, db };
