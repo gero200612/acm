@@ -1776,7 +1776,7 @@ function projectSettings(p) {
     <label class="field">Último día de propaganda<input class="input" type="date" name="propaganda_until" value="${esc(p.propaganda_until)}"><span class="hint">Después de ese día no se publica ni se pauta</span></label></div>
     <div class="field">Color del proyecto${swatchPicker('color', p.color || '#ff5a1f')}<span class="hint">Identifica al proyecto en el panel</span></div>
     <div class="aj-sep">Portadas</div>
-    <label class="field">Territorio<input class="input" name="territorio" maxlength="200" value="${esc(p.territorio || '')}" placeholder="San Isidro, Buenos Aires"><span class="hint">Dónde hace política: el editor lo usa para elegir el fondo de las portadas</span></label>
+    <label class="field">Territorio<input class="input" name="territorio" maxlength="200" value="${esc(p.territorio || '')}" placeholder="San Isidro, Buenos Aires"><span class="hint">Opcional: se deduce de la investigación; completalo solo para corregirlo</span></label>
     <div class="field">Foto del dirigente<div class="row" style="gap:10px;flex-wrap:wrap">
       <label class="btn sm">${p.tiene_foto_dirigente ? 'Cambiar foto' : 'Subir foto'}<input type="file" id="foto-dir" accept="image/*" hidden></label>
       ${p.tiene_foto_dirigente ? '<span class="chip s-conectada">Cargada</span><button type="button" class="btn sm danger" data-act="foto-dir-del">Quitar</button>' : '<span class="small muted">Sin foto</span>'}</div>

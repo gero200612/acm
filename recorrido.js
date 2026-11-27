@@ -312,6 +312,12 @@ export function recorridoCases(sb) {
       eq([a.territorio, a.nombre, a.foto_dirigente, a.portada_refs], ['San Isidro, Buenos Aires', 'Portadas A', 'data:image/jpeg;base64,/9j/AAAA', [{ lugar: 'plaza mitre', imagen_url: 'https://x/a.jpg', pagina_url: 'https://x/p', fuente: 'Wikimedia', licencia: 'CC BY', si: 2, no: 1 }]], 'lo de A');
       const b = (await sb.box.editorGet(`/api/editor/aprendizajes/${B}`)).j;
       eq([b.territorio, b.foto_dirigente, b.portada_refs.map((x) => x.lugar)], ['', '', ['otro lugar']], 'lo de B, sin mezclar');
+      eq([a.logo, b.logo], ['', ''], 'sin foto de proyecto, sin logo');
+      const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+      fs.writeFileSync(path.join(sb.box.dataDir, 'uploads', 'logo-test.png'), png);
+      sb.box.write("UPDATE projects SET photo = 'logo-test.png' WHERE id = ?", A);
+      const l = (await sb.box.editorGet(`/api/editor/aprendizajes/${A}`)).j.logo;
+      yes(/^data:image\/(png|jpeg);base64,/.test(l) && l.length < 200 * 1024 * 1.4, 'logo = data-URI achicado ≤ 200 KB');
       eq((await sb.box.sql('SELECT count(*) n FROM portada_refs WHERE project_id = ?', A))[0].n, 1, 'una por proyecto');
       let dup = false; try { sb.box.write("INSERT INTO portada_refs (project_id, lugar, imagen_url) VALUES (?, 'x', 'https://x/a.jpg')", A); } catch { dup = true; }
       eq(dup, true, 'única por (proyecto, imagen_url)');

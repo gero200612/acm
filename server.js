@@ -269,13 +269,14 @@ app.post('/api/editor/estado', requireEditor, (req, res) => {
   res.json({ ok: true });
 });
 // lo que el editor necesita del proyecto: las variables ganadoras (memoria) y la investigación; solo del proyecto pedido
-app.get('/api/editor/aprendizajes/:pid', requireEditor, (req, res) => {
+app.get('/api/editor/aprendizajes/:pid', requireEditor, async (req, res) => {
   const pid = Number(req.params.pid);
   if (!get('SELECT id FROM projects WHERE id = ?', pid)) return res.status(404).json({ error: 'No existe el proyecto' });
   const w = winningVariables(db, pid);
   // pedidos: comentarios por segundo y motivos de rechazo (para no repetir el error); referencias: reels de otros que el equipo marcó como inspiración
-  const proy = get('SELECT name, territorio, foto_dirigente FROM projects WHERE id = ?', pid);
-  res.json({ project_id: pid, territorio: proy.territorio || '', nombre: proy.name || '', foto_dirigente: proy.foto_dirigente || '',
+  const proy = get('SELECT name, territorio, foto_dirigente, photo FROM projects WHERE id = ?', pid);
+  const logo = await logoDe(proy.photo);
+  res.json({ project_id: pid, territorio: proy.territorio || '', nombre: proy.name || '', foto_dirigente: proy.foto_dirigente || '', logo,
     portada_refs: all('SELECT lugar, imagen_url, pagina_url, fuente, licencia, si, no FROM portada_refs WHERE project_id = ? ORDER BY id', pid),
     aprendizajes: Object.keys(w).length ? [w] : [], investigacion: investigationOf(db, pid), pedidos: feedbackOf(db, pid), referencias: referencesOf(db, pid), publicos: publicosDe(pid),
     // cómo escribe el dirigente (sus captions con más me gusta): el editor escribe los textos con esa voz
@@ -731,6 +732,25 @@ const jpegDe = (buf, ancho, q) => new Promise((resolve, reject) => {
 async function achicarFoto(buf) {
   for (const [ancho, q] of [[720, 4], [720, 8], [540, 10], [400, 14], [300, 20]]) { const j = await jpegDe(buf, ancho, q); if (j.length <= FOTO_MAX) return j; }
   throw new Error('No pude achicar la foto a 300 KB');
+}
+// Logo del proyecto (projects.photo, archivo en uploads) para las portadas: PNG achicado ≤ 200 KB (conserva transparencia); si no entra, JPEG; '' si no hay
+const LOGO_MAX = 200 * 1024;
+const imagenDe = (buf, fmt, alto, extra) => new Promise((resolve, reject) => {
+  const p = spawn('ffmpeg', ['-v', 'error', '-protocol_whitelist', 'pipe', '-i', 'pipe:0', '-frames:v', '1', '-vf', `scale=-2:'min(${alto},ih)'`, ...extra, '-f', fmt, 'pipe:1'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const out = []; let err = '';
+  p.stdout.on('data', (d) => out.push(d)); p.stderr.on('data', (d) => { err = (err + d).slice(-300); });
+  p.on('error', reject); p.stdin.on('error', () => {});
+  p.on('close', (c) => (c === 0 && out.length ? resolve(Buffer.concat(out)) : reject(new Error(err.trim() || `ffmpeg salió con ${c}`))));
+  p.stdin.end(buf);
+});
+async function logoDe(file) {
+  if (!file) return '';
+  try {
+    const buf = fs.readFileSync(path.join(UPLOADS, path.basename(file)));
+    for (const alto of [300, 220, 150]) { const j = await imagenDe(buf, 'image2pipe', alto, ['-c:v', 'png', '-compression_level', '9']); if (j.length <= LOGO_MAX) return `data:image/png;base64,${j.toString('base64')}`; }
+    for (const [alto, q] of [[300, 6], [220, 10], [150, 14]]) { const j = await imagenDe(buf, 'mjpeg', alto, ['-q:v', String(q)]); if (j.length <= LOGO_MAX) return `data:image/jpeg;base64,${j.toString('base64')}`; }
+  } catch {}
+  return '';
 }
 app.put('/api/projects/:id/foto-dirigente', fotoUpload.single('foto'), async (req, res) => {
   const p = get('SELECT id FROM projects WHERE id = ?', req.params.id);
