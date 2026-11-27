@@ -8,10 +8,11 @@ import { crearEstudio } from './estudio.js';
 import { crearAcm } from './acm.js';
 import { crearRunner } from './runner.js';
 import { crearClaude } from './claude.js';
+import { crearBancoFondos } from './fondos.js';
 import { crearCriterio } from './criterio.js';
 
 // Arma la app con sus piezas; las funciones de criterio (momentos, recetas, revisión) se inyectan desde acá.
-export function crearEditor({ token, db, estudio, acm, publicUrl, dir, hooks = {}, log } = {}) {
+export function crearEditor({ token, db, estudio, acm, publicUrl, dir, dirFondos, hooks = {}, log } = {}) {
   const runner = crearRunner({ db, estudio, acm, publicUrl, dir, log, ...hooks });
   const app = express();
   app.disable('x-powered-by');
@@ -49,19 +50,26 @@ export function crearEditor({ token, db, estudio, acm, publicUrl, dir, hooks = {
     if (!/^[0-9a-f-]{36}\.(mp4|jpg)$/.test(req.params.f)) return res.status(404).end();
     res.sendFile(req.params.f, { root: path.resolve(dir) }, (e) => { if (e && !res.headersSent) res.status(404).end(); });
   });
+  // los fondos de portada guardados (banco de fondos): el Estudio los baja de acá; nombre UUID, sin token como /entregas
+  if (dirFondos) app.get('/fondos/:f', (req, res) => {
+    if (!/^[0-9a-f-]{36}\.(jpg|png|webp)$/.test(req.params.f)) return res.status(404).end();
+    res.sendFile(req.params.f, { root: path.resolve(dirFondos) }, (e) => { if (e && !res.headersSent) res.status(404).end(); });
+  });
   return { app, runner, db };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const data = path.resolve(process.env.EDITOR_DATA || './data');
   if (!process.env.EDITOR_TOKEN) { console.error('Falta EDITOR_TOKEN'); process.exit(1); }
+  const db = abrirDb(path.join(data, 'editor.db')), publicUrl = process.env.EDITOR_PUBLIC_URL || '';
+  const banco = crearBancoFondos({ db, dir: path.join(data, 'fondos'), publicUrl });
   const { app, runner } = crearEditor({
-    token: process.env.EDITOR_TOKEN, db: abrirDb(path.join(data, 'editor.db')), dir: path.join(data, 'entregas'),
-    publicUrl: process.env.EDITOR_PUBLIC_URL || '',
+    token: process.env.EDITOR_TOKEN, db, dir: path.join(data, 'entregas'), dirFondos: path.join(data, 'fondos'),
+    publicUrl,
     estudio: crearEstudio({ url: process.env.ESTUDIO_URL, empresa: process.env.ESTUDIO_EMPRESA, clave: process.env.ESTUDIO_CLAVE }),
     acm: crearAcm({ url: process.env.ACM_URL, token: process.env.EDITOR_TOKEN }),
     // Tarea 6: momentos y recetas con Claude (sin ANTHROPIC_API_KEY el trabajo termina en «error» con el motivo). Tarea 7: revisar
-    hooks: crearCriterio({ claude: crearClaude(), estudio: crearEstudio({ url: process.env.ESTUDIO_URL, empresa: process.env.ESTUDIO_EMPRESA, clave: process.env.ESTUDIO_CLAVE }) }), // incluye ajustar (rehacer a pedido)
+    hooks: crearCriterio({ banco, claude: crearClaude(), estudio: crearEstudio({ url: process.env.ESTUDIO_URL, empresa: process.env.ESTUDIO_EMPRESA, clave: process.env.ESTUDIO_CLAVE }) }), // incluye ajustar (rehacer a pedido)
   });
   const srv = app.listen(Number(process.env.PORT || 4000), () => console.log(`Editor en http://localhost:${srv.address().port}`));
   runner.arrancar();

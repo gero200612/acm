@@ -33,7 +33,7 @@ export function resumirUso(lista = []) {
   return { total_usd: Math.round(Object.values(por).reduce((a, m) => a + m.usd, 0) * 10000) / 10000, llamadas: lista.length, por_modelo: por };
 }
 
-export const MODELOS = { momentos: 'claude-sonnet-5-5', textos: 'claude-haiku-5-5', mirar: 'claude-haiku-5-5', analista: 'claude-sonnet-5-5' };
+export const MODELOS = { momentos: 'claude-sonnet-5-5', textos: 'claude-haiku-5-5', mirar: 'claude-haiku-5-5', portadas: 'claude-haiku-5-5', analista: 'claude-sonnet-5-5' };
 
 // Las salidas JSON no aceptan topes numéricos, de largo ni de cantidad, y exigen additionalProperties: false en cada objeto.
 // Se sacan del esquema que viaja; los topes los controla cada llamador al validar lo que vuelve (validarTextos, etc.).

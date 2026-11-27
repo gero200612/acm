@@ -19,6 +19,10 @@ import { crearClaude } from './claude.js';
 import { paraEstudio } from './runner.js';
 import { crearAnalista, corregirReceta, elegirCuadros } from './analista.js';
 import { tramosAEstado, notasDe } from './mirar.js';
+import { Readable } from 'node:stream';
+import { crearPortadas, normLugar, bajar, urlPermitida, dimensiones, ipPrivada, bajarSeguro, lookupFijado } from './portadas.js';
+import { crearBancoFondos } from './fondos.js';
+import { lineasDePortada } from './recetas.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
 const yes = (c, what) => { if (!c) throw new Error(what); };
@@ -921,6 +925,405 @@ casos.push(
     const r = tramosAEstado({ tramos: [{ planilla: 2, cuadro_desde: 1, cuadro_hasta: 9, se_ve: 'b' }, { planilla: 1, cuadro_desde: 3, cuadro_hasta: 2, se_ve: 'a' }, { planilla: 5, cuadro_desde: 1, cuadro_hasta: 1 }, { planilla: 1, cuadro_desde: 0, cuadro_hasta: 1 }] }, pl, 2);
     eq(r.map((x) => [x.desde_s, x.hasta_s, x.se_ve]), [[2, 6, 'a'], [8, 11, 'b']], 'swap, tope de la planilla, inválidos fuera');
     eq(notasDe({ notas_mirar: ['a'], notas_buscar: ['b'], notas_momentos: ['c'] }), ['a', 'b', 'c'], 'notas');
+  }],
+);
+
+// --- Portadas estilo Chango: Claude, Wikimedia, Brave y fal simulados ---
+// un JPEG mínimo con sus medidas (SOF0): lo que `dimensiones` necesita para exigir resolución
+const JPG = (n, ancho = 2000, alto = 1300) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, alto >> 8, alto & 255, ancho >> 8, ancho & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]), Buffer.alloc(64, n)]);
+const IA = { FAL_KEY: 'k-fal', PORTADA_FONDO_IA: '1' }; // el camino de IA (fal redibuja la foto) está apagado por defecto
+// el mundo de afuera: `wiki` = fotos que devuelve Wikimedia, `brave` = las de Brave, `elegir` decide qué fotos (números) acepta la visión, `fal` falla o no
+function mundoPortada(o = {}) {
+  const w = { llamadas: [], falBodies: [], visionTextos: [], decisiones: 0, ...o };
+  const wiki = o.wiki ?? [1, 2, 3, 4, 5].map((i) => `https://upload.wikimedia.org/wiki${i}.jpg`);
+  const brave = o.brave ?? [1, 2].map((i) => `https://imgs.search.brave.com/brave${i}.jpg`);
+  w.fetchFn = async (url, init = {}) => {
+    const u = String(url), res = (code, body) => new Response(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body), { status: code });
+    w.llamadas.push(u.split('?')[0]);
+    if (u.startsWith('https://commons.wikimedia.org/w/api.php')) {
+      if (o.wikiFalla) return res(500, 'x');
+      const pages = Object.fromEntries(wiki.map((src, i) => [String(i), { title: `File:Catedral ${i}.jpg`, index: i + 1, imageinfo: [{ thumburl: src, url: src, descriptionurl: `https://commons.test/File:Catedral${i}`, mime: 'image/jpeg', width: 3000, height: 2000, extmetadata: { LicenseShortName: { value: 'CC BY-SA 4.0' }, Artist: { value: '<a href="x">Ana</a>' } } }] }]));
+      pages.x = { title: 'File:Plano.svg', index: 99, imageinfo: [{ thumburl: 'https://upload.wikimedia.org/x.png', mime: 'image/svg+xml', width: 3000, height: 2000 }] };
+      return res(200, { query: { pages } });
+    }
+    if (u.startsWith('https://api.search.brave.com/')) {
+      w.braveToken = init.headers['x-subscription-token'];
+      return res(200, { results: brave.map((src, i) => ({ title: `Web ${i}`, url: `https://pagina.test/${i}`, source: 'pagina.test', thumbnail: { src: src + '?t' }, properties: { url: (o.hostOriginal ?? 'sitio-externo.test') ? `https://${o.hostOriginal ?? 'sitio-externo.test'}/${i}.jpg` : '' } })) });
+    }
+    if (u.startsWith('https://fal.run/')) {
+      const b = JSON.parse(init.body); w.falBodies.push({ modelo: u.slice('https://fal.run/'.length), auth: init.headers.authorization, ...b });
+      if (o.falFalla && o.falFalla(w.falBodies.length - 1)) return res(500, 'sin crédito');
+      return res(200, { images: [{ url: `https://fal.media/fondo${w.falBodies.length}.jpg` }] });
+    }
+    if (/^https:\/\/(upload\.wikimedia\.org|imgs\.search\.brave\.com|fal\.media)\//.test(u)) return u.includes('rota') ? res(404, '') : res(200, u.includes('chica') ? JPG(u.length, 800, 600) : JPG(u.length));
+    return res(404, '');
+  };
+  // red «segura» (la original de Brave): resolución de nombres y pedido a la IP fijada, simulados
+  w.resueltos = []; w.pedidosSeguros = [];
+  w.lookup = async (h) => { w.resueltos.push(h); return [{ address: h === 'privado.test' ? '10.0.0.5' : '93.184.216.34', family: 4 }]; };
+  w.pedir = async ({ url, ip }) => { w.pedidosSeguros.push({ url, ip }); const r = Readable.from([JPG(url.length)]); r.statusCode = 200; r.headers = { 'content-type': 'image/jpeg' }; return r; };
+  w.claude = { pedidos: [], async estructurado(p) {
+    w.claude.pedidos.push(p);
+    if (o.claudeFalla) throw new Error('Claude caído');
+    if (p.herramienta.name === 'decidir_portada') { w.decisiones++; return o.decision ?? { tipo: 'lugar', lugar: 'Catedral de San Isidro', escena: 'the cathedral of San Isidro', consultas: ['Catedral de San Isidro Buenos Aires', 'Catedral San Isidro'] }; }
+    if (p.herramienta.name === 'elegir_fotos_portada') {
+      w.visionTextos = p.usuario.filter((b) => b.type === 'text').map((b) => b.text);
+      w.imagenes = p.usuario.filter((b) => b.type === 'image').length;
+      return { elegidas: (o.elegir ?? [1, 2, 3]).map((foto) => ({ foto, motivo: 'ok', momento_del_dia: (o.noche ?? []).includes(foto) ? 'noche' : 'dia' })) };
+    }
+    return { versiones: [0, 1, 2].map((i) => ({ caption: `Caption ${w.claude.pedidos.length}-${i}`, hashtags: ['#club', `#tema${i}`], gancho_texto: `Gancho ${i}`, portada_texto: `Portada ${i}`, portada_linea1: `Linea ${i}`, portada_linea2: `Remate ${i}` })) };
+  } };
+  return w;
+}
+const armarConPortada = (w, { banco = null, env = {}, ctx = { territorio: 'San Isidro, Buenos Aires', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,AAAA', portada_refs: [] }, momento = MOM, log = () => {} } = {}) =>
+  crearArmarRecetas({ claude: w.claude, portadas: crearPortadas({ claude: w.claude, fetchFn: w.fetchFn, env, log, banco, lookup: w.lookup, pedir: w.pedir }), log })({ momento, transcripcion: { palabras: PALABRAS }, aprendizajes: [], portada: ctx });
+
+casos.push(
+  ['Portadas', 'portada_luz, portada_plano y portada_lado distintos en las 3 versiones sin aprendizaje, y tiradas a la ganadora con aprendizaje', () => {
+    for (let k = 0; k < 30; k++) for (const d of ['portada_luz', 'portada_plano', 'portada_lado']) eq(new Set(elegirVariables({ semilla: k }).map((v) => v[d])).size, 3, `${d} distinto en las 3 (semilla ${k})`);
+    eq(OPCIONES.portada_luz, ['calido', 'neutro', 'frio', 'noche'], 'valores de la luz (tinte)'); eq(OPCIONES.portada_lado, ['izq', 'der', 'centro'], 'valores del lado');
+    const v = elegirVariables({ semilla: 4, aprendizajes: { portada_luz: 'noche' } });
+    eq(v.filter((x) => x.portada_luz === 'noche').length >= 2, true, 'la ganadora va en las 2 versiones de base');
+    eq(normalizarAprendizajes({ portada_plano: 'cerca' }).portada_plano, 'cerca', 'el aprendizaje de portada se normaliza');
+    eq(elegirVariables({ semilla: 1, aprendizajes: { portada_lado: 'der' }, estilo: { portada_lado: ['izq', 'centro'] } }).some((x) => x.portada_lado === 'der'), false, 'una ganadora fuera del estilo no se usa');
+  }],
+  ['Portadas', 'Haiku pide la portada en 2 líneas; sin portadas la receta queda como hoy (portada.texto, sin chango) y lleva las variables portada_*', async () => {
+    const claude = claudeFalso();
+    const rs = await crearArmarRecetas({ claude })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: [] });
+    const props = claude.pedidos[0].herramienta.input_schema.properties.versiones.items.properties;
+    yes(props.portada_linea1 && props.portada_linea2 && props.portada_texto, 'pide linea1, linea2 y sigue pidiendo portada_texto');
+    for (const r of rs) yes(r.portada.texto && !('chango' in r.portada) && r.variables.portada_luz && r.variables.portada_plano && r.variables.portada_lado && !('portada_motivo' in r), 'portada de hoy + variables');
+    eq(lineasDePortada({ portada_linea1: 'Lo que no te cuentan de', portada_linea2: 'La Catedral de San Isidro hoy' }, 'Mirá esto'), { linea1: 'Lo que no te cuentan de', linea2: 'Mirá esto' }, 'una línea 2 larga cae al respaldo');
+    eq(lineasDePortada({ portada_linea1: 'x', portada_linea2: 'Gran Obra' }), { linea1: 'x', linea2: 'Gran Obra' }, 'líneas buenas');
+    eq(lineasDePortada({ portada_linea1: 'Obra', portada_linea2: 'obra' }).linea1, '', 'la línea 1 no repite la 2');
+  }],
+  ['Portadas', 'Camino de IA (PORTADA_FONDO_IA=1): receta.portada.chango según el contrato, un fondo por versión en fal con foto como data-URI, luz y plano de las variables', async () => {
+    const w = mundoPortada();
+    const rs = await armarConPortada(w, { env: IA });
+    eq(rs.length, 3, 'tres recetas');
+    for (const [i, r] of rs.entries()) {
+      const c = r.portada.chango;
+      yes(c && /^https:\/\/fal\.media\/fondo\d\.jpg$/.test(c.fondo_url), `v${i + 1} tiene fondo`); // (sin banco: la URL de fal)
+      eq([c.linea1, c.linea2, c.lado, c.nombre, c.foto_dirigente], [`Linea ${i}`, `Remate ${i}`, r.variables.portada_lado, 'Posse', 'data:image/jpeg;base64,AAAA'], 'campos del contrato');
+      eq(Object.keys(c.referencia).sort(), ['fuente', 'imagen_url', 'licencia', 'lugar', 'pagina_url'], 'referencia del contrato');
+      eq([c.fondo_tipo, c.luz, c.plano], ['ia', r.variables.portada_luz, r.variables.portada_plano], 'tipo, luz y plano a la vista');
+      eq(c.referencia.lugar, 'catedral de san isidro', 'lugar normalizado');
+      yes(c.referencia.fuente === 'Wikimedia Commons' && c.referencia.licencia.startsWith('CC BY-SA 4.0') && c.referencia.pagina_url.startsWith('https://commons.test/'), 'fuente y licencia a la vista');
+      yes(r.portada.texto && !('portada_motivo' in r), 'portada.texto de respaldo se mantiene');
+    }
+    eq(new Set(rs.map((r) => r.portada.chango.referencia.imagen_url)).size, 3, 'tres fotos distintas');
+    eq(w.falBodies.length, 3, 'tres fondos');
+    for (const [i, b] of w.falBodies.entries()) {
+      eq([b.modelo, b.auth, b.num_images, b.image_size], ['bytedance/seedream/v5.5/edit', 'Key k-fal', 1, { width: 1152, height: 2048 }], 'llamada a fal');
+      yes(/^data:image\/jpeg;base64,/.test(b.image_urls[0]) && /exact location/.test(b.prompt) && /Remove all people/.test(b.prompt), 'foto como data-URI y prompt del prototipo');
+    }
+    const luces = { calido: 'golden hour', neutro: 'daylight', frio: 'blue hour', noche: 'night' }, planos = { lejos: 'Wide shot', medio: 'Medium shot', cerca: 'Close-up' };
+    // las versiones salen en el orden de las variables; cada fondo lleva SU luz y SU plano
+    for (const [i, r] of rs.entries()) { const b = w.falBodies.find((x) => x.image_urls[0].length > 0 && x.prompt.includes(luces[r.variables.portada_luz]) && x.prompt.includes(planos[r.variables.portada_plano])); yes(b, `v${i + 1}: el prompt trae su luz y plano`); }
+    eq(w.claude.pedidos.filter((p) => p.herramienta.name === 'decidir_portada').length, 1, 'se decide UNA vez por momento');
+    yes(w.llamadas.some((u) => u.includes('wikimedia')), 'busca en Wikimedia');
+    eq(w.llamadas.some((u) => u.includes('brave')), false, 'sin BRAVE_API_KEY se saltea Brave');
+    yes(w.llamadas.every((u) => !u.endsWith('x.png')), 'los SVG/no-fotos no se bajan');
+  }],
+  ['Portadas', 'Con BRAVE_API_KEY suma la búsqueda de imágenes de Brave; PORTADA_MODELO cambia el modelo (y el formato) de fal', async () => {
+    const w = mundoPortada({ wiki: ['https://upload.wikimedia.org/w1.jpg'], elegir: [1, 2, 3] });
+    const rs = await armarConPortada(w, { env: { ...IA, BRAVE_API_KEY: 'bk', PORTADA_MODELO: 'fal-ai/nano-banana-2/edit' } });
+    eq(w.braveToken, 'bk', 'token de Brave');
+    eq(w.falBodies.map((b) => [b.modelo, b.aspect_ratio]), [['fal-ai/nano-banana-2/edit', '9:16'], ['fal-ai/nano-banana-2/edit', '9:16'], ['fal-ai/nano-banana-2/edit', '9:16']], 'modelo por env');
+    yes(rs.some((r) => r.portada.chango.referencia.fuente.startsWith('Web: ')), 'una foto de la web con su fuente');
+    yes(w.llamadas.every((u) => !u.includes('sitio-externo')), 'la original del sitio no pasa por el fetch común sino por la bajada segura');
+    yes(w.pedidosSeguros.length > 0 && w.pedidosSeguros.every((x) => x.ip === '93.184.216.34' && x.url.startsWith('https://sitio-externo.test/')), 'y va a la IP ya resuelta');
+  }],
+  ['Portadas', 'Banco del proyecto: las fotos con más 👍 van primero y marcadas; las que tienen más 👎 nunca se usan', async () => {
+    const w = mundoPortada();
+    const refs = [
+      { lugar: 'Catedral de San Isidro', imagen_url: 'https://upload.wikimedia.org/gustada.jpg', pagina_url: 'https://p/1', fuente: 'Wikimedia Commons', licencia: 'CC0', si: 3, no: 1 },
+      { lugar: 'CATEDRAL de San Isidro', imagen_url: 'https://upload.wikimedia.org/wiki2.jpg', pagina_url: 'https://p/2', fuente: 'Wikimedia Commons', licencia: '', si: 0, no: 2 },
+      { lugar: 'Plaza Mitre', imagen_url: 'https://upload.wikimedia.org/otra-plaza.jpg', pagina_url: '', fuente: '', licencia: '', si: 9, no: 0 },
+    ];
+    const rs = await armarConPortada(w, { ctx: { territorio: 't', nombre: 'P', foto_dirigente: '', portada_refs: refs } });
+    yes(w.visionTextos[0].startsWith('Lugar pedido') && w.visionTextos[1].includes('(gustó)'), 'la gustada va primera y marcada');
+    eq(w.imagenes, 5, 'la del banco + 4 de Wikimedia (la de 👎 fuera)');
+    const usadas = rs.map((r) => r.portada.chango.referencia.imagen_url);
+    yes(usadas.includes('https://upload.wikimedia.org/gustada.jpg'), 'se usa la que gustó');
+    yes(!usadas.some((u) => u.includes('wiki2.jpg') || u.includes('otra-plaza')), 'ni la de 👎 ni la de otro lugar');
+    eq(rs.every((r) => !('foto_dirigente' in r.portada.chango)), true, 'sin foto del dirigente no se manda el campo');
+  }],
+  ['Portadas', 'Con 1 o 2 fotos válidas las versiones reusan, con luz o plano distintos; con 0, ninguna lleva chango y se anota por qué', async () => {
+    const dos = await armarConPortada(mundoPortada({ elegir: [2, 4] }));
+    eq(dos.every((r) => r.portada.chango), true, 'las 3 con chango');
+    eq(new Set(dos.map((r) => r.portada.chango.referencia.imagen_url)).size, 2, 'dos fotos para tres versiones');
+    eq(new Set(dos.map((r) => `${r.portada.chango.referencia.imagen_url}|${r.variables.portada_luz}|${r.variables.portada_plano}`)).size, 3, 'ninguna repite foto+luz+plano');
+    const w = mundoPortada({ elegir: [] }), logs = [];
+    const cero = await armarConPortada(w, { log: (m) => logs.push(m) });
+    eq(cero.length, 3, 'las 3 recetas igual');
+    for (const r of cero) yes(!('chango' in r.portada) && /ninguna foto/.test(r.portada_motivo) && r.portada.texto, 'sin chango, con motivo y portada de hoy');
+    eq(w.falBodies.length, 0, 'sin fotos no se gasta en fal');
+    yes(logs.length === 1 && logs[0].includes('sin portada chango'), 'el motivo se registra');
+    eq(paraEstudio(cero[0]).portada_motivo, undefined, 'el motivo no viaja al Estudio');
+  }],
+  ['Portadas', 'Si el tema no es un lugar: con territorio se usa una escena; sin territorio y sin lugar nombrado, sin chango y sin buscar nada', async () => {
+    const esc = { tipo: 'escena', lugar: 'patrullero en calle arbolada de Boulogne', escena: 'a police car on a tree-lined street', consultas: ['calle arbolada Boulogne'] };
+    const conT = mundoPortada({ decision: esc });
+    const a = await armarConPortada(conT, { env: IA });
+    eq(a.every((r) => r.portada.chango), true, 'con territorio hay chango');
+    yes(conT.falBodies.every((b) => /police car/.test(b.prompt)), 'la escena va al prompt');
+    const sinT = mundoPortada({ decision: esc });
+    const b = await armarConPortada(sinT, { ctx: { territorio: '', nombre: 'P', foto_dirigente: '', portada_refs: [] } });
+    yes(b.every((r) => !r.portada.chango && /territorio/.test(r.portada_motivo)) && sinT.llamadas.length === 0, 'sin territorio, sin escena inventada y sin búsquedas');
+    const ning = mundoPortada({ decision: { tipo: 'ninguno', lugar: '', escena: '', consultas: [] } });
+    yes((await armarConPortada(ning)).every((r) => !r.portada.chango) && ning.llamadas.length === 0 && ning.falBodies.length === 0, 'tipo ninguno: nada que buscar');
+  }],
+  ['Portadas', 'Los errores nunca frenan la edición: sin FAL_KEY, Wikimedia caída, Claude caído, fal con una versión fallada', async () => {
+    const w1 = mundoPortada(); const sinKey = await armarConPortada(w1, { env: { PORTADA_FONDO_IA: '1' } });
+    yes(sinKey.length === 3 && sinKey.every((r) => !r.portada.chango && /FAL_KEY/.test(r.portada_motivo)) && w1.claude.pedidos.length === 1, 'IA sin FAL_KEY: ni se llama a Claude por la portada (solo los textos)');
+    const w2 = mundoPortada({ wikiFalla: true }); const wk = await armarConPortada(w2);
+    yes(wk.length === 3 && wk.every((r) => !r.portada.chango && /no encontré fotos/.test(r.portada_motivo)), 'Wikimedia caída: sin fotos');
+    const w3 = mundoPortada({ wiki: ['https://upload.wikimedia.org/rota1.jpg'], brave: [] }); const rota = await armarConPortada(w3);
+    yes(rota.every((r) => !r.portada.chango), 'fotos que no se pueden bajar: sin chango');
+    // Claude caído solo en la portada: los textos se piden antes con otro cliente; acá cae toda la llamada de portada
+    const w4 = mundoPortada(); const orig = w4.claude.estructurado.bind(w4.claude);
+    w4.claude.estructurado = async (p) => { if (p.herramienta.name === 'decidir_portada') throw new Error('Claude caído'); return orig(p); };
+    const ck = await armarConPortada(w4);
+    yes(ck.length === 3 && ck.every((r) => !r.portada.chango && /Claude caído/.test(r.portada_motivo) && r.caption), 'Claude caído en la portada: recetas igual');
+    const w5 = mundoPortada({ falFalla: (n) => n === 1 }); const fa = await armarConPortada(w5, { env: IA });
+    eq(fa.filter((r) => r.portada.chango).length, 2, 'una versión sin fondo, las otras 2 con');
+    yes(fa.find((r) => !r.portada.chango).portada_motivo.startsWith('fal: fal respondió 500'), 'motivo de fal');
+    const w6 = { porMomento: async () => { throw new Error('explotó'); } };
+    const ex = await crearArmarRecetas({ claude: claudeFalso(), portadas: w6, log: () => {} })({ momento: MOM, transcripcion: { palabras: PALABRAS }, aprendizajes: [] });
+    yes(ex.length === 3 && ex.every((r) => !r.portada.chango && r.portada_motivo === 'explotó'), 'una excepción del módulo tampoco frena');
+  }],
+  ['Portadas', 'ACM → editor: el contexto trae territorio, nombre, foto del dirigente y portada_refs', async () => {
+    const fetchFn = async () => new Response(JSON.stringify({ aprendizajes: [], territorio: 'Boulogne', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,QQ', portada_refs: [{ lugar: 'plaza', imagen_url: 'u', si: 1, no: 0 }] }), { status: 200 });
+    const c = await crearAcm({ url: 'http://acm.test', token: 't', fetchFn }).contexto(1, 2);
+    eq(c.portada, { territorio: 'Boulogne', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,QQ', portada_refs: [{ lugar: 'plaza', imagen_url: 'u', si: 1, no: 0 }] }, 'portada del contexto');
+    const vacio = await crearAcm({ url: 'http://acm.test', token: 't', fetchFn: async () => new Response('{}', { status: 200 }) }).contexto(1);
+    eq(vacio.portada, { territorio: '', nombre: '', foto_dirigente: '', portada_refs: [] }, 'sin datos, vacío');
+    eq(normLugar('  Catedral   de SAN Isidro Ñandú '), 'catedral de san isidro nandu', 'normaliza sin tildes');
+  }],
+);
+
+// --- Banco de fondos (se guardan los de fal y se reusan en otros momentos del mismo lugar) y bajada segura de imágenes ---
+function bancoDeFondos(t0 = Date.UTC(2026, 10, 27)) {
+  const reloj = { t: t0 }, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fondos-'));
+  const db = abrirDb(':memory:'), banco = crearBancoFondos({ db, dir, publicUrl: 'http://editor.test/', ahora: () => reloj.t });
+  return { reloj, dir, db, banco, dias: (n) => { reloj.t += n * 864e5; } };
+}
+const CTX = (project_id) => ({ territorio: 'San Isidro', nombre: 'P', foto_dirigente: '', portada_refs: [], project_id });
+const filas = (b) => b.db.prepare('SELECT * FROM fondos ORDER BY id').all();
+const resp = (body, init = {}) => new Response(body, init);
+
+casos.push(
+  ['Fondos', 'Cada fondo generado se guarda (archivo + registro); pasados 7 días se reusa SIN fal, ni búsqueda, ni visión, con una URL del editor y las variables de la receta ajustadas', async () => {
+    const b = bancoDeFondos(), w = mundoPortada();
+    const a = await armarConPortada(w, { env: IA, banco: b.banco, ctx: CTX(1) });
+    eq(w.falBodies.length, 3, 'la primera vez, 3 fondos en fal');
+    const f = filas(b);
+    eq(f.length, 3, '3 registros');
+    yes(f.every((x) => x.project_id === 1 && x.lugar === 'catedral de san isidro' && x.ref_url.startsWith('https://upload.wikimedia.org/') && fs.existsSync(path.join(b.dir, x.archivo)) && x.creado && x.ultimo_uso), 'registro completo y archivo en disco');
+    yes(a.every((r) => r.portada.chango.fondo_url.startsWith('http://editor.test/fondos/')), 'recién generado: también sale del editor');
+    b.dias(8);
+    const w2 = mundoPortada();
+    const r = await armarConPortada(w2, { env: IA, banco: b.banco, ctx: CTX(1), momento: { ...MOM, id: 2, idx: 1 } });
+    eq([w2.falBodies.length, w2.llamadas.filter((u) => !u.startsWith('http://editor.test')).length, w2.claude.pedidos.some((p) => p.herramienta.name === 'elegir_fotos_portada')], [0, 0, false], 'sin fal, sin búsqueda, sin visión');
+    const urls = r.map((x) => x.portada.chango.fondo_url);
+    yes(urls.every((u) => /^http:\/\/editor\.test\/fondos\/[0-9a-f-]{36}\.jpg$/.test(u)), 'URL que sirve el editor');
+    eq(new Set(urls).size, 3, 'no repite fondo dentro del momento');
+    eq(r.map((x) => `${x.variables.portada_luz}|${x.variables.portada_plano}`).sort(), f.map((x) => `${x.luz}|${x.plano}`).sort(), 'las variables son las del fondo reusado');
+    yes(r.every((x) => x.portada.chango.referencia.imagen_url.startsWith('https://upload.wikimedia.org/') && x.portada.chango.referencia.fuente === 'Wikimedia Commons'), 'la referencia viaja con el fondo');
+    yes(filas(b).every((x) => Date.parse(x.ultimo_uso) === b.reloj.t), 'ultimo_uso al día');
+  }],
+  ['Fondos', 'Un fondo usado hace menos de 7 días no se reusa (se genera), y el banco es por proyecto', async () => {
+    const b = bancoDeFondos();
+    await armarConPortada(mundoPortada(), { env: IA, banco: b.banco, ctx: CTX(1) });
+    b.dias(6);
+    const w = mundoPortada(), r = await armarConPortada(w, { env: IA, banco: b.banco, ctx: CTX(1) });
+    eq(w.falBodies.length, 3, 'a los 6 días se genera de nuevo');
+    eq(filas(b).length, 6, 'y se guardan los nuevos');
+    b.dias(2); // los primeros ya cumplieron 8 días; los segundos tienen 2
+    const w2 = mundoPortada(); await armarConPortada(w2, { env: IA, banco: b.banco, ctx: CTX(2) });
+    eq(w2.falBodies.length, 3, 'otro proyecto no reusa los de este');
+    const w3 = mundoPortada(), r3 = await armarConPortada(w3, { env: IA, banco: b.banco, ctx: CTX(1) });
+    eq(w3.falBodies.length, 0, 'del proyecto 1 se reusan los de 8 días');
+    const ids = new Set(filas(b).filter((x) => x.project_id === 1 && Date.parse(x.ultimo_uso) === b.reloj.t).map((x) => x.archivo));
+    eq(r3.every((x) => ids.has(x.portada.chango.fondo_url.split('/').pop())), true, 'y solo los viejos');
+  }],
+  ['Fondos', 'Con menos fondos que versiones: se reusan los que hay y solo se genera lo que falta (buscando solo para eso)', async () => {
+    const b = bancoDeFondos();
+    for (const [luz, plano] of [['calido', 'lejos'], ['noche', 'cerca']]) b.banco.guardar({ project_id: 1, tipo: 'ia', lugar: 'catedral de san isidro', ref_url: 'https://upload.wikimedia.org/vieja.jpg', luz, plano, referencia: { lugar: 'catedral de san isidro', imagen_url: 'https://upload.wikimedia.org/vieja.jpg', pagina_url: 'p', fuente: 'Wikimedia Commons', licencia: 'CC0' } }, JPG(1));
+    b.dias(8);
+    const w = mundoPortada(), r = await armarConPortada(w, { env: IA, banco: b.banco, ctx: CTX(1) });
+    eq(w.falBodies.length, 1, 'un solo fondo en fal');
+    eq(new Set(r.map((x) => x.portada.chango.fondo_url)).size, 3, 'los 3 distintos');
+    eq(filas(b).length, 3, 'el nuevo se suma al banco');
+    // otro lugar: el banco no sirve
+    const w2 = mundoPortada({ decision: { tipo: 'lugar', lugar: 'Plaza Mitre', escena: 'a plaza', consultas: ['Plaza Mitre'] } });
+    b.dias(8); await armarConPortada(w2, { env: IA, banco: b.banco, ctx: CTX(1) });
+    eq(w2.falBodies.length, 3, 'otro lugar, todo nuevo');
+    // sin URL pública no hay cómo servir el archivo: no se reusa
+    const sinPub = crearBancoFondos({ db: b.db, dir: b.dir, publicUrl: '', ahora: () => b.reloj.t });
+    const w3 = mundoPortada(); await armarConPortada(w3, { env: IA, banco: sinPub, ctx: CTX(1) });
+    eq(w3.falBodies.length, 3, 'sin publicUrl no se reusa');
+  }],
+  ['Fondos', 'El editor sirve /fondos/<uuid>.jpg (sin salir de la carpeta) para que el Estudio lo baje', async () => {
+    const b = bancoDeFondos();
+    const archivo = b.banco.guardar({ project_id: 1, lugar: 'x', luz: 'dia', plano: 'medio', referencia: {} }, JPG(7));
+    const { app } = crearEditor({ token: 't', db: b.db, estudio: {}, acm: {}, dirFondos: b.dir });
+    const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+    try {
+      const base = `http://127.0.0.1:${srv.address().port}`;
+      const ok = await fetch(`${base}/fondos/${archivo}`);
+      eq([ok.status, Buffer.from(await ok.arrayBuffer()).equals(JPG(7))], [200, true], 'sirve el fondo');
+      eq((await fetch(`${base}/fondos/..%2Feditor.db`)).status, 404, 'no sale de la carpeta');
+      eq((await fetch(`${base}/fondos/${'0'.repeat(36)}.jpg`)).status, 404, 'uno inexistente');
+    } finally { srv.closeAllConnections(); srv.close(); }
+  }],
+  ['Seguridad', 'Solo se bajan imágenes por https de hosts permitidos (Wikimedia, miniatura de Brave); las de portada_refs pasan por la misma lista', async () => {
+    yes(urlPermitida('https://upload.wikimedia.org/a.jpg') && urlPermitida('https://imgs.search.brave.com/x'), 'permitidas');
+    for (const u of ['http://upload.wikimedia.org/a.jpg', 'https://127.0.0.1/a.jpg', 'https://localhost:4000/entregas/x.jpg', 'https://169.254.169.254/latest', 'https://upload.wikimedia.org.evil.test/a.jpg', 'https://user:pw@upload.wikimedia.org/a.jpg', 'https://sitio-externo.test/a.jpg', 'file:///etc/passwd', 'no es url']) eq(urlPermitida(u), false, `rechaza ${u}`);
+    const llamadas = []; let msg = '';
+    try { await bajar('https://127.0.0.1/a.jpg', async (u) => { llamadas.push(u); return resp(JPG(1)); }); } catch (e) { msg = e.message; }
+    eq([msg, llamadas.length], ['URL no permitida', 0], 'ni se hace el pedido');
+    // el banco del proyecto: una referencia con host no permitido se descarta aunque tenga 👍
+    const w = mundoPortada();
+    const refs = [{ lugar: 'Catedral de San Isidro', imagen_url: 'http://169.254.169.254/foto.jpg', pagina_url: '', fuente: '', licencia: '', si: 5, no: 0 }, { lugar: 'Catedral de San Isidro', imagen_url: 'https://privado.test/gustada.jpg', pagina_url: '', fuente: '', licencia: '', si: 5, no: 0 }];
+    await armarConPortada(w, { ctx: { territorio: 't', nombre: 'P', foto_dirigente: '', portada_refs: refs } });
+    yes(w.llamadas.every((u) => !u.includes('169.254') && !u.includes('privado.test')) && w.pedidosSeguros.length === 0, 'no se pidió ninguna de las dos (una no es https, la otra resuelve a una IP privada)');
+    yes(!w.visionTextos.some((t) => t.includes('(gustó)')), 'tampoco llegaron a la visión');
+  }],
+  ['Seguridad', 'Sin seguir redirecciones, y con tope de tamaño: Content-Length de más y stream que se pasa se cortan', async () => {
+    let init;
+    const redir = async (u, i) => { init = i; return resp('', { status: 302, headers: { location: 'http://127.0.0.1/secreto' } }); };
+    let msg = ''; try { await bajar('https://upload.wikimedia.org/a.jpg', redir); } catch (e) { msg = e.message; }
+    eq([msg, init.redirect], ['redirección no permitida', 'manual'], 'redirect manual y 302 rechazado');
+    msg = ''; try { await bajar('https://upload.wikimedia.org/a.jpg', async () => resp(JPG(1), { headers: { 'content-length': String(6 * 1024 * 1024) } }), { max: 5 * 1024 * 1024 }); } catch (e) { msg = e.message; }
+    eq(msg, 'imagen demasiado grande', 'Content-Length de más');
+    // un stream sin Content-Length que se pasa: se corta apenas excede (no se lee todo)
+    let leidos = 0, cancelado = false;
+    const stream = new ReadableStream({ pull(c) { leidos += 1024; c.enqueue(new Uint8Array(1024).fill(1)); }, cancel() { cancelado = true; } });
+    msg = ''; try { await bajar('https://upload.wikimedia.org/a.jpg', async () => resp(stream), { max: 10 * 1024 }); } catch (e) { msg = e.message; }
+    eq([msg, cancelado], ['imagen demasiado grande', true], 'stream cortado');
+    yes(leidos <= 20 * 1024, `no se leyó de más (${leidos})`);
+    const okb = await bajar('https://upload.wikimedia.org/a.jpg', async () => resp(JPG(3)), { max: 1024 });
+    eq([okb.tipo, okb.bytes.length], ['image/jpeg', 85], 'una imagen chica pasa');
+    msg = ''; try { await bajar('https://upload.wikimedia.org/a.jpg', async () => resp('<html>no soy imagen</html>')); } catch (e) { msg = e.message; }
+    eq(msg, 'no es una imagen usable', 'lo que no es imagen no pasa');
+  }],
+);
+
+// --- Fondo = la foto real directa (sin IA): luz como tinte, resolución, banco de fotos ---
+casos.push(
+  ['Foto directa', 'Por defecto no se llama a fal (ni hace falta FAL_KEY): el fondo es la foto elegida, con fondo_tipo «foto», luz y plano; sin banco, la miniatura permitida', async () => {
+    const w = mundoPortada(), rs = await armarConPortada(w, { env: { FAL_KEY: 'k-fal' } });
+    eq([w.falBodies.length, w.llamadas.some((u) => u.startsWith('https://fal.run')), rs.every((r) => r.portada.chango)], [0, false, true], 'sin fal');
+    for (const r of rs) { const c = r.portada.chango; eq([c.fondo_tipo, c.luz, c.plano, c.referencia.imagen_url === c.fondo_url], ['foto', r.variables.portada_luz, r.variables.portada_plano, true], 'tipo, luz y plano; fondo_url = la miniatura de la referencia'); yes(urlPermitida(c.fondo_url), 'URL permitida'); }
+    eq(new Set(rs.map((r) => r.portada.chango.fondo_url)).size, 3, '3 fotos distintas');
+    const w2 = mundoPortada(), sinKey = await armarConPortada(w2, { env: {} });
+    yes(sinKey.every((r) => r.portada.chango), 'sin FAL_KEY anda igual');
+    const w3 = mundoPortada({ brave: ['https://imgs.search.brave.com/b1.jpg'] }), conBrave = await armarConPortada(w3, { env: { BRAVE_API_KEY: 'x' }, ctx: CTX(1) });
+    yes(conBrave.length === 3, 'con Brave también');
+  }],
+  ['Foto directa', 'Con banco y EDITOR_PUBLIC_URL la foto se baja, se guarda y fondo_url sale del editor (/fondos/<uuid>); se reusa pasados 7 días sin buscar ni mirar, y los fondos de IA no se reusan como fotos', async () => {
+    const b = bancoDeFondos(), w = mundoPortada();
+    const a = await armarConPortada(w, { banco: b.banco, ctx: CTX(1) });
+    const f = filas(b);
+    eq([f.length, f.every((x) => x.tipo === 'foto' && x.ref_url.startsWith('https://upload.wikimedia.org/') && fs.existsSync(path.join(b.dir, x.archivo)))], [3, true], '3 fotos guardadas');
+    yes(a.every((r) => /^http:\/\/editor\.test\/fondos\/[0-9a-f-]{36}\.jpg$/.test(r.portada.chango.fondo_url) && r.portada.chango.fondo_tipo === 'foto'), 'URL del editor');
+    yes(fs.readFileSync(path.join(b.dir, f[0].archivo)).subarray(0, 4).equals(Buffer.from([0xff, 0xd8, 0xff, 0xc0])), 'el archivo guardado es la foto bajada');
+    b.dias(8);
+    const w2 = mundoPortada(), r = await armarConPortada(w2, { banco: b.banco, ctx: CTX(1), momento: { ...MOM, id: 2, idx: 1 } });
+    eq([w2.llamadas.filter((u) => !u.startsWith('http://editor.test')).length, w2.claude.pedidos.some((p) => p.herramienta.name === 'elegir_fotos_portada'), new Set(r.map((x) => x.portada.chango.fondo_url)).size], [0, false, 3], 'sin buscar, sin visión, 3 distintas');
+    // un banco que solo tiene fondos de IA no sirve en modo foto
+    const b2 = bancoDeFondos();
+    for (const [luz, plano] of [['calido', 'lejos'], ['neutro', 'medio'], ['frio', 'cerca']]) b2.banco.guardar({ project_id: 1, tipo: 'ia', lugar: 'catedral de san isidro', luz, plano, referencia: {} }, JPG(2));
+    b2.dias(8);
+    const w3 = mundoPortada(); await armarConPortada(w3, { banco: b2.banco, ctx: CTX(1) });
+    yes(w3.claude.pedidos.some((p) => p.herramienta.name === 'elegir_fotos_portada'), 'se buscó: lo de IA no vale como foto');
+    eq(filas(b2).filter((x) => x.tipo === 'foto').length, 3, 'y se guardaron fotos');
+  }],
+  ['Foto directa', 'La luz es un tinte (calido, neutro, frio, noche): «noche» solo con una foto de noche, y con ella siempre; una foto de día nunca queda en noche', async () => {
+    // semilla 3: las variables piden noche, calido, neutro; la foto 2 (versión 2) es de noche
+    const w = mundoPortada({ noche: [2] });
+    const rs = await armarConPortada(w, { momento: { ...MOM, id: 3, idx: 3 } });
+    eq(rs.map((r) => r.variables.portada_luz), ['frio', 'noche', 'neutro'], 'v1 pedía noche con foto de día → tinte de día distinto; v2 foto de noche → noche');
+    eq(rs.map((r) => r.portada.chango.luz), ['frio', 'noche', 'neutro'], 'la misma luz va al Estudio');
+    const sin = await armarConPortada(mundoPortada(), { momento: { ...MOM, id: 3, idx: 3 } });
+    yes(sin.every((r) => r.variables.portada_luz !== 'noche') && new Set(sin.map((r) => r.variables.portada_luz)).size === 3, 'sin fotos de noche, ninguna noche y 3 tintes distintos');
+    const props = w.claude.pedidos.find((p) => p.herramienta.name === 'elegir_fotos_portada');
+    yes(props.herramienta.input_schema.properties.elegidas.items.required.includes('momento_del_dia') && /mástil|poste/.test(props.system) && /9:16/.test(props.system) && /noche/.test(props.system), 'la visión pide día o noche y usabilidad como fondo vertical');
+  }],
+  ['Foto directa', 'Resolución mínima: las fotos con menos de 900 px en el lado corto ni llegan a la visión; el lector de medidas entiende JPEG, PNG y WEBP', async () => {
+    const w = mundoPortada({ wiki: ['https://upload.wikimedia.org/chica1.jpg', 'https://upload.wikimedia.org/chica2.jpg', 'https://upload.wikimedia.org/buena.jpg'], brave: [], elegir: [1] });
+    await armarConPortada(w);
+    eq(w.imagenes, 1, 'solo la de buena resolución llega a la visión');
+    eq(dimensiones(JPG(1, 1920, 1080)), { ancho: 1920, alto: 1080 }, 'JPEG');
+    const png = Buffer.alloc(40); Buffer.from([0x89, 0x50, 0x4e, 0x47]).copy(png); png.writeUInt32BE(1000, 16); png.writeUInt32BE(1500, 20);
+    eq(dimensiones(png), { ancho: 1000, alto: 1500 }, 'PNG');
+    const webp = Buffer.alloc(40); webp.write('RIFF', 0, 'latin1'); webp.write('WEBP', 8, 'latin1'); webp.write('VP8X', 12, 'latin1'); webp.writeUIntLE(1199, 24, 3); webp.writeUIntLE(799, 27, 3);
+    eq(dimensiones(webp), { ancho: 1200, alto: 800 }, 'WEBP');
+    eq(dimensiones(Buffer.from('basura')), null, 'basura');
+  }],
+);
+
+// --- La original de Brave: bajada con protección SSRF (IP resuelta y validada, conexión a esa IP, sin redirecciones) ---
+const respuesta = (cuerpo, { status = 200, headers = { 'content-type': 'image/jpeg' } } = {}) => { const r = Readable.from(Array.isArray(cuerpo) ? cuerpo : [cuerpo]); r.statusCode = status; r.headers = headers; return r; };
+const seguroCon = (resp) => { const c = { resueltos: 0, pedidos: [] }; return { c, lookup: async () => { c.resueltos++; return [{ address: '93.184.216.34', family: 4 }]; }, pedir: async (x) => { c.pedidos.push(x); return resp(); } }; };
+
+casos.push(
+  ['SSRF', 'ipPrivada: loopback, privadas, link-local, CGNAT, multicast y reservadas, IPv4 e IPv6 (incluidas las ::ffff: mapeadas); las públicas pasan', () => {
+    for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1', '100.127.255.255', '0.0.0.0', '192.0.0.1', '224.0.0.1', '240.0.0.1', '255.255.255.255', '198.18.0.1',
+      '::1', '::', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:10.0.0.1', '::ffff:a9fe:a9fe', 'fe80::1', 'fc00::1', 'fd12:3456::1', 'ff02::1', '64:ff9b::7f00:1', '2002:7f00:1::', '2001:db8::1', '2001:0:4136:e378:8000:63bf:3fff:fdd2', 'no es ip']) yes(ipPrivada(ip), `${ip} debe rechazarse`);
+    for (const ip of ['93.184.216.34', '8.8.8.8', '100.128.0.1', '172.15.0.1', '172.32.0.1', '2606:2800:220:1:248:1893:25c8:1946', '::ffff:8.8.8.8', '2a00:1450:4001:81b::200e']) yes(!ipPrivada(ip), `${ip} es pública`);
+  }],
+  ['SSRF', 'bajarSeguro: solo https, puerto 443, sin usuario/clave; si algún IP resuelto es privado (o IPv6 mapeada) ni se hace el pedido', async () => {
+    const s = seguroCon(() => respuesta(JPG(1)));
+    for (const u of ['http://sitio.test/a.jpg', 'https://sitio.test:8443/a.jpg', 'https://u:p@sitio.test/a.jpg', 'ftp://sitio.test/a.jpg', 'basura']) { let m = ''; try { await bajarSeguro(u, s); } catch (e) { m = e.message; } yes(/URL/.test(m), `rechaza ${u}`); }
+    eq([s.c.resueltos, s.c.pedidos.length], [0, 0], 'ni siquiera se resolvió');
+    for (const direcciones of [[{ address: '10.0.0.5' }], [{ address: '93.184.216.34' }, { address: '127.0.0.1' }], [{ address: '::ffff:7f00:1' }], [{ address: '::ffff:192.168.0.1' }], [{ address: '169.254.169.254' }], []]) {
+      const c = { n: 0 }; let m = '';
+      try { await bajarSeguro('https://sitio.test/a.jpg', { lookup: async () => direcciones, pedir: async () => { c.n++; return respuesta(JPG(1)); } }); } catch (e) { m = e.message; }
+      yes(/no permitida/.test(m) && c.n === 0, `rechaza ${JSON.stringify(direcciones)}`);
+    }
+    const ok = await bajarSeguro('https://sitio.test/a.jpg', s);
+    eq([ok.tipo, s.c.pedidos.length], ['image/jpeg', 1], 'una pública pasa');
+  }],
+  ['SSRF', 'DNS rebinding: se resuelve UNA vez y se conecta a esa IP; un segundo lookup que daría una IP privada no se usa', async () => {
+    let n = 0; const pedidos = [];
+    const lookup = async () => [{ address: n++ === 0 ? '93.184.216.34' : '127.0.0.1', family: 4 }];
+    await bajarSeguro('https://sitio.test/a.jpg', { lookup, pedir: async (x) => { pedidos.push(x); return respuesta(JPG(1)); } });
+    eq([n, pedidos.map((x) => x.ip)], [1, ['93.184.216.34']], 'un solo lookup y se pide a la IP validada');
+    // y la conexión real usa un lookup fijado: nunca vuelve a resolver el nombre
+    const fijado = lookupFijado('93.184.216.34');
+    eq(await new Promise((r) => fijado('sitio.test', {}, (e, a, f) => r([a, f]))), ['93.184.216.34', 4], 'lookup fijado');
+    eq(await new Promise((r) => fijado('otro.test', { all: true }, (e, l) => r(l))), [{ address: '93.184.216.34', family: 4 }], 'lookup fijado con all');
+    eq(await new Promise((r) => lookupFijado('2606:2800::1')('x', (e, a, f) => r([a, f]))), ['2606:2800::1', 6], 'IPv6 fijada');
+  }],
+  ['SSRF', 'bajarSeguro: sin redirecciones, content-type image/*, tope por header y por stream', async () => {
+    const intenta = async (resp, o = {}) => { let m = ''; try { await bajarSeguro('https://sitio.test/a.jpg', { ...seguroCon(resp), ...o }); } catch (e) { m = e.message; } return m; };
+    eq(await intenta(() => respuesta('', { status: 302, headers: { location: 'http://127.0.0.1/x', 'content-type': 'image/jpeg' } })), 'redirección no permitida', '302');
+    eq(await intenta(() => respuesta('<html>', { headers: { 'content-type': 'text/html' } })), 'no es una imagen (content-type)', 'text/html');
+    eq(await intenta(() => respuesta(JPG(1), { headers: {} })), 'no es una imagen (content-type)', 'sin content-type');
+    eq(await intenta(() => respuesta(JPG(1), { status: 404 })), 'HTTP 404', '404');
+    eq(await intenta(() => respuesta(JPG(1), { headers: { 'content-type': 'image/jpeg', 'content-length': String(6 * 1024 * 1024) } })), 'imagen demasiado grande', 'Content-Length de más');
+    let leidos = 0, destruida = false;
+    const grande = () => { const r = new Readable({ read() { leidos += 1024; this.push(Buffer.alloc(1024, 1)); }, destroy(e, cb) { destruida = true; cb(e); } }); r.statusCode = 200; r.headers = { 'content-type': 'image/jpeg' }; return r; };
+    eq(await intenta(grande, { max: 10 * 1024 }), 'imagen demasiado grande', 'stream que se pasa');
+    yes(destruida && leidos <= 64 * 1024, `se cortó la lectura (${leidos})`);
+    eq(await intenta(() => respuesta(Buffer.from('no soy imagen'))), 'no es una imagen usable', 'bytes que no son imagen');
+  }],
+  ['Brave', 'Foto directa: se usa la ORIGINAL del resultado de Brave (a la IP validada); sin banco, fondo_url es la miniatura; si la original falla, se cae a la miniatura', async () => {
+    const w = mundoPortada({ wiki: [], brave: ['https://imgs.search.brave.com/b1.jpg', 'https://imgs.search.brave.com/b2.jpg'], elegir: [1, 2] });
+    const rs = await armarConPortada(w, { env: { BRAVE_API_KEY: 'bk' } });
+    yes(rs.every((r) => r.portada.chango), 'con chango');
+    eq(w.pedidosSeguros.every((x) => x.ip === '93.184.216.34' && /^https:\/\/sitio-externo\.test\//.test(x.url)), true, 'original por la vía segura');
+    for (const r of rs) { const c = r.portada.chango; yes(c.referencia.imagen_url.startsWith('https://sitio-externo.test/') && c.fondo_url.startsWith('https://imgs.search.brave.com/'), 'referencia = original; fondo_url = miniatura permitida'); }
+    // la original resuelve a una IP privada: se usa la miniatura (se baja con el fetch común)
+    const logs = [], w2 = mundoPortada({ wiki: [], brave: ['https://imgs.search.brave.com/b1.jpg'], hostOriginal: 'privado.test', elegir: [1] });
+    const r2 = await armarConPortada(w2, { env: { BRAVE_API_KEY: 'bk' }, log: (m) => logs.push(m) });
+    yes(w2.pedidosSeguros.length === 0 && r2.every((r) => r.portada.chango) && logs.some((m) => /miniatura/.test(m)), 'cae a la miniatura');
+    // sin la original en el resultado (no es https), directo la miniatura
+    const w3 = mundoPortada({ wiki: [], brave: ['https://imgs.search.brave.com/b1.jpg'], hostOriginal: '', elegir: [1] });
+    yes((await armarConPortada(w3, { env: { BRAVE_API_KEY: 'bk' } })).every((r) => r.portada.chango) && w3.pedidosSeguros.length === 0, 'sin original, miniatura');
   }],
 );
 
