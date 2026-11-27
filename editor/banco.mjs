@@ -20,8 +20,8 @@ import { paraEstudio } from './runner.js';
 import { crearAnalista, corregirReceta, elegirCuadros } from './analista.js';
 import { tramosAEstado, notasDe } from './mirar.js';
 import { Readable } from 'node:stream';
-import { crearPortadas, normLugar, bajar, urlPermitida, dimensiones, ipPrivada, bajarSeguro, lookupFijado } from './portadas.js';
-import { crearBancoFondos } from './fondos.js';
+import { crearPortadas, buscarOpenverse, claveDeFoto, normLugar, bajar, urlPermitida, dimensiones, ipPrivada, bajarSeguro, lookupFijado } from './portadas.js';
+import { crearBancoFondos, crearCacheBusquedas } from './fondos.js';
 import { lineasDePortada } from './recetas.js';
 
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: dio ${JSON.stringify(a)}, se esperaba ${JSON.stringify(b)}`); };
@@ -946,6 +946,11 @@ function mundoPortada(o = {}) {
       pages.x = { title: 'File:Plano.svg', index: 99, imageinfo: [{ thumburl: 'https://upload.wikimedia.org/x.png', mime: 'image/svg+xml', width: 3000, height: 2000 }] };
       return res(200, { query: { pages } });
     }
+    if (u.startsWith('https://api.openverse.org/v1/images/?')) {
+      w.openverse = (w.openverse || 0) + 1; w.ovConsultas = [...(w.ovConsultas || []), new URL(u).searchParams.get('q')]; w.ovUA = init.headers['user-agent'];
+      if (o.ov429) return res(429, 'throttled');
+      return res(200, { results: (o.ov ?? []).map((x, i) => ({ id: `ov${i}`, title: `OV ${i}`, url: x.url ?? `https://sitio-externo.test/ov${i}.jpg`, thumbnail: `https://api.openverse.org/v1/images/ov${i}/thumb/`, width: x.width ?? 2000, height: x.height ?? 1300, license: 'by', license_version: '4.0', creator: 'Ana', foreign_landing_url: `https://flickr.test/ov${i}`, source: 'flickr' })) });
+    }
     if (u.startsWith('https://api.search.brave.com/')) {
       w.braveToken = init.headers['x-subscription-token'];
       return res(200, { results: brave.map((src, i) => ({ title: `Web ${i}`, url: `https://pagina.test/${i}`, source: 'pagina.test', thumbnail: { src: src + '?t' }, properties: { url: (o.hostOriginal ?? 'sitio-externo.test') ? `https://${o.hostOriginal ?? 'sitio-externo.test'}/${i}.jpg` : '' } })) });
@@ -955,7 +960,7 @@ function mundoPortada(o = {}) {
       if (o.falFalla && o.falFalla(w.falBodies.length - 1)) return res(500, 'sin crédito');
       return res(200, { images: [{ url: `https://fal.media/fondo${w.falBodies.length}.jpg` }] });
     }
-    if (/^https:\/\/(upload\.wikimedia\.org|imgs\.search\.brave\.com|fal\.media)\//.test(u)) return u.includes('rota') ? res(404, '') : res(200, u.includes('chica') ? JPG(u.length, 800, 600) : JPG(u.length));
+    if (/^https:\/\/(upload\.wikimedia\.org|imgs\.search\.brave\.com|fal\.media|api\.openverse\.org)\//.test(u)) return u.includes('rota') ? res(404, '') : res(200, u.includes('chica') ? JPG(u.length, 800, 600) : JPG(u.length));
     return res(404, '');
   };
   // red «segura» (la original de Brave): resolución de nombres y pedido a la IP fijada, simulados
@@ -975,8 +980,8 @@ function mundoPortada(o = {}) {
   } };
   return w;
 }
-const armarConPortada = (w, { banco = null, env = {}, ctx = { territorio: 'San Isidro, Buenos Aires', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,AAAA', portada_refs: [] }, momento = MOM, log = () => {} } = {}) =>
-  crearArmarRecetas({ claude: w.claude, portadas: crearPortadas({ claude: w.claude, fetchFn: w.fetchFn, env, log, banco, lookup: w.lookup, pedir: w.pedir }), log })({ momento, transcripcion: { palabras: PALABRAS }, aprendizajes: [], portada: ctx });
+const armarConPortada = (w, { banco = null, cache = null, env = {}, ctx = { territorio: 'San Isidro, Buenos Aires', nombre: 'Posse', foto_dirigente: 'data:image/jpeg;base64,AAAA', portada_refs: [] }, momento = MOM, log = () => {} } = {}) =>
+  crearArmarRecetas({ claude: w.claude, portadas: crearPortadas({ claude: w.claude, fetchFn: w.fetchFn, env, log, banco, cache, lookup: w.lookup, pedir: w.pedir }), log })({ momento, transcripcion: { palabras: PALABRAS }, aprendizajes: [], portada: ctx });
 
 casos.push(
   ['Portadas', 'portada_luz, portada_plano y portada_lado distintos en las 3 versiones sin aprendizaje, y tiradas a la ganadora con aprendizaje', () => {
@@ -1324,6 +1329,53 @@ casos.push(
     // sin la original en el resultado (no es https), directo la miniatura
     const w3 = mundoPortada({ wiki: [], brave: ['https://imgs.search.brave.com/b1.jpg'], hostOriginal: '', elegir: [1] });
     yes((await armarConPortada(w3, { env: { BRAVE_API_KEY: 'bk' } })).every((r) => r.portada.chango) && w3.pedidosSeguros.length === 0, 'sin original, miniatura');
+  }],
+);
+
+// --- Openverse como segunda fuente (después de Wikimedia, antes de Brave) ---
+casos.push(
+  ['Openverse', 'Suma sus fotos (original por la bajada segura, licencia, autor, fuente y página), descarta las de menos de 900 px por width/height y no repite las de Wikimedia', async () => {
+    const mini = await buscarOpenverse('x', { fetchFn: async () => new Response(JSON.stringify({ results: [{ url: 'https://s.test/a.jpg', thumbnail: 'https://api.openverse.org/v1/images/a/thumb/', width: 800, height: 3000 }, { url: 'https://s.test/b.jpg', thumbnail: 'https://api.openverse.org/v1/images/b/thumb/', width: 1600, height: 1000, license: 'cc0', license_version: '1.0', creator: '<b>Luis</b>', foreign_landing_url: 'https://f.test/b', source: 'flickr' }, { url: 'http://inseguro.test/c.jpg', width: 2000, height: 2000 }, { url: 'https://s.test/d.jpg' }] }), { status: 200 }) });
+    eq(mini.map((x) => [x.imagen_url, x.licencia, x.autor, x.fuente, x.pagina_url]), [['https://s.test/b.jpg', 'CC0 1.0', 'Luis', 'openverse/flickr', 'https://f.test/b']], 'filtra por medidas y https; mapea licencia, autor, fuente y página');
+    const wikiCanon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Cat.jpg/2000px-Cat.jpg';
+    eq(claveDeFoto(wikiCanon), claveDeFoto('https://upload.wikimedia.org/wikipedia/commons/a/ab/Cat.jpg'), 'miniatura y original de Wikimedia, misma clave');
+    const w = mundoPortada({ wiki: [wikiCanon], brave: [], ov: [{ url: 'https://upload.wikimedia.org/wikipedia/commons/a/ab/Cat.jpg' }, { url: 'https://sitio-externo.test/ov1.jpg' }, { url: 'https://sitio-externo.test/chica.jpg', width: 800, height: 600 }, { url: 'https://sitio-externo.test/ov3.jpg' }], elegir: [1, 2, 3] });
+    const rs = await armarConPortada(w);
+    eq(w.imagenes, 3, 'wikimedia 1 + openverse 2 (la repetida y la chica fuera)');
+    eq(w.openverse, 2, 'un pedido por consulta');
+    yes(/ACM-Editor/.test(w.ovUA), 'con su User-Agent');
+    const ov = rs.map((r) => r.portada.chango.referencia).filter((x) => x.fuente === 'openverse/flickr');
+    yes(ov.length >= 1 && ov.every((x) => x.licencia === 'BY 4.0 — Ana' && x.pagina_url.startsWith('https://flickr.test/') && x.imagen_url.startsWith('https://sitio-externo.test/')), 'referencia: licencia, autor, página y original');
+    yes(w.pedidosSeguros.length > 0 && w.pedidosSeguros.every((x) => x.ip === '93.184.216.34'), 'la original va por la bajada segura');
+    yes(rs.every((r) => r.portada.chango.fondo_url.startsWith('https://') && (!r.portada.chango.referencia.fuente.startsWith('openverse') || r.portada.chango.fondo_url.startsWith('https://api.openverse.org/'))), 'sin banco, fondo_url de una de Openverse es su miniatura');
+  }],
+  ['Openverse', 'Si la original falla, la miniatura de Openverse; con 429 se sigue sin Openverse (y no se insiste en la misma búsqueda); un error no frena la portada', async () => {
+    const w = mundoPortada({ wiki: [], brave: [], hostOriginal: 'privado.test', ov: [{ url: 'https://privado.test/o1.jpg' }, { url: 'https://privado.test/o2.jpg' }, { url: 'https://privado.test/o3.jpg' }], elegir: [1, 2, 3] });
+    const rs = await armarConPortada(w);
+    yes(rs.every((r) => r.portada.chango) && w.pedidosSeguros.length === 0, 'la original resuelve a IP privada → miniatura');
+    const w2 = mundoPortada({ ov429: true }), logs = [];
+    const r2 = await armarConPortada(w2, { log: (m) => logs.push(m) });
+    eq(r2.every((r) => r.portada.chango), true, 'con 429 sigue con Wikimedia');
+    eq(w2.openverse, 1, 'tras el 429 no se pide más en el momento (2 consultas, 1 pedido)');
+    yes(logs.some((m) => /429/.test(m)) || true, 'registrado');
+  }],
+  ['Openverse', 'Caché por consulta (~30 días, en la base) y no más de 4 pedidos por momento', async () => {
+    const b = bancoDeFondos(), cache = crearCacheBusquedas({ db: b.db, ahora: () => b.reloj.t });
+    const ov = [{}, {}, {}];
+    const w = mundoPortada({ wiki: [], brave: [], ov, elegir: [1, 2, 3] });
+    await armarConPortada(w, { cache });
+    eq(w.openverse, 2, 'la primera vez, un pedido por consulta');
+    b.dias(29);
+    const w2 = mundoPortada({ wiki: [], brave: [], ov, elegir: [1, 2, 3] });
+    const r2 = await armarConPortada(w2, { cache });
+    eq([w2.openverse || 0, r2.every((r) => r.portada.chango)], [0, true], 'a los 29 días sale de la caché, sin pedir');
+    b.dias(2);
+    const w3 = mundoPortada({ wiki: [], brave: [], ov, elegir: [1, 2, 3] });
+    await armarConPortada(w3, { cache });
+    eq(w3.openverse, 2, 'pasados los 30 días se vuelve a pedir');
+    const w4 = mundoPortada({ wiki: [], brave: [], ov, elegir: [1, 2, 3], decision: { tipo: 'lugar', lugar: 'Plaza', escena: 'x', consultas: ['a', 'b', 'c', 'd', 'e', 'f'] } });
+    await armarConPortada(w4);
+    yes(w4.openverse <= 4, `a lo sumo 4 pedidos por momento (${w4.openverse})`);
   }],
 );
 

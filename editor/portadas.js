@@ -12,7 +12,7 @@ import { MODELOS } from './claude.js';
 
 export const MODELO_FAL = 'bytedance/seedream/v5.5/edit';
 const UA = 'ACM-Editor/1.0 (portadas; contacto por el proyecto)';
-const MAX_CANDIDATAS = 12, MAX_REFS_BANCO = 4, MAX_BYTES = 5 * 1024 * 1024;
+const MAX_CANDIDATAS = 12, MAX_REFS_BANCO = 4, MAX_OPENVERSE = 4 /* pedidos por momento */, MAX_OPENVERSE_EN_LISTA = 6, MAX_BYTES = 5 * 1024 * 1024;
 
 // portada_luz es un tinte: calido | neutro | frio | noche (noche solo si la foto ya es de noche). En el camino de IA, además, la luz del fondo generado.
 const LUZ = {
@@ -78,6 +78,22 @@ export async function buscarWikimedia(consulta, { fetchFn = fetch, limite = 15 }
   return out;
 }
 
+// Openverse (sin clave, límite anónimo): fotos con licencia abierta. Devuelve la original (imagen_url, se baja con bajarSeguro) y su miniatura (respaldo_url).
+// Se descartan antes de la visión las de menos de MIN_LADO_CORTO px en el lado corto según width/height del resultado.
+export async function buscarOpenverse(consulta, { fetchFn = fetch, limite = 20 } = {}) {
+  const u = new URL('https://api.openverse.org/v1/images/');
+  u.searchParams.set('q', consulta); u.searchParams.set('page_size', limite);
+  const r = await fetchFn(u, { headers: { 'user-agent': UA, accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+  if (r.status === 429) throw Object.assign(new Error('Openverse respondió 429 (límite anónimo)'), { limite: true });
+  if (!r.ok) throw new Error(`Openverse respondió ${r.status}`);
+  return ((await r.json())?.results || [])
+    .filter((x) => /^https:\/\//.test(x.url || '') && Math.min(Number(x.width) || 0, Number(x.height) || 0) >= MIN_LADO_CORTO)
+    .map((x) => ({ imagen_url: x.url, respaldo_url: /^https:\/\//.test(x.thumbnail || '') ? x.thumbnail : '', pagina_url: x.foreign_landing_url || '', fuente: `openverse/${x.source || 'web'}`,
+      licencia: [String(x.license || '').toUpperCase(), x.license_version].filter(Boolean).join(' '), autor: sinHtml(x.creator).slice(0, 80), titulo: x.title || '' }));
+}
+// la misma foto de Wikimedia por su miniatura o su original: misma clave (para no repetirla entre Wikimedia y Openverse)
+export const claveDeFoto = (url) => String(url).replace(/^(https:\/\/upload\.wikimedia\.org\/wikipedia\/[^/]+)\/thumb\/(.+)\/[^/]+$/, '$1/$2');
+
 export async function buscarBrave(consulta, { fetchFn = fetch, clave, limite = 15 } = {}) {
   const u = new URL('https://api.search.brave.com/res/v1/images/search');
   u.searchParams.set('q', consulta); u.searchParams.set('count', limite); u.searchParams.set('safesearch', 'strict');
@@ -114,7 +130,7 @@ const extDe = (tipo) => ({ 'image/png': 'png', 'image/webp': 'webp' })[tipo] || 
 
 // Solo se bajan imágenes por https de hosts conocidos (nada que apunte a la red interna): Wikimedia y, de Brave, SOLO su miniatura proxeada (nunca la imagen del sitio).
 // Un host que empieza con «.» vale también para sus subdominios.
-export const HOSTS_FOTO = ['upload.wikimedia.org', 'commons.wikimedia.org', 'imgs.search.brave.com'];
+export const HOSTS_FOTO = ['upload.wikimedia.org', 'commons.wikimedia.org', 'imgs.search.brave.com', 'api.openverse.org'];
 export const HOSTS_FAL = ['.fal.media'];
 export function urlPermitida(url, hosts = HOSTS_FOTO) {
   try {
@@ -204,7 +220,8 @@ export async function bajarSeguro(url, { lookup = (h) => dns.promises.lookup(h, 
 }
 
 // --- el módulo ---
-export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log = console.log, modelo = MODELOS.portadas, banco = null, lookup, pedir } = {}) {
+export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log = console.log, modelo = MODELOS.portadas, banco = null, cache = null, lookup, pedir } = {}) {
+  let openverseHasta = 0; // tras un 429 no se insiste un rato (el límite anónimo es por IP)
   const seguro = { ...(lookup ? { lookup } : {}), ...(pedir ? { pedir } : {}) };
   const modeloFal = () => env.PORTADA_MODELO || MODELO_FAL;
 
@@ -227,17 +244,30 @@ export function crearPortadas({ claude, fetchFn = fetch, env = process.env, log 
     }
     previas.sort((a, b) => b.si - a.si);
     const hallazgos = [], errores = [];
+    let pedidosOv = 0, ovCortado = Date.now() < openverseHasta;
     for (const q of consultas) {
       try { hallazgos.push(...await buscarWikimedia(q, { fetchFn })); } catch (e) { errores.push(`Wikimedia: ${e.message}`); }
+      if (!ovCortado) {
+        try {
+          const clave = `openverse:${normLugar(q)}`;
+          let rows = cache?.get(clave);
+          if (!rows) {
+            if (pedidosOv >= MAX_OPENVERSE) throw new Error('tope de pedidos por momento');
+            pedidosOv++; rows = await buscarOpenverse(q, { fetchFn }); cache?.set(clave, rows);
+          }
+          hallazgos.push(...rows);
+        } catch (e) { errores.push(`Openverse: ${e.message}`); if (e.limite) { ovCortado = true; openverseHasta = Date.now() + 10 * 60e3; } }
+      }
       if (env.BRAVE_API_KEY) { try { hallazgos.push(...await buscarBrave(q, { fetchFn, clave: env.BRAVE_API_KEY })); } catch (e) { errores.push(`Brave: ${e.message}`); } }
     }
     const vistas = new Set(), todas = [];
     for (const c of [...previas.slice(0, MAX_REFS_BANCO), ...hallazgos]) {
-      if (bloqueadas.has(c.imagen_url) || vistas.has(c.imagen_url) || !(urlPermitida(c.imagen_url) || /^https:\/\//.test(c.imagen_url))) continue;
-      vistas.add(c.imagen_url); todas.push(c);
+      if (bloqueadas.has(c.imagen_url) || vistas.has(claveDeFoto(c.imagen_url)) || !(urlPermitida(c.imagen_url) || /^https:\/\//.test(c.imagen_url))) continue;
+      vistas.add(claveDeFoto(c.imagen_url)); todas.push(c);
     }
-    // Wikimedia primero (libre), después la web; hasta MAX_CANDIDATAS, alternando para no llenarlo de una sola fuente
-    const lista = [...todas.filter((c) => c.gusto), ...todas.filter((c) => !c.gusto && c.fuente === 'Wikimedia Commons').slice(0, 8), ...todas.filter((c) => !c.gusto && c.fuente !== 'Wikimedia Commons')].slice(0, MAX_CANDIDATAS);
+    // Wikimedia primero (libre), después Openverse y al final Brave; hasta MAX_CANDIDATAS sin llenarlo de una sola fuente
+    const sueltas = todas.filter((c) => !c.gusto), esOv = (c) => c.fuente.startsWith('openverse/');
+    const lista = [...todas.filter((c) => c.gusto), ...sueltas.filter((c) => c.fuente === 'Wikimedia Commons').slice(0, 8), ...sueltas.filter(esOv).slice(0, MAX_OPENVERSE_EN_LISTA), ...sueltas.filter((c) => c.fuente !== 'Wikimedia Commons' && !esOv(c))].slice(0, MAX_CANDIDATAS);
     if (errores.length) log(`[portadas] búsqueda con fallas: ${errores.join('; ')}`);
     const bajadas = await Promise.all(lista.map(async (c) => {
       // host conocido: bajar directo; cualquier otro https (la original de Brave): bajarSeguro, y si falla, la miniatura. fondo_directo = URL que el Estudio puede bajar sin banco
