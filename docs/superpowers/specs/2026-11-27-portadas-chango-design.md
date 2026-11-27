@@ -120,3 +120,12 @@ Sin `chango` (o si algo falla en el Estudio) → la portada de hoy. El Estudio d
 **Valores de las variables:** `portada_luz`: dorada · dia · azul · noche. `portada_plano`: lejos · medio · cerca. `portada_lado`: izq · der · centro.
 
 **Reconocer al dirigente en el Estudio:** con la detección de caras que ya hay (encuadre por hablante), se juntan caras candidatas de varios cuadros cerca de `portada.segundo_s`; Claude Haiku (visión) compara con `foto_dirigente` y elige la mejor (de frente, nítida, grande), o ninguna. Sin foto: la cara del que más habla en el momento. Sin cara → la portada de hoy. Recorte de la persona por fal (`fal-ai/birefnet/v2`, modelo Portrait). La composición replica `~/Documents/acm/portadas-chango/armar.py` (cabeza a cintura, halo, degradé, título 2 líneas, lado) como composición Remotion nueva `PortadaChango`.
+
+## Cambio 2026-11-27: foto directa, sin IA en el fondo (decidido por Gero)
+
+La comparación (`~/Documents/acm/portadas-chango/directo/comparacion-ia-vs-directo.jpg`) mostró que la foto real recortada a 9:16, con desenfoque leve y tinte, queda casi igual que el fondo de IA y cuesta 0. Desde ahora:
+- El fondo es la foto de referencia tal cual (`chango.fondo_tipo = 'foto'`); el Estudio la recorta, la desenfoca ~3 px y le aplica el tinte de `portada_luz`.
+- `portada_luz` pasa a ser tinte: calido · neutro · frio · noche (noche solo si la foto ya es de noche).
+- La visión elige fotos usables tal cual: sin gente/autos en primer plano, sin carteles, sin un objeto fino donde va la cabeza, ≥ ~900 px de lado corto.
+- fal solo recorta a la persona (~USD 0,003). El fondo con IA queda detrás de `PORTADA_FONDO_IA=1`, apagado.
+- Costo por momento: < USD 0,01 + Haiku.
