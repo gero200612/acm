@@ -7,6 +7,6 @@ import { crearMirar } from './mirar.js';
 import { crearPortadas } from './portadas.js';
 
 // con estudio, el editor también mira el video (etapa «mirando»); sin él, sigue solo con la transcripción
-export function crearCriterio({ claude, estudio, banco = null }) {
-  return { ...(estudio ? { mirarVideo: crearMirar({ claude, estudio }) } : {}), elegirMomentos: crearElegirMomentos({ claude }), armarRecetas: crearArmarRecetas({ claude, portadas: crearPortadas({ claude, banco }) }), revisar: crearAnalista({ claude }), ajustar: crearAjustar({ claude }) };
+export function crearCriterio({ claude, estudio, banco = null, cache = null }) {
+  return { ...(estudio ? { mirarVideo: crearMirar({ claude, estudio }) } : {}), elegirMomentos: crearElegirMomentos({ claude }), armarRecetas: crearArmarRecetas({ claude, portadas: crearPortadas({ claude, banco, cache }) }), revisar: crearAnalista({ claude }), ajustar: crearAjustar({ claude }) };
 }

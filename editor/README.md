@@ -55,7 +55,7 @@ Estados del crudo en ACM (`reels.status`): `en_cola`, `transcribiendo`, `buscand
 | `PORTADA_FONDO_IA` | `1` = el fondo lo redibuja fal a partir de la foto (apagado por defecto: el fondo es la foto real directa, guardada en el banco de fondos y servida en `/fondos/`; hace falta `EDITOR_PUBLIC_URL` para servirla) |
 | `FAL_KEY` | solo con `PORTADA_FONDO_IA=1` (el recorte de la persona lo hace el Estudio) |
 | `PORTADA_MODELO` | solo con PORTADA_FONDO_IA=1: modelo de fal del fondo (por defecto `bytedance/seedream/v5.5/edit`; `fal-ai/nano-banana-2/edit` es la alternativa) |
-| `BRAVE_API_KEY` | opcional: segunda fuente de fotos (Brave Images) además de Wikimedia Commons |
+| `BRAVE_API_KEY` | opcional: tercera fuente de fotos (Brave Images); las fuentes son Wikimedia Commons, Openverse (sin clave, con caché de 30 días) y Brave |
 
 En ACM: `EDITOR_URL` (si falta, los crudos quedan `en_cola` y no pasa nada) y `EDITOR_TOKEN`.
 

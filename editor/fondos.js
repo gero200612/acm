@@ -7,6 +7,19 @@ import path from 'node:path';
 
 export const DIAS_SIN_REUSO = 7;
 
+// Caché de búsquedas externas (Openverse tiene límite anónimo): por consulta, ~30 días, en la base del editor.
+export const DIAS_CACHE = 30;
+export function crearCacheBusquedas({ db, ahora = () => Date.now() } = {}) {
+  db.exec('CREATE TABLE IF NOT EXISTS busquedas (clave TEXT PRIMARY KEY, resultado TEXT NOT NULL, creado TEXT NOT NULL)');
+  return {
+    get(clave) {
+      const f = db.prepare('SELECT resultado, creado FROM busquedas WHERE clave = ?').get(clave);
+      return f && Date.parse(f.creado) > ahora() - DIAS_CACHE * 864e5 ? JSON.parse(f.resultado) : null;
+    },
+    set(clave, rows) { db.prepare('INSERT OR REPLACE INTO busquedas (clave, resultado, creado) VALUES (?, ?, ?)').run(clave, JSON.stringify(rows), new Date(ahora()).toISOString()); },
+  };
+}
+
 export function crearBancoFondos({ db, dir, publicUrl = '', ahora = () => Date.now() } = {}) {
   db.exec(`CREATE TABLE IF NOT EXISTS fondos (
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, lugar TEXT NOT NULL, ref_url TEXT DEFAULT '', luz TEXT NOT NULL, plano TEXT NOT NULL,
