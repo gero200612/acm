@@ -93,3 +93,30 @@ Las elige el código (como hoy gancho, subtítulos, ritmo), distintas entre las 
 - Cómo elegir el cuadro de la persona para cada versión (el «mirar» ya registra qué se ve y quién; el encuadre por hablante ya detecta caras).
 - El texto exacto de las indicaciones a Claude y a fal, el tamaño de las imágenes, reintentos y tiempos de espera.
 - Cómo se ve el 👍/👎 en «Para aprobar» y en el link compartido, siguiendo lo que ya hay.
+
+## Contrato entre las partes (para construir en paralelo)
+
+**ACM → editor** (`GET /api/editor/aprendizajes/:pid`, lo que ya existe más):
+- `territorio: string` (Ajustes; '' si no hay), `nombre: string` (nombre del proyecto, va arriba de la portada).
+- `foto_dirigente: string` — data-URI JPEG ≤ 300 KB (ACM la achica al subirla en Ajustes), '' si no hay.
+- `portada_refs: [{ lugar, imagen_url, pagina_url, fuente, licencia, si, no }]` — banco de fotos del proyecto (lugar normalizado en minúsculas sin tildes).
+- Los aprendizajes de `portada_luz`, `portada_plano`, `portada_lado` llegan como las demás variables (por público incluido).
+
+**editor → Estudio** (la receta de cada versión). `receta.variables` suma `portada_luz`, `portada_plano`, `portada_lado`. `receta.portada` suma un campo opcional:
+```
+portada.chango = {
+  fondo_url: string,            // imagen 9:16 ya generada (URL pública de fal)
+  linea1: string, linea2: string,
+  lado: 'izq' | 'der' | 'centro',
+  nombre: string,               // va arriba, chico
+  foto_dirigente?: string,      // data-URI, para reconocerlo
+  referencia: { lugar, imagen_url, pagina_url, fuente, licencia }
+}
+```
+Sin `chango` (o si algo falla en el Estudio) → la portada de hoy. El Estudio devuelve además `portada_estilo: 'chango' | 'cuadro'` y, si cayó al de hoy, `portada_motivo`.
+
+**ACM guarda** la receta entera en `reels.recipe` (como hoy). El voto: `POST /api/reels/:id/portada { voto: 'si' | 'no' | null }` (null = sacar el voto). Suma a `learnings` (origen `opinion_dueno`, con el público del reel) las 3 variables `portada_*` del reel, y suma o resta en `portada_refs` la referencia. Aprobar o rechazar un recorte **no** suma las variables `portada_*`.
+
+**Valores de las variables:** `portada_luz`: dorada · dia · azul · noche. `portada_plano`: lejos · medio · cerca. `portada_lado`: izq · der · centro.
+
+**Reconocer al dirigente en el Estudio:** con la detección de caras que ya hay (encuadre por hablante), se juntan caras candidatas de varios cuadros cerca de `portada.segundo_s`; Claude Haiku (visión) compara con `foto_dirigente` y elige la mejor (de frente, nítida, grande), o ninguna. Sin foto: la cara del que más habla en el momento. Sin cara → la portada de hoy. Recorte de la persona por fal (`fal-ai/birefnet/v2`, modelo Portrait). La composición replica `~/Documents/acm/portadas-chango/armar.py` (cabeza a cintura, halo, degradé, título 2 líneas, lado) como composición Remotion nueva `PortadaChango`.
