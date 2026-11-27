@@ -123,7 +123,8 @@ const CONTENT = { sombra: SOMBRA, editor: EDITOR };
 // Rutas de proyecto que el administrador de dirigente NO usa: las de usuarios van por su propia regla.
 // también lo técnico que su pantalla no muestra: conectar anuncios, importar investigación y la memoria del agente
 const ADMIN_DENY = [['DELETE', /^\/api\/projects\/\d+$/], ['PUT', /^\/api\/projects\/\d+\/ads$/], ['POST', /^\/api\/projects\/\d+\/ads(\/[a-z]+)?$/],
-  ['POST', /^\/api\/projects\/\d+\/knowledge\/import$/], ['GET', /^\/api\/projects\/\d+\/memory$/]];
+  ['POST', /^\/api\/projects\/\d+\/knowledge\/import$/], ['GET', /^\/api\/projects\/\d+\/memory$/],
+  ['POST', /^\/api\/reels\/\d+\/editar$/]]; // mandar un crudo al editor otra vez: técnico, solo general
 const hit = (list, m, p) => list.some(([mm, re]) => mm === m && re.test(p));
 
 // ¿Puede este usuario hacer este pedido? → null si sí, o { status, error }.

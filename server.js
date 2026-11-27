@@ -1025,6 +1025,14 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
   // un crudo recién subido va al editor; sin EDITOR_URL queda en cola y listo
   for (const r of out) if (r.kind === 'crudo') sendToEditor(r).catch((e) => console.error('editor:', e.message));
 });
+// volver a mandar un crudo al editor (si cuando se subió el editor estaba apagado o el túnel cambió); solo general
+app.post('/api/reels/:id/editar', async (req, res) => {
+  const r = get("SELECT * FROM reels WHERE id = ? AND kind = 'crudo' AND archived_at = ''", req.params.id);
+  if (!r) return res.status(404).json({ error: 'No existe ese crudo' });
+  if (!(process.env.EDITOR_URL || '').trim()) return res.status(409).json({ error: 'El editor no está conectado (falta EDITOR_URL)' });
+  run("UPDATE reels SET status = 'en_cola', status_detail = '', status_at = datetime('now') WHERE id = ?", r.id);
+  try { await sendToEditor(r); res.json({ ok: true }); } catch (e) { res.status(502).json({ error: `No pudimos mandarlo al editor: ${mask(e.message).slice(0, 200)}` }); }
+});
 async function sendToEditor(r) {
   const base = (process.env.EDITOR_URL || '').replace(/\/+$/, '');
   if (!base) return;
