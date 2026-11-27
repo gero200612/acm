@@ -1027,6 +1027,9 @@ app.post('/api/projects/:id/reels/complete', async (req, res) => {
 });
 // volver a mandar un crudo al editor (si cuando se subió el editor estaba apagado o el túnel cambió); solo general
 app.post('/api/reels/:id/editar', async (req, res) => {
+  // pide una clave para no mandarlo sin querer (se guarda solo su sha256)
+  const dada = crypto.createHash('sha256').update(String(req.body?.clave ?? '')).digest(), quiere = Buffer.from('6f6a4e56098cfd9af29e3ae549503b370211a4e94421457fe4cfd39a38a1fa08', 'hex');
+  if (!crypto.timingSafeEqual(dada, quiere)) return res.status(403).json({ error: 'Clave incorrecta' });
   const r = get("SELECT * FROM reels WHERE id = ? AND kind = 'crudo' AND archived_at = ''", req.params.id);
   if (!r) return res.status(404).json({ error: 'No existe ese crudo' });
   if (!(process.env.EDITOR_URL || '').trim()) return res.status(409).json({ error: 'El editor no está conectado (falta EDITOR_URL)' });

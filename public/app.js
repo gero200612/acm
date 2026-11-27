@@ -2083,6 +2083,19 @@ function confirmBox(title, text, okLabel = 'Borrar') {
   });
 }
 
+// pide un texto (p. ej. una clave): devuelve lo escrito, o null si cancela
+function promptBox(title, text, okLabel = 'Aceptar', { type = 'text' } = {}) {
+  return new Promise((res) => {
+    let hecho = false;
+    const d = openDialog(title, `<p class="muted">${text}</p><input class="input" data-in type="${type === 'password' ? 'password' : 'text'}" autocomplete="off">`, `<button class="btn" data-close>Cancelar</button><button class="btn accent" data-ok>${okLabel}</button>`);
+    const inp = d.querySelector('[data-in]'), ok = () => { hecho = true; res(inp.value); d.close(); };
+    d.querySelector('[data-ok]').onclick = ok;
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ok(); } });
+    d.addEventListener('close', () => { if (!hecho) res(null); });
+    setTimeout(() => inp.focus(), 0);
+  });
+}
+
 // los interruptores de pauta viajan como un solo campo JSON; al cambiar el tipo vuelven a su valor por defecto (en política, TikTok apagado)
 function projectFormData(form) {
   const fd = new FormData(form);
@@ -2727,8 +2740,10 @@ document.addEventListener('click', async (e) => {
         try { await api(`/api/clips/${encodeURIComponent(row.dataset.clip)}/review`, { method: 'POST', body: { decisiones } }); toast('Retirada: lo programado no se publica'); } catch (err) { fail(err); }
         render(); break; }
       case 'crudo-editar': {
+        const clave = await promptBox('Mandar al editor', 'Escribí la clave para mandarlo al editor.', 'Mandar', { type: 'password' });
+        if (clave == null) break;
         el.disabled = true;
-        try { await api(`/api/reels/${el.dataset.id}/editar`, { method: 'POST' }); toast('Mandado al editor'); await loadProject(state.project.id); } catch (err) { fail(err); }
+        try { await api(`/api/reels/${el.dataset.id}/editar`, { method: 'POST', body: { clave } }); toast('Mandado al editor'); await loadProject(state.project.id); } catch (err) { fail(err); }
         render(); break; }
       case 'ap-retry': {
         el.disabled = true;

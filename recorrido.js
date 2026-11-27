@@ -947,14 +947,16 @@ export function recorridoCases(sb) {
         eq([done.status, done.j?.[0]?.status], [200, 'en_cola'], 'en cola');
         await sleep(300);
         eq((await box.api('GET', `/api/projects/${p}/reels`)).j[0].status, 'en_cola', 'sigue en cola, sin error');
-        eq((await box.api('POST', `/api/reels/${done.j[0].id}/editar`)).status, 409, 'mandar al editor sin editor conectado: 409');
+        eq((await box.api('POST', `/api/reels/${done.j[0].id}/editar`, { clave: '2006' })).status, 409, 'mandar al editor sin editor conectado: 409');
       } finally { await box.stop(); }
     }],
     [G('editor'), 'Mandar al editor otra vez: el general lo manda y el crudo vuelve a la cola; un reel listo o inexistente da 404', async () => {
-      eq((await api('POST', `/api/reels/${c.crudo}/editar`)).status, 200, 'mandado');
-      eq((await api('POST', '/api/reels/999999/editar')).status, 404, 'inexistente');
+      eq((await api('POST', `/api/reels/${c.crudo}/editar`)).status, 403, 'sin clave');
+      eq((await api('POST', `/api/reels/${c.crudo}/editar`, { clave: '2005' })).status, 403, 'clave mal');
+      eq((await api('POST', `/api/reels/${c.crudo}/editar`, { clave: '2006' })).status, 200, 'mandado');
+      eq((await api('POST', '/api/reels/999999/editar', { clave: '2006' })).status, 404, 'inexistente');
       const listo = sb.box.write("INSERT INTO reels (project_id, title, file, kind) VALUES (?, 'L', 'l.mp4', 'listo')", c.p).lastInsertRowid;
-      eq((await api('POST', `/api/reels/${listo}/editar`)).status, 404, 'un listo no es un crudo');
+      eq((await api('POST', `/api/reels/${listo}/editar`, { clave: '2006' })).status, 404, 'un listo no es un crudo');
     }],
     [G('editor'), 'Cuando el editor avisa «error» o ACM no logra mandarle el crudo, queda un aviso `falla` con el nombre del crudo', async () => {
       eq((await sb.box.editorApi('/api/editor/estado', { reel_id: c.crudo, estado: 'error', detalle: 'se cayó el Estudio' })).status, 200, 'error');
